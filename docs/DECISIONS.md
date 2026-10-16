@@ -103,27 +103,6 @@ toolchain for it lives in `code-app`, which is not present on this machine.
 
 ## D-6 — Internal host / private-IP references in committed text
 
-## D-7 — GUI is three independent verticals, not one interface with breakpoints
-
-**Status:** DECIDED (owner directive 2026-10-16) — implementation deferred to Track F.
-
-**Decision:** the GUI ships as **three independent verticals** — Desktop (autosizing between
-standard and widescreen), Tablet (standard = iPad), Mobile (standard = iPhone 16 Pro). A viewport
-width selects a *vertical implementation*; it does not switch branches of one shared responsive
-stylesheet.
-
-**Rationale:** owner directive. Practically it buys per-form-factor layout control (each vertical
-optimised, no cross-breakpoint compromise) at the cost of three implementations to maintain and
-three to verify — accepted deliberately.
-
-**Spec + open points:** `docs/README-SPEC.md` (sizes; which web GUI to confirm). Screenshots come
-from the **TUI** and the web GUI (owner clarified 2026-10-16).
-
-**Gate:** `README-SPEC.md` gate section — three verticals render independently at the three
-standard sizes; README written in the Floyd Labs voice with real live screenshots.
-
----
-
 **Status:** REMEDIATED (2026-10-16, `be0e4f0`).
 
 **Rule (from the git-steward role):** every commit is treated as a permanent public artifact. Do
@@ -154,3 +133,40 @@ repo (Actions only reads the repo-root `.github/workflows`). A push therefore ca
 CI-failure risk. If root CI is ever added, guard publish jobs on
 `github.repository_owner == 'CaptainPhantasy'`; the upstream `if: … == 'LegacyAI'` guards would
 otherwise skip every job.
+
+---
+
+## D-7 — GUI is three independent verticals, not one interface with breakpoints
+
+**Status:** DECIDED (owner directive 2026-10-16) — implementation deferred to Track F.
+
+**Decision:** the GUI ships as **three independent verticals** — Desktop (autosizing between
+standard and widescreen), Tablet (standard = iPad), Mobile (standard = iPhone 16 Pro). A viewport
+width selects a *vertical implementation*; it does not switch branches of one shared responsive
+stylesheet.
+
+**Rationale:** owner directive. Practically it buys per-form-factor layout control (each vertical
+optimised, no cross-breakpoint compromise) at the cost of three implementations to maintain and
+three to verify — accepted deliberately.
+
+**Spec + open points:** `docs/README-SPEC.md` (sizes; which web GUI to confirm). Screenshots come
+from the **TUI** and the web GUI (owner clarified 2026-10-16).
+
+**Gate:** `README-SPEC.md` gate section — three verticals render independently at the three
+standard sizes; README written in the Floyd Labs voice with real live screenshots.
+
+---
+
+## D-8 — Where git branch/status disclosure lives in Floyd Code (B1)
+
+**Status:** OPEN (raised 2026-10-16). Blocks B1 coding; design in `docs/B1-CONTEXT-ASSEMBLY.md`.
+
+**Context (VERIFIED):** Go bakes `GitStatus` into `PromptDat`; Floyd Code discloses the *date* via
+`features/dateChange` reminders and does **not** disclose git branch/status at all, though
+`app/git/gitService.ts` can produce it.
+
+**Options:** (a) session-start **reminder** carrying branch + short status — mirrors the existing
+date pattern (recommended); (b) a `${git_status}` prompt variable filled in
+`buildSystemPromptContext`.
+
+**To close:** pick one, then implement with a `src/human/test/**` vitest and the package gate.

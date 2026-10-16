@@ -62,7 +62,7 @@ Sweep proof (VERIFIED): `comm` of source-tree tracked files vs MEGAFLOYD tracked
 
 | Phase | Task | Gate |
 |---|---|---|
-| B1 (P2) | Context-assembly service in `agent-core-v2`; fill the pack at session start via `sessionInit` git data | typecheck + vitest; dumped prompt diffed against Go output |
+| B1 (P2) | Context assembly in `agent-core-v2` — design + verified gap in `docs/B1-CONTEXT-ASSEMBLY.md`; gap is **git branch/status disclosure** (date is already handled by `dateChange` reminders) | typecheck + vitest; dumped prompt diffed against Go output |
 | B2 (P3) | Port Go bash guards (no bare `<>`/`>|`/`&>|`, heredoc-in-substitution traps, read-before-write) to `externalHooks` rules | hook unit tests + denied-command demo |
 | B3 (P4) | Identity + memory: `FLOYD.md` discovery + `.floyd/.supercache` read/injection + `FLOYD_*` markers | fresh-session smoke shows context loaded once, not per-turn |
 | B4 (P5) | Package + ship: `floyd-one` launcher, own home dir, telemetry off | A/B session; no new egress beyond the inference host |
