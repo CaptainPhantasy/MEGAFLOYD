@@ -32,3 +32,6 @@ logs/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# vite transient config timestamps
+*.timestamp-*.mjs
