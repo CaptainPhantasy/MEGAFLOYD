@@ -73,3 +73,38 @@ Over-broad unanchored `.gitignore` rules hide real source at any depth.
 - Rewrote `task_plan.md` as the master plan (Tracks A–D, gates, operating rules).
 - Extended `findings.md` (§H inventory, §I unverified infra leads, §J toolchain).
 - Added `docs/DECISIONS.md` D-4 (ignore-rule policy + guard) and D-5 (dist-web restore policy).
+
+## 2026-10-16 — session 3 (build proof reproduced; Track A closed)
+
+### Gate — fresh-copy build proof: PASSED
+
+| Step | Command | Result |
+|---|---|---|
+| Install | `pnpm install --frozen-lockfile` in `floyd-code/` | exit 0; corepack used the pinned pnpm 10.33.0 |
+| Build | `pnpm -r run build` (root script `build`; matches the source README's `pnpm build`) | exit 0; 23 packages reported Done |
+| App version | `node apps/floyd-code/dist/main.mjs --version` | `2.0.2`, exit 0 |
+| Web assets | `node apps/floyd-code/scripts/check-web-assets.mjs` | "Web assets OK … 525 entries" |
+
+Toolchain measured: node v26.9.0, pnpm 10.25.0 on PATH (pinned 10.33.0 resolved by corepack),
+go 1.25.7 against a `go.mod` that declares 1.26.6.
+
+### First attempt failed, and this is what it was
+
+`pnpm -r run build` before installing failed with `sh: tsdown: command not found` for
+`kaos`, `kosong`, `minidb`, `oauth`. Those workspaces call `tsdown` in their build script,
+but declare it only at the root, and their per-package dependencies had never been
+installed in this copy — so the tool was not resolvable. The documented install step fixed
+it; no config was changed. After install the same build exits 0.
+
+### Corrections to checks made earlier in this session
+
+- **A2 is closed**: `floyd-code/packages/klient/Dockerfile` IS tracked and is not ignored.
+  The earlier check used the wrong root path.
+- **A3 is closed**: `apps/floyd-code/dist-web` is present with 525 tracked entries. The gate
+  script lives at `floyd-code/apps/floyd-code/scripts/check-web-assets.mjs`, not `scripts/`.
+
+### Added
+
+- `FLOYD.md` at the project root: identity, operating rules, and the order of work, so a
+  session opening in this folder does not need telling what the project is. This is also the
+  file phase B3 will read.
