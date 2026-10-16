@@ -132,3 +132,23 @@ Spec: `docs/README-SPEC.md`; decision `docs/DECISIONS.md` D-7.
 | 2026-10-16 | `Cannot find module .../floyd-code/build/raw-text-plugin.mjs` on clone | 1 | force-add helpers; root `build/` exception (`9088cd4`) |
 | 2026-10-16 | `Could not resolve "../components/logs/LogsTab"` on clone | 1 | un-ignore four rule collisions (`f8c4541`) |
 | 2026-10-16 | `check-web-assets.mjs`: missing committed `dist-web/` | — | open (A3) |
+
+## Owner asks raised 2026-10-16, not yet scheduled (recorded here so they survive)
+
+1. **Graphics card check — open.** The owner asked: is the speech model loaded, and on which
+   card? He suspects a new router built two days ago may be erroring. Gate: a recorded answer
+   with the command and its output in `progress.md`. Nothing in this project's files covered it.
+2. **Audio edition standard for MEGAFLOYD reports.** Use the local speech service in the
+   owner's own voice, not the paid one. Detailed, not padded, and under 10 minutes. Context for
+   the length rule: an earlier run spent a month of paid audio credits on two reports, which is
+   why the local service exists now.
+3. **Method adopted (owner-supplied, now binding here).** The planning-files method: keep
+   `task_plan.md` / `findings.md` / `progress.md` on disk, read them before deciding, log every
+   error, never repeat a failed action, and treat a three-strike failure as a stop-and-report.
+4. **Working agreement (owner-supplied, now binding here).** Before any push: scan for secrets
+   and internal detail; keep commit messages honest; commit and push often.
+5. **Delivery items already in Track F, restated by the owner:** README in the brand voice with
+   real screenshots of the terminal interface and the web interface, and three independent
+   layouts — desktop, iPad, iPhone 16 Pro — not one layout with breakpoints.
+6. **Budget context.** This build will spend real money in cloud build spaces on the Flash model.
+   Gates and evidence exist to keep that spend honest, not to slow it down.

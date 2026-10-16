@@ -207,3 +207,13 @@ allow-list assertion rather than prose, then add the service to the P5 manifest 
   `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` (exit 0, clean) and
   `../../node_modules/.bin/vitest run <path>`.
 - B1 unit landed: `src/features/gitStatus/gitStatusDisclosure.ts` + `test/features/gitStatus/`.
+
+## Method and working agreement from the owner (2026-10-16)
+
+The owner supplied two documents and told us to adopt them: a planning-files method
+(write the plan, findings and progress to disk; read them before deciding; log every error;
+never repeat a failed action; after three failures, stop and report) and a git working
+agreement (scan staged content for secrets, private addresses and internal names before any
+push; honest commit messages; commit and push often). Both are now binding for this project.
+Also standing: plain language with the owner, no jargon, and never present old threads as
+live work.
