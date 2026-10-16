@@ -44,11 +44,58 @@ POLL_INTERVAL = 5
 ACCESS_TOKEN_TTL = 30 * 24 * 3600
 REFRESH_TOKEN_TTL = 365 * 24 * 3600
 CLIENT_ID_KNOWN = "17e5f671-d194-4dfb-9706-5516cb48c098"
+ADMIN_KEY_PATH = BASE_DIR / "ADMIN-PASSWORD.txt"
+PBKDF2_ITERATIONS = 240_000
 
 log = logging.getLogger("floyd-auth")
 
 
+def write_config(config: dict) -> None:
+    """Atomically persist config.json (mode 0600), fsyncing file and directory."""
+    temporary = CONFIG_PATH.with_name("config.bootstrap-" + secrets.token_hex(6))
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        json.dump(config, stream, indent=2)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, CONFIG_PATH)
+    directory = os.open(CONFIG_PATH.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def bootstrap_config() -> dict:
+    """First-run config: generate secrets and a one-time administrator key.
+
+    config.json is gitignored, so a fresh checkout has none and the module-level
+    load_config() below would otherwise crash on import. Generate a usable config
+    and write the administrator key to ADMIN-PASSWORD.txt (0600) for the owner to
+    record once; a later key rotation retires that file (CompanyPlatform.rotate).
+    """
+    admin_key = "fa_" + secrets.token_urlsafe(40)
+    salt = secrets.token_bytes(24)
+    config = {
+        "public_base_url": os.environ.get("FLOYD_PUBLIC_BASE_URL", "http://127.0.0.1:18443"),
+        "password_salt": salt.hex(),
+        "password_hash": hashlib.pbkdf2_hmac("sha256", admin_key.encode(), salt, PBKDF2_ITERATIONS).hex(),
+        "csrf_secret": secrets.token_hex(32),
+        "catalog_url": os.environ.get("FLOYD_CATALOG_URL", "https://models.dev/api.json"),
+        "company_model_base": os.environ.get("FLOYD_COMPANY_MODEL_BASE", ""),
+        "install_url": os.environ.get("FLOYD_INSTALL_URL", ""),
+    }
+    write_config(config)
+    with open(ADMIN_KEY_PATH, "w", encoding="utf-8") as stream:
+        stream.write(admin_key + "\n")
+    os.chmod(ADMIN_KEY_PATH, 0o600)
+    log.warning("bootstrap: generated config.json and ADMIN-PASSWORD.txt - record the key once")
+    return config
+
+
 def load_config():
+    if not CONFIG_PATH.exists():
+        return bootstrap_config()
     with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
         return json.load(fh)
 
@@ -70,9 +117,6 @@ MODELS = CONFIG.get(
         }
     ],
 )
-
-PBKDF2_ITERATIONS = 240_000
-
 
 def verify_admin_password(password: str) -> bool:
     current = load_config()
