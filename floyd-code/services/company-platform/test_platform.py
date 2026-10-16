@@ -149,10 +149,21 @@ class PlatformTest(unittest.TestCase):
 
     def test_owner_approval_uses_the_current_page_with_cookie_sign_in(self):
         _, _, login = self.request('/admin/api/login', 'POST', {'key': self.key})
-        status, page, _ = self.request('/approve?user_code=TEST-CODE', headers={
-            'Cookie': login['Set-Cookie'].split(';')[0]})
+        cookie = login['Set-Cookie'].split(';')[0]
+        status, page, _ = self.request('/approve?user_code=TEST-CODE', headers={'Cookie': cookie})
         self.assertEqual(status, 200)
         self.assertIn('/platform.js', page)
+        # The server-injected runtime config must be defined before the app script runs.
+        self.assertIn('window.__FLOYD_CONFIG=', page)
+        self.assertLess(page.index('window.__FLOYD_CONFIG='), page.index('<script src="/platform.js"'))
+        # A '<' in a configured value must be escaped, never breaking out of the script tag.
+        config_file = self.home / 'config.json'
+        config = json.loads(config_file.read_text())
+        config['install_url'] = 'https://example.test/<script>'
+        config_file.write_text(json.dumps(config))
+        _, hardened, _ = self.request('/approve?user_code=TEST-CODE', headers={'Cookie': cookie})
+        self.assertIn('\\u003cscript', hardened)
+        self.assertNotIn('example.test/<script>', hardened)
 
     def test_key_replacement_cancels_old_access_and_rejects_unprotected_writes(self):
         _, info, _ = self.request('/admin/api/overview', key=self.key)
@@ -445,6 +456,49 @@ class PlatformTest(unittest.TestCase):
             source.shutdown()
             source.server_close()
             thread.join()
+
+
+    @staticmethod
+    def _import_app(home):
+        import sys
+        sys.path.insert(0, str(home))
+        try:
+            for name in ['auth_under_test', 'company_platform', 'model_access', 'feedback_store',
+                         'shared_tools', 'media_tools']:
+                sys.modules.pop(name, None)
+            spec = importlib.util.spec_from_file_location('auth_under_test', home / 'app.py')
+            module = importlib.util.module_from_spec(spec)
+            sys.modules['auth_under_test'] = module
+            spec.loader.exec_module(module)
+            return module
+        finally:
+            sys.path.remove(str(home))
+
+    def test_first_run_bootstrap_builds_config_and_one_time_admin_key(self):
+        home = Path(tempfile.mkdtemp(prefix='floyd-bootstrap-test-'))
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        source = Path(__file__).parent
+        for name in ['app.py', 'company_platform.py', 'model_access.py', 'feedback_store.py',
+                     'shared_tools.py', 'media_tools.py', 'gateway_bridge.mjs', 'platform.html',
+                     'platform.js', 'platform.css']:
+            if (source / name).exists():
+                shutil.copy2(source / name, home / name)
+        self.assertFalse((home / 'config.json').exists(), 'checkout must start with no config')
+        module = self._import_app(home)
+        config_file = home / 'config.json'
+        key_file = home / 'ADMIN-PASSWORD.txt'
+        self.assertTrue(config_file.exists(), 'bootstrap must create config.json')
+        self.assertTrue(key_file.exists(), 'bootstrap must leave a one-time admin key')
+        self.assertEqual(config_file.stat().st_mode & 0o777, 0o600, 'config must be 0600')
+        self.assertEqual(key_file.stat().st_mode & 0o777, 0o600, 'admin key file must be 0600')
+        key = key_file.read_text().strip()
+        self.assertTrue(key.startswith('fa_'))
+        self.assertTrue(module.verify_admin_password(key), 'generated key must authenticate')
+        self.assertFalse(module.verify_admin_password('fa_not-the-generated-key'))
+        csrf = json.loads(config_file.read_text())['csrf_secret']
+        self._import_app(home)  # a restart must reuse the config, never rotate the key
+        self.assertEqual(json.loads(config_file.read_text())['csrf_secret'], csrf)
+        self.assertEqual(key_file.read_text().strip(), key)
 
 
 if __name__ == '__main__':

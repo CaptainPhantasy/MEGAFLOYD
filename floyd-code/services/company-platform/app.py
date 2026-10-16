@@ -50,20 +50,37 @@ PBKDF2_ITERATIONS = 240_000
 log = logging.getLogger("floyd-auth")
 
 
-def write_config(config: dict) -> None:
-    """Atomically persist config.json (mode 0600), fsyncing file and directory."""
-    temporary = CONFIG_PATH.with_name("config.bootstrap-" + secrets.token_hex(6))
+def write_secret(path, text: str) -> None:
+    """Atomically write a 0600 file, fsyncing both file and containing directory.
+
+    Creates the temporary file in the destination directory (same filesystem, so
+    os.replace is atomic) and never widens the mode, so a crash mid-write cannot
+    expose a partially written secret.
+    """
+    temporary = path.with_name(path.name + ".tmp-" + secrets.token_hex(6))
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        json.dump(config, stream, indent=2)
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary, CONFIG_PATH)
-    directory = os.open(CONFIG_PATH.parent, os.O_RDONLY)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+    directory = os.open(path.parent, os.O_RDONLY)
     try:
         os.fsync(directory)
     finally:
         os.close(directory)
+
+
+def write_config(config: dict) -> None:
+    """Persist config.json (mode 0600) via a crash-safe atomic replace."""
+    write_secret(CONFIG_PATH, json.dumps(config, indent=2))
 
 
 def bootstrap_config() -> dict:
@@ -86,9 +103,7 @@ def bootstrap_config() -> dict:
         "install_url": os.environ.get("FLOYD_INSTALL_URL", ""),
     }
     write_config(config)
-    with open(ADMIN_KEY_PATH, "w", encoding="utf-8") as stream:
-        stream.write(admin_key + "\n")
-    os.chmod(ADMIN_KEY_PATH, 0o600)
+    write_secret(ADMIN_KEY_PATH, admin_key + "\n")
     log.warning("bootstrap: generated config.json and ADMIN-PASSWORD.txt - record the key once")
     return config
 
