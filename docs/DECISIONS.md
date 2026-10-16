@@ -7,7 +7,8 @@ unblocks. Nothing here changes code by itself.
 
 ## D-1 — `floyd-code/services/company-platform/` : IN or OUT of the merged build?
 
-**Status:** REVERSED — **IN** (owner directive 2026-10-16; originally recorded OUT).
+**Status:** IN — SHIPPING (2026-10-16). Was OUT; owner directive reversed it, the egress review
+passed, and the service is now named in `ship-manifest.json`.
 
 **Reversal (2026-10-16, owner verbatim):** "i have enjoyed the company platform… enough that I
 recommended it to be included… i can always add things later. i want you to build out the
@@ -29,9 +30,11 @@ review.
   from "unknown endpoints baked in" to "enumerate the runtime network surface" — the build-out
   task below.
 
-**To close (build-out gate):** enumerate the service's network surface (`gateway_bridge.mjs`,
-`model_access.py` relay, catalog fetch, feedback upload, media tools) and confirm no new
-egress beyond its configured endpoints; then add it to the P5 build manifest.
+**Closed (build-out gate):** the egress surface is enumerated and enforced by the `EgressReview`
+test (`test_platform.py`): only loopback and the overridable `models.dev` catalog default may
+appear as literals, the outbound call-site count is fixed, and each sink must target configuration.
+The service is listed in `ship-manifest.json` (verified by `scripts/verify-ship-manifest.mjs`).
+Remaining to fully ship: P5 packaging itself (launcher) — that is Track B/B4, not this decision.
 
 ---
 

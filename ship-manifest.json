@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "updated": "2026-10-16",
+  "note": "Explicit ship set for the merged MEGAFLOYD build (PLAN.md P5). Paths are relative to the repository root. Company-platform inclusion is decision D-1 (docs/DECISIONS.md); its egress review is enforced by EgressReview in floyd-code/services/company-platform/test_platform.py, not by prose.",
+  "ship_set": [
+    { "path": "floyd-code/apps/floyd-code/dist", "kind": "cli-bundle", "note": "built CLI/TUI entrypoint" },
+    { "path": "floyd-code/apps/floyd-code/dist-web", "kind": "web-assets", "decision": "D-5", "note": "committed prebuilt console bundle" },
+    { "path": "floyd-code/services/company-platform", "kind": "service", "decision": "D-1", "egress_reviewed": true, "note": "Python console backend + member SPA" }
+  ]
+}
