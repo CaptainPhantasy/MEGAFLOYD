@@ -1,31 +1,60 @@
-# build output
+# =============================================================================
+# MEGAFLOYD root .gitignore
+#
+# Patterns are matched against every path in the repo (root + all
+# subdirectories). Four of them use bare directory names that also occur as
+# real source/fixture directories under floyd-code/, which silently hid
+# committed-worthy files from git. The explicit negation block at the bottom
+# re-includes them. Keep the negations AFTER the excluding patterns — git uses
+# "last matching pattern wins".
+# =============================================================================
+
+# ---- dependencies / generated build output (recursive) ----
 node_modules/
 dist/
 dist-native/
 dist-web/
-build/
-# EXCEPTION: floyd-code/build is NOT build output — it holds hand-written bundler/loader
-# helpers (raw-text-plugin.mjs, raw-text-loader.mjs, register-raw-text-loader.mjs) imported
-# by tsdown + vitest configs across packages. Committed so a fresh clone can build.
-!floyd-code/build/
-!floyd-code/build/**
-.turbo/
+dist-single/
 coverage/
+.turbo/
 *.tsbuildinfo
 
-# runtime state and secrets
+# ---- directory-name rules that collide with source dirs (see negations) ----
+# `build/` is build output in general, but floyd-code/build is NOT output: it
+# holds hand-written bundler/loader helpers (raw-text-plugin.mjs,
+# raw-text-loader.mjs, register-raw-text-loader.mjs) imported by the tsdown +
+# vitest configs across packages. They must ship or a fresh clone cannot build.
+build/
+
+# `logs/` is runtime log output; apps/vis/web/src/components/logs is React source.
+logs/
+
+# `credentials` guards against stray secret files; .../src/**/credentials is code.
+credentials
+
+# `.floyd/` is runtime agent state; migration-legacy golden fixtures are committed.
+.floyd/
+
+# ---- runtime state and secrets ----
 .env
 .env.*
-credentials
 *.db
 *.db-shm
 *.db-wal
 *.sqlite
 *.sqlite3
-.floyd/
 .supercache
 *.log
-logs/
+
+# ---- EXCEPTIONS: committed source / fixtures the rules above would hide ----
+!floyd-code/build/
+!floyd-code/build/**
+!floyd-code/apps/vis/web/src/components/logs/
+!floyd-code/apps/vis/web/src/components/logs/**
+!floyd-code/packages/**/credentials/
+!floyd-code/packages/**/credentials/**
+!floyd-code/packages/migration-legacy/test/fixtures/**/.floyd/
+!floyd-code/packages/migration-legacy/test/fixtures/**/.floyd/**
 
 # editors / OS
 .DS_Store
