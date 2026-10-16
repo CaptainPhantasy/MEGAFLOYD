@@ -1,0 +1,23 @@
+{
+  "name": "floyd-webbridge",
+  "version": "1.11.4",
+  "description": "Control your real browser (with your login sessions) from Floyd Code via the local WebBridge daemon — navigate, click, type, read pages, and screenshot any website.",
+  "keywords": [
+    "browser",
+    "webbridge",
+    "cdp",
+    "automation",
+    "web",
+    "scraping"
+  ],
+  "author": "Legacy AI",
+  "license": "Proprietary",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Floyd Browser Extension",
+    "shortDescription": "Control your real browser from Floyd Code — navigate, click, type, and screenshot",
+    "longDescription": "Floyd Browser Extension lets AI control the user's real browser — navigate, click, type, read, screenshot, and interact with any website using the user's actual login sessions. The skill talks to the local WebBridge daemon (http://127.0.0.1:10086), which drives Chrome/Edge through a browser extension over CDP. Everything runs locally; login state and page content never leave the device.\n\nRequires the local WebBridge daemon and the browser extension; the plugin's bundled skill covers installing, starting, and recovering both.",
+    "developerName": "Legacy AI",
+    "websiteURL": "https://github.com/CaptainPhantasy/f7"
+  }
+}

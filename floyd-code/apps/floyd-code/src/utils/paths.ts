@@ -1,0 +1,146 @@
+/**
+ * CLI-owned data path helpers.
+ *
+ * These paths are for local app data such as logs and input history. Config
+ * files are owned by Core/SDK and intentionally do not live behind this module.
+ */
+
+import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+
+import {
+  FLOYD_CODE_BANNER_DIR_NAME,
+  FLOYD_CODE_BANNER_STATE_FILE_NAME,
+  FLOYD_CODE_BIN_DIR_NAME,
+  FLOYD_CODE_CACHE_DIR_NAME,
+  FLOYD_CODE_DATA_DIR_NAME,
+  FLOYD_CODE_HOME_ENV,
+  FLOYD_CODE_INPUT_HISTORY_DIR_NAME,
+  FLOYD_CODE_LOG_DIR_NAME,
+  FLOYD_CODE_NATIVE_STAGED_STATE_FILE_NAME,
+  FLOYD_CODE_NATIVE_STAGING_DIR_NAME,
+  FLOYD_CODE_PLUGIN_UPDATE_NOTICE_STATE_FILE_NAME,
+  FLOYD_CODE_RECOMMENDED_EFFORT_STATE_FILE_NAME,
+  FLOYD_CODE_SURVEY_STATE_FILE_NAME,
+  FLOYD_CODE_UPDATE_INSTALL_LOCK_FILE_NAME,
+  FLOYD_CODE_UPDATE_INSTALL_STATE_FILE_NAME,
+  FLOYD_CODE_UPDATE_DIR_NAME,
+  FLOYD_CODE_UPDATE_ROLLOUT_LOG_FILE_NAME,
+  FLOYD_CODE_UPDATE_STATE_FILE_NAME,
+} from '#/constant/app';
+
+/**
+ * Return the root data directory for Floyd Code.
+ *
+ * Priority: `FLOYD_CODE_HOME` env var > `~/.floyd-code`.
+ */
+export function getDataDir(): string {
+  const envDir = process.env[FLOYD_CODE_HOME_ENV];
+  if (envDir) {
+    return envDir;
+  }
+  return join(homedir(), FLOYD_CODE_DATA_DIR_NAME);
+}
+
+/**
+ * Return the diagnostic log directory: `<dataDir>/logs/`.
+ */
+export function getLogDir(): string {
+  return join(getDataDir(), FLOYD_CODE_LOG_DIR_NAME);
+}
+
+/**
+ * Return the CLI cache directory: `<dataDir>/cache/`.
+ */
+export function getCacheDir(): string {
+  return join(getDataDir(), FLOYD_CODE_CACHE_DIR_NAME);
+}
+
+/**
+ * Return the managed tools directory: `<dataDir>/bin/`.
+ */
+export function getBinDir(): string {
+  return join(getDataDir(), FLOYD_CODE_BIN_DIR_NAME);
+}
+
+/**
+ * Return the update cache file: `<dataDir>/updates/latest.json`.
+ */
+export function getUpdateStateFile(): string {
+  return join(getDataDir(), FLOYD_CODE_UPDATE_DIR_NAME, FLOYD_CODE_UPDATE_STATE_FILE_NAME);
+}
+
+/**
+ * Return the update install state file: `<dataDir>/updates/install.json`.
+ */
+export function getUpdateInstallStateFile(): string {
+  return join(getDataDir(), FLOYD_CODE_UPDATE_DIR_NAME, FLOYD_CODE_UPDATE_INSTALL_STATE_FILE_NAME);
+}
+
+/**
+ * Return the update install lock file: `<dataDir>/updates/install.lock`.
+ */
+export function getUpdateInstallLockFile(): string {
+  return join(getDataDir(), FLOYD_CODE_UPDATE_DIR_NAME, FLOYD_CODE_UPDATE_INSTALL_LOCK_FILE_NAME);
+}
+
+/**
+ * Return the rollout decision log: `<dataDir>/updates/rollout.log`.
+ */
+export function getUpdateRolloutLogFile(): string {
+  return join(getDataDir(), FLOYD_CODE_UPDATE_DIR_NAME, FLOYD_CODE_UPDATE_ROLLOUT_LOG_FILE_NAME);
+}
+
+/**
+ * Return the plugin update notice state file: `<dataDir>/updates/plugin-notices.json`.
+ */
+export function getPluginUpdateNoticeStateFile(): string {
+  return join(
+    getDataDir(),
+    FLOYD_CODE_UPDATE_DIR_NAME,
+    FLOYD_CODE_PLUGIN_UPDATE_NOTICE_STATE_FILE_NAME,
+  );
+}
+
+/**
+ * Return the native staged-update directory: `<exe dir>/.staging/`.
+ *
+ * Anchored on the running executable (not `~/.floyd-code/bin`) because the
+ * Windows installer honors `FLOYD_INSTALL_DIR`, and the swap's atomic renames
+ * require the staged binary to sit on the same volume as the exe.
+ */
+export function getNativeStagingDir(exePath: string): string {
+  return join(dirname(exePath), FLOYD_CODE_NATIVE_STAGING_DIR_NAME);
+}
+
+/**
+ * Return the staged-update metadata file: `<exe dir>/.staging/staged.json`.
+ */
+export function getNativeStagedStateFile(exePath: string): string {
+  return join(getNativeStagingDir(exePath), FLOYD_CODE_NATIVE_STAGED_STATE_FILE_NAME);
+}
+
+/**
+ * Return the banner display state file: `<dataDir>/cache/banner/state.json`.
+ */
+export function getBannerStateFile(): string {
+  return join(getCacheDir(), FLOYD_CODE_BANNER_DIR_NAME, FLOYD_CODE_BANNER_STATE_FILE_NAME);
+}
+
+export function getSurveyStateFile(): string {
+  return join(getDataDir(), FLOYD_CODE_SURVEY_STATE_FILE_NAME);
+}
+
+export function getRecommendedEffortStateFile(): string {
+  return join(getDataDir(), FLOYD_CODE_RECOMMENDED_EFFORT_STATE_FILE_NAME);
+}
+
+/**
+ * Return the user input history file for a given working directory.
+ * Layout: `<share_dir>/user-history/<md5(cwd)>.jsonl`.
+ */
+export function getInputHistoryFile(workDir: string): string {
+  const hash = createHash('md5').update(workDir, 'utf-8').digest('hex');
+  return join(getDataDir(), FLOYD_CODE_INPUT_HISTORY_DIR_NAME, `${hash}.jsonl`);
+}

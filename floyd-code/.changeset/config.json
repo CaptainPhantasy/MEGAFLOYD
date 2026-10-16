@@ -1,0 +1,19 @@
+{
+  "changelog": ["@changesets/changelog-github", { "repo": "CaptainPhantasy/f7" }],
+  "commit": false,
+  "fixed": [],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": [
+    "@legacy-ai/vis",
+    "@legacy-ai/vis-server",
+    "@legacy-ai/vis-web",
+    "@legacy-ai/floyd-inspect"
+  ],
+  "snapshot": {
+    "useCalculatedVersion": true,
+    "prereleaseTemplate": "{tag}-{commit}"
+  }
+}

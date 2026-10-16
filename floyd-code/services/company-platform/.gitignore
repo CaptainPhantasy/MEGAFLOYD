@@ -1,0 +1,7 @@
+config.json
+ADMIN-PASSWORD.txt
+data/
+uploads/
+__pycache__/
+*.log
+*.private

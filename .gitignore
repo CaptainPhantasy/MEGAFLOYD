@@ -1,0 +1,29 @@
+# build output
+node_modules/
+dist/
+dist-native/
+dist-web/
+build/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# runtime state and secrets
+.env
+.env.*
+credentials
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+.floyd/
+.supercache
+*.log
+logs/
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

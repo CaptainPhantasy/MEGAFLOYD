@@ -1,0 +1,43 @@
+{
+  "name": "@legacy-ai/floyd-telemetry",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Shared telemetry infrastructure for Floyd Code",
+  "license": "MIT",
+  "author": "Legacy AI",
+  "homepage": "https://github.com/LegacyAI/floyd-code/tree/main/packages/telemetry#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LegacyAI/floyd-code.git",
+    "directory": "packages/telemetry"
+  },
+  "bugs": {
+    "url": "https://github.com/LegacyAI/floyd-code/issues"
+  },
+  "keywords": [
+    "floyd",
+    "telemetry",
+    "analytics",
+    "events",
+    "client"
+  ],
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "imports": {
+    "#/*": "./src/*.ts"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  }
+}

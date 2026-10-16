@@ -1,0 +1,17 @@
+title = "MEGAFLOYD"
+
+# Findings reviewed 2026-10-16 before the initial commit: all four are
+# documentation examples or test fixtures copied from the source trees, not
+# credentials. Paths are exact on purpose - no broad allowlisting.
+# The one real-looking hit (a PostHog project key in
+# floyd-go/internal/event/event.go) was removed from the code instead: the key
+# is now read from MEGAFLOYD_POSTHOG_KEY and telemetry stays off when it is
+# unset.
+[[allowlists]]
+description = "Reviewed doc and test fixtures"
+paths = [
+  '''floyd-code/docs/en/reference/server-api\.md''',
+  '''floyd-code/docs/zh/reference/server-api\.md''',
+  '''floyd-go/README\.md''',
+  '''floyd-go/internal/discover/lmstudio_test\.go''',
+]
