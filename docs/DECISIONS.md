@@ -109,3 +109,14 @@ provenance.
 
 **History note:** the replaced values remain in commit `e9a3309`. Not worth a history rewrite for
 a tailnet hostname in the owner's own org repo unless this repo is public — confirm visibility.
+
+**Visibility (VERIFIED 2026-10-16):** `gh repo view CaptainPhantasy/MEGAFLOYD` → `isPrivate:true`,
+`visibility:PRIVATE`. The tailnet host / private IP were never public; sanitizing is hygiene, not
+incident response. No history rewrite (disproportionate for a private repo).
+
+**CI (VERIFIED 2026-10-16):** there is **no root `.github/workflows/`**, so GitHub Actions runs
+nothing here — the copied `floyd-code/.github` and `floyd-go/.github` workflows are inert on this
+repo (Actions only reads the repo-root `.github/workflows`). A push therefore carries no
+CI-failure risk. If root CI is ever added, guard publish jobs on
+`github.repository_owner == 'CaptainPhantasy'`; the upstream `if: … == 'LegacyAI'` guards would
+otherwise skip every job.
