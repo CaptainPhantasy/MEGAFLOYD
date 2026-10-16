@@ -109,11 +109,49 @@ Sweep proof (VERIFIED 2026-10-16):
 shipped here per `floyd-code/AGENTS.md` as "gitignored, force-added"). `check-web-assets.mjs`
 makes packaging fail loudly if it is absent — correct behavior; the tree simply lost the file.
 
-## I. Infrastructure leads (UNVERIFIED — do not design against until confirmed)
+## I. Web console + plugin/marketplace surface
 
-- Owner note 2026-10-16: the plugin/marketplace **CDN is "maybe" on Cloudflare**; the **admin
-  console is hosted by "indeeence"** (owner's spelling; identity unconfirmed). Both are `LEAD`,
-  not fact. Confirm via a run (DNS/HTTP, or the marketplace's catalog fetch URL) before use.
+### I.1 The console is live (VERIFIED 2026-10-16)
+
+- `https://inference.tail58d565.ts.net:8446/` serves the **Floyd Code Web** SPA
+  (`<title>Floyd Code Web</title>`; served by the inference host, Tailscale name `inference`).
+  Nav: *FloydCode · Providers · My account · Administration* — this is the admin console the
+  owner referred to. `GET /healthz` → `{"ok": true}`.
+- `/approve?user_code=<code>` is the **OAuth device-authorization approval page**
+  (RFC 8628). The SPA's device-flow fields: `verification_uri_complete`, `user_code`,
+  `expires_in`, `interval` → the CLI prints a `verification_uri_complete` of this shape.
+- `GET /meta`, `GET /plugins/marketplace`, `GET /api/v1/*` → **404** unauthenticated.
+  The API paths below are the ones the client requests; they are auth-gated (404 masks them),
+  so they are NOT reachable without a session/token.
+
+### I.2 Client API surface (VERIFIED — extracted from the committed `dist-web` bundle)
+
+Path literals the web client requests (grouped; base is server-relative):
+
+- auth: `/auth`, `/login`, `/oauth/login`, `/oauth/logout`, `/oauth/region`, `/oauth/usage`,
+  `/oauth/userinfo`
+- plugins / marketplace: `/plugins`, `/plugins/marketplace` (GET → `{entries}`),
+  `/plugins/{id}:enable` `:disable` `:remove` (POST); event `event.plugin.changed` →
+  `pluginsChanged`, `event.capability.changed`
+- providers: `/providers`, `/providers:import_catalog`, `/providers:import_registry`,
+  `/providers:refresh`, `/providers:refresh_oauth`, `/catalog/providers`
+- sessions: `/sessions`, `/sessions/`, `/sessions:archive`, `/sessions:restore`, `/admin/sessions`
+- workspaces/fs: `/workspaces`, `/workspace/fs:search`, `/workspace/fs:suggest`, `/files`,
+  `/fs:browse`, `/fs:content`, `/fs:home`
+- misc: `/capabilities`, `/config`, `/models`, `/healthz`, `/meta`, `/status`, `/devices/`,
+  `/v1/remote/devices`, `/api/v1`, `/api/v2`
+- client-side slash commands (not HTTP): `/btw` `/clear` `/compact` `/export` `/fork` `/goal`
+  `/new` `/plan` `/swarm` `/tower` `/undo`
+
+Track C0 note: the **plugin dashboard + marketplace are real and already wired** in the web
+client — C2 is integration/reuse, not greenfield.
+
+### I.3 Still UNVERIFIED (leads only)
+
+- Owner note: the marketplace **CDN is "maybe" on Cloudflare** — no evidence yet. Confirm the
+  marketplace catalog fetch origin before designing C2 distribution.
+- "indeeence hosts the admin console" — the console is on the inference host (I.1); "indeeence"
+  is unexplained. Do not treat as a fact.
 
 ## J. Toolchain reality check (2026-10-16)
 
