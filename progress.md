@@ -47,3 +47,29 @@
 | Go vet | `go vet ./internal/agent/...` | clean |
 
 P2–P5 remain unstarted (roadmap in `task_plan.md`), not claimed done.
+
+## 2026-10-16 — session 2 (build relocation to /Volumes/SanDisk1Tb/MEGAFLOYD)
+
+### Trigger
+
+Owner relocated the build to a fresh clone and ran `pnpm -r run build`; it failed repeatedly on
+files that exist in local copies but were never committed.
+
+### Diagnosis — one defect class, six instances (see `findings.md` §H)
+
+Over-broad unanchored `.gitignore` rules hide real source at any depth.
+
+- Fixed root-file instances 1–4 with a trailing negation block (`f8c4541`): `build/`, `logs/`,
+  `credentials`, `.floyd/`. Verified with `git check-ignore` + negative controls.
+- Committed + pushed from `/Users/floyd/MEGAFLOYD` (fast-forwarded to `d62c595` first).
+- Sweep proof: `comm` of source-vs-mega tracked files = 525 = 524 `dist-web` + 1 `klient/Dockerfile`.
+
+### Then — third blocker, still the same class
+
+`check-web-assets.mjs` aborts: committed `apps/floyd-code/dist-web/` missing. Open → Track A A3.
+
+### Planning files
+
+- Rewrote `task_plan.md` as the master plan (Tracks A–D, gates, operating rules).
+- Extended `findings.md` (§H inventory, §I unverified infra leads, §J toolchain).
+- Added `docs/DECISIONS.md` D-4 (ignore-rule policy + guard) and D-5 (dist-web restore policy).

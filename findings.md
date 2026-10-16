@@ -81,3 +81,42 @@ All 11 paths verified present 2026-10-16.
 
 - Tool counts, `reachable` flags, build-output presence (`node_modules`, `dist`) — all change
   between sessions. Re-measure.
+
+## H. Session-2 defect inventory — "required artifact invisible to git" (VERIFIED)
+
+Class: an over-broad, **unanchored** `.gitignore` rule (a bare directory/file name) matches a
+real source path at any depth, so the file exists locally but is never committed — and is then
+absent from every clone. One copy-time exclusion is in the same class. Six instances total.
+
+| # | Artifact | Rule that hid it | State |
+|---|---|---|---|
+| 1 | `floyd-code/build/{raw-text-plugin,raw-text-loader,register-raw-text-loader}.mjs` | root `.gitignore` `build/` | fixed `9088cd4` |
+| 2 | `apps/vis/web/src/components/logs/LogsTab.tsx` | root `.gitignore` `logs/` | fixed `f8c4541` |
+| 3 | `packages/agent-core-v2/src/human/{test/,}credentials/*.ts` (5) | root `.gitignore` `credentials` | fixed `f8c4541` |
+| 4 | `packages/migration-legacy/test/fixtures/{golden,multi-workdir}/.floyd/**` (26) | root `.gitignore` `.floyd/` | fixed `f8c4541` |
+| 5 | `packages/klient/Dockerfile` | `floyd-code/.gitignore:26` bare `Dockerfile` | **open** |
+| 6 | `apps/floyd-code/dist-web/**` (524) | copy exclusion (`.git/…/dist-native/dist-web` dropped) + root `dist-web/` | **open** |
+
+Fix applied (`f8c4541`): a trailing **negation block** in the root `.gitignore` — explicit `!`
+re-includes placed **after** the excluding patterns (last-match-wins). Negative controls confirm
+`node_modules/`, `dist/`, `.floyd/`, `build/` at foreign depths stay ignored.
+
+Sweep proof (VERIFIED 2026-10-16):
+`comm -23 <(git -C <source> ls-files | sort) <(git -C <mega> ls-files -- floyd-code | sed 's#^floyd-code/##' | sort)`
+→ **525 paths = 524 × dist-web + 1 × klient/Dockerfile**. No other omissions.
+
+`dist-web` is a **committed, prebuilt** bundle (developed in the upstream `code-app` repo,
+shipped here per `floyd-code/AGENTS.md` as "gitignored, force-added"). `check-web-assets.mjs`
+makes packaging fail loudly if it is absent — correct behavior; the tree simply lost the file.
+
+## I. Infrastructure leads (UNVERIFIED — do not design against until confirmed)
+
+- Owner note 2026-10-16: the plugin/marketplace **CDN is "maybe" on Cloudflare**; the **admin
+  console is hosted by "indeeence"** (owner's spelling; identity unconfirmed). Both are `LEAD`,
+  not fact. Confirm via a run (DNS/HTTP, or the marketplace's catalog fetch URL) before use.
+
+## J. Toolchain reality check (2026-10-16)
+
+- Mac (client-only): node v26.9.0 both trees; **pnpm 10.33.0** on the SanDisk1Tb clone.
+- Inference host: Ubuntu 7.0.0-38, reachable at `100.78.109.105`, login `LEGACYAI\floyd`; **no
+  docker/podman** — plain node processes + systemd. MCP secret-broker runs there (port 9717).
