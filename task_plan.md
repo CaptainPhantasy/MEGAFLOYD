@@ -106,6 +106,17 @@ Ship gate = **close D-1**: egress review, then add to the P5 build manifest.
 
 Tracks A/B/C/D below are unchanged and still pending except as noted (A2/A3/A5 landed in `62c0c0c`).
 
+### Track F — README + GUI verticals (owner directive 2026-10-16; deliver at completion)
+
+Spec: `docs/README-SPEC.md`; decision `docs/DECISIONS.md` D-7.
+
+| Phase | Task | Gate |
+|---|---|---|
+| F1 | Confirm open points: which web GUI the verticals target; iPad standard size | recorded in the spec |
+| F2 | Split that GUI into **three independent verticals** (Desktop autosize std↔widescreen; Tablet iPad; Mobile iPhone 16 Pro) — no shared-breakpoint interface | each vertical renders independently at its standard size |
+| F3 | Capture real live screenshots: TUI + web GUI | images committed with alt text |
+| F4 | Write `README.md` in the Floyd Labs brand voice | README present; spec gate met |
+
 ## Standing constraints
 
 - Isolation: never point at `~/.floyd7`, `~/.floyd-ff`, `~/.floyd-code`, `~/.floyd-10x`. Merged
