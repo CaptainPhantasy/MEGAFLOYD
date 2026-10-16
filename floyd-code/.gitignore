@@ -26,6 +26,9 @@ apps/vscode/artifacts/
 Dockerfile
 docker-compose.yml
 .dockerignore
+# Bare `Dockerfile` above also matches packages/klient/Dockerfile, which IS a
+# committed source artifact upstream. Re-include it.
+!packages/klient/Dockerfile
 
 docs/superpowers/
 reports/
