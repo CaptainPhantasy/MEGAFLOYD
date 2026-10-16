@@ -91,6 +91,21 @@ hosted by "indeeence". Do not treat as design inputs until confirmed by a run.
 | D2 | Promote the "hold on to memory" wish into a product feature: `.supercache` auto-load + `FLOYD.md` (overlaps B3) | same gate as B3 |
 | D3 | Decide where memory lives for the shipped tool (repo-local vs `~/.megafloyd`) | recorded in `docs/DECISIONS.md` |
 
+### Track E — Company platform (IN build; owner directive 2026-10-16 — reverses D-1)
+
+Service: `floyd-code/services/company-platform/` (Python stdlib console backend + member SPA).
+Ship gate = **close D-1**: egress review, then add to the P5 build manifest.
+
+| Phase | Task | Gate |
+|---|---|---|
+| E1 | First-run bootstrap so a clean checkout can start | clean-dir boot serves `/healthz` 200 **done** `491e1d7`; guarded `98db924` |
+| E2 | De-hardcode internal endpoints (tool defaults, provider seed, install link) | grep + gitleaks clean **done** `be0e4f0` |
+| E3 | Egress review: enumerate `gateway_bridge.mjs` / `model_access.py` relay / catalog fetch / feedback upload / media tools | VERIFIED inventory; no endpoint beyond config |
+| E4 | Resume README gaps: portable-app command-window files; browser reply timing + reconnection checks | targeted tests + boot smoke |
+| E5 | Add service to the P5 build manifest; close D-1 | manifest lists it; D-1 = IN-shipped |
+
+Tracks A/B/C/D below are unchanged and still pending except as noted (A2/A3/A5 landed in `62c0c0c`).
+
 ## Standing constraints
 
 - Isolation: never point at `~/.floyd7`, `~/.floyd-ff`, `~/.floyd-code`, `~/.floyd-10x`. Merged

@@ -7,25 +7,34 @@ unblocks. Nothing here changes code by itself.
 
 ## D-1 — `floyd-code/services/company-platform/` : IN or OUT of the merged build?
 
-**Status:** DECIDED — **OUT** (recorded 2026-10-16; re-openable).
+**Status:** REVERSED — **IN** (owner directive 2026-10-16; originally recorded OUT).
+
+**Reversal (2026-10-16, owner verbatim):** "i have enjoyed the company platform… enough that I
+recommended it to be included… i can always add things later. i want you to build out the
+platform. it was missing your core ethics and ability to hold to a task and get it done."
+The directory moves from provenance-only to a shipped surface. The egress review below is now a
+**required step of build-out**, not an option.
 
 **What it is:** a copied-in Python + JS + MJS service (`app.py`, `company_platform.py`,
 `company-tools.mjs`, `gateway_bridge.mjs`, `media_tools.py`, `model_access.py`,
 `feedback_store.py`, `platform.{html,css,js}`) — its own HTTP surface and model-access path.
 
-**Decision:** keep the directory in the tree (provenance), but **exclude it from the P5
-shipping build** and wire it to nothing. It stays out until it gets its own egress review.
+**Original decision (superseded):** keep the directory in the tree (provenance), but **exclude
+it from the P5 shipping build** and wire it to nothing; it stayed out pending its own egress
+review.
 
-**Rationale:**
-- `PLAN.md` P5 gate: "no new network egress beyond the existing inference host." This service
-  adds `gateway_bridge.mjs` / `model_access.py` network surface that the P5 gate does not cover.
-- The merged build's goal is the *Go agent behaviour layer* on the Floyd Code shell, not the
-  company platform. Shipping it is scope, not completion.
-- Reversible: it is one directory; keeping it untracked-by-build costs nothing.
+**Rationale for reversal:**
+- Owner-accepted surface; the console web UI is already the front door the owner uses.
+- Its hardcoded internal defaults are removed (`be0e4f0`), so the egress objection is narrowed
+  from "unknown endpoints baked in" to "enumerate the runtime network surface" — the build-out
+  task below.
 
-**To reverse:** give it its own egress review, then add it to the P5 build manifest.
+**To close (build-out gate):** enumerate the service's network surface (`gateway_bridge.mjs`,
+`model_access.py` relay, catalog fetch, feedback upload, media tools) and confirm no new
+egress beyond its configured endpoints; then add it to the P5 build manifest.
 
 ---
+
 
 ## D-2 — Source-repo secret: PostHog key still hardcoded upstream
 
@@ -91,7 +100,7 @@ toolchain for it lives in `code-app`, which is not present on this machine.
 
 ## D-6 — Internal host / private-IP references in committed text
 
-**Status:** PARTIALLY REMEDIATED — vendored copies left for owner decision.
+**Status:** REMEDIATED (2026-10-16, `be0e4f0`).
 
 **Rule (from the git-steward role):** every commit is treated as a permanent public artifact. Do
 not commit internal hostnames, private IPs, or logins. Keep exact values in the local, gitignored
@@ -101,11 +110,12 @@ in tracked docs.
 **Applied:** `findings.md` §I.1/§J — the console host, private IP, and login I had added
 (`e9a3309`) are replaced with placeholders; the real values live only in `.floyd/.supercache`.
 
-**Open (vendored, NOT introduced here):** `floyd-code/services/company-platform/`
-(`company-tools.mjs:7`, `company_platform.py:93`) ships internal endpoints as defaults. The dir is
-OUT of the ship build (D-1) but present in the tree. **To close:** either sanitize the defaults or
-record them as accepted-and-internal; owner's call, since editing them diverges from upstream
-provenance.
+**Closed (vendored copies):** `floyd-code/services/company-platform/` shipped internal endpoints
+as defaults in `company-tools.mjs`, `company_platform.py`, and `platform.js`. Sanitized in
+`be0e4f0`: `company-tools.mjs` now requires `FLOYD_CODE_BASE_URL` / `FLOYD_CODE_CDN_BASE`; the
+provider seed reads `company_model_base` or `FLOYD_COMPANY_MODEL_BASE`; the console install link
+is server-injected (`window.__FLOYD_CONFIG`, `install_url` from `FLOYD_INSTALL_URL`). Post-fix
+grep for the hostname/IP across the directory is empty and gitleaks is clean.
 
 **History note:** the replaced values remain in commit `e9a3309`. Not worth a history rewrite for
 a tailnet hostname in the owner's own org repo unless this repo is public — confirm visibility.
