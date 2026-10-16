@@ -90,7 +90,7 @@ class CompanyPlatform:
                     conn.execute('ALTER TABLE ' + table + ' ADD COLUMN device_code TEXT')
             conn.execute('DELETE FROM web_sessions WHERE expires_at < ?', (self.app.now(),))
             conn.execute("UPDATE usage_events SET outcome='interrupted' WHERE outcome='in_progress'")
-            company_base = self.config().get('company_model_base', 'http://100.78.109.105:8090/v1')
+            company_base = self.config().get('company_model_base') or os.environ.get('FLOYD_COMPANY_MODEL_BASE', '')
             if company_base:
                 conn.execute('INSERT OR IGNORE INTO provider_settings(id,name,base_url,protocol,updated_at) VALUES(?,?,?,?,?)',
                              ('company-local', 'Company models on inference', company_base, 'openai', self.app.now()))
@@ -450,7 +450,15 @@ class CompanyPlatform:
         self.fail(404, 'That account action does not exist.')
 
     def markup(self):
-        return (Path(__file__).parent / 'platform.html').read_text(encoding='utf-8')
+        page = (Path(__file__).parent / 'platform.html').read_text(encoding='utf-8')
+        runtime = {
+            'install_url': self.config().get('install_url', '') or os.environ.get('FLOYD_INSTALL_URL', ''),
+        }
+        # json.dumps + '<' escaping keeps the inline payload from breaking out of the script tag.
+        payload = json.dumps(runtime, separators=(',', ':')).replace('<', '\\u003c')
+        tag = '<script>window.__FLOYD_CONFIG=' + payload + ';</script>'
+        return page.replace('<script src="/platform.js" defer></script>',
+                            tag + '<script src="/platform.js" defer></script>')
 
     def connections(self):
         with self.database() as conn:

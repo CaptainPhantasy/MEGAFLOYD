@@ -4,13 +4,14 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 
-const base = (process.env.FLOYD_CODE_BASE_URL || 'https://inference.tail58d565.ts.net:8446').replace(/\/+$/, '');
+const base = (process.env.FLOYD_CODE_BASE_URL || '').replace(/\/+$/, '');
 const oauthHost = (process.env.FLOYD_CODE_OAUTH_HOST || base).replace(/\/+$/, '');
 const home = process.env.FLOYD_CODE_HOME || join(homedir(), '.floyd-code');
 const digest = createHash('sha256').update(JSON.stringify({ oauthHost, baseUrl: base })).digest('hex').slice(0, 16);
 const credential = join(home, 'credentials', `floyd-code-env-${digest}.json`);
 
 async function request(path, body) {
+  if (!base) throw new Error('FLOYD_CODE_BASE_URL is not set. Sign in from the company console, or set it before using the company tools.');
   let saved;
   try { saved = JSON.parse(await readFile(credential, 'utf8')); }
   catch { throw new Error('Sign in with f7 login to use the company tools.'); }
@@ -37,6 +38,7 @@ async function save(path, bytes) {
 }
 
 if (process.argv[2] === '--install-mcp') {
+  if (!base) throw new Error('FLOYD_CODE_BASE_URL is not set. Sign in from the company console before installing the company tools.');
   const file = process.argv[3];
   if (!file || !isAbsolute(file)) throw new Error('Choose the full settings filename.');
   let previous = {}, exists = false;
@@ -50,7 +52,7 @@ if (process.argv[2] === '--install-mcp') {
   const next = { ...previous, mcpServers: { ...previous.mcpServers, 'floyd-company': {
     command, args: ['__plugin_run_node', entry], env: {
       FLOYD_PLUGIN_ROOT: root, FLOYD_CODE_BASE_URL: base, FLOYD_CODE_OAUTH_HOST: oauthHost,
-      FLOYD_CODE_CDN_BASE: 'https://inference.tail58d565.ts.net:8444/code', FLOYD_DISABLE_TELEMETRY: '1',
+      FLOYD_CODE_CDN_BASE: process.env.FLOYD_CODE_CDN_BASE || '', FLOYD_DISABLE_TELEMETRY: '1',
       FLOYD_CODE_HOME: home,
     },
   } } };

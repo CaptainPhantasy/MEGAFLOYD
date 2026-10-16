@@ -1,5 +1,6 @@
 'use strict';
 const main = document.querySelector('#main');
+const CONFIG = window.__FLOYD_CONFIG || {};
 let csrf = '';
 let noticeTimer;
 const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined)
@@ -63,7 +64,8 @@ catch (error) {
 finally {
     submit.disabled = false;
 } }; s.append(form); }
-async function home() { title('Your coding platform', 'Use Floyd Code on your own computer, with your own files and settings. Shared company services live on inference.'); const s = section('Get started'); add(s, link('Install Floyd Code', 'https://inference.tail58d565.ts.net:8444/code', 'button'), el('p', 'Already have an account? Sign in to approve devices and manage your access.'), link('Open my account', '/account', 'button secondary')); const g = el('div', undefined, 'grid'); add(g, add(el('div', undefined, 'card'), el('h3', 'Provider choice'), el('p', 'Use your own model provider, or company-provided models.')), add(el('div', undefined, 'card'), el('h3', 'Personal work'), el('p', 'Your projects and saved conversations belong in your own computer account.'))); main.append(g); }
+async function home() { title('Your coding platform', 'Use Floyd Code on your own computer, with your own files and settings. Shared company services live on inference.'); const s = section('Get started'); const install = safeLink(CONFIG.install_url); if (install)
+    add(s, link('Install Floyd Code', install, 'button')); add(s, el('p', 'Already have an account? Sign in to approve devices and manage your access.'), link('Open my account', '/account', 'button secondary')); const g = el('div', undefined, 'grid'); add(g, add(el('div', undefined, 'card'), el('h3', 'Provider choice'), el('p', 'Use your own model provider, or company-provided models.')), add(el('div', undefined, 'card'), el('h3', 'Personal work'), el('p', 'Your projects and saved conversations belong in your own computer account.'))); main.append(g); }
 async function loadDirectory(parent, owner = false) { const s = section('Providers and models', parent); const status = el('p', 'Loading the saved directory…'); s.append(status); if (owner)
     add(s, button('Refresh provider information', async () => { await api('/admin/api/catalog/refresh', 'POST', {}); await renderDirectory(); tell('Provider information refreshed.'); })); const controls = el('div'); const content = el('div'); add(s, controls, content); async function renderDirectory() { try {
     const [info, providers] = await Promise.all([api('/catalog/info'), api('/catalog/api.json')]);
