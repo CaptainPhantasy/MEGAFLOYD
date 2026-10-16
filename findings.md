@@ -160,3 +160,28 @@ client — C2 is integration/reuse, not greenfield.
 - Inference host: Ubuntu 7.0.0-38, reached over the tailnet; exact address + login held locally
   in `.floyd/.supercache` (not committed). **no docker/podman** — plain node processes + systemd.
   MCP secret-broker runs there (port 9717).
+
+## §K — Company platform build-out (Track E, in-VERIFIED 2026-10-16)
+
+Owner reversed D-1: service is IN the ship build. Work landed this session:
+
+- **Bootstrap** `491e1d7`: `load_config()` generated config.json + a one-time
+  `ADMIN-PASSWORD.txt` (0600) when absent; previously the module crashed on import from a
+  clean checkout. Guarded `98db924` (clean-dir import test + restart-reuse assertion).
+- **Endpoint de-hardcode** `be0e4f0`: removed the internal console host from `company-tools.mjs`,
+  the private IP from the provider seed, and the internal CDN from the console install link
+  (now server-injected `window.__FLOYD_CONFIG`, `install_url`). gitleaks + grep clean.
+- **Host-path de-hardcode** `86b7fb6`: removed every baked absolute host path
+  (speech model under another user's home, `/srv/.../transcribe-cli`, `/usr/bin/ffmpeg`,
+  `/opt/ComfyUI/temp`, linuxbrew node, llama-swap settings, MCP gateway root). Each now
+  resolves config.json -> env -> PATH, degrading to a clear 'not configured' error.
+
+**Egress inventory (read, not yet a runtime capture).** Outbound surface, by path:
+- `company_platform.read_json_url` → `catalog_url` (default `https://models.dev/api.json`) and
+  each configured provider `base_url` (`/models`). NoRedirect opener + 15 s timeout.
+- `model_access.relay` → configured provider `base_url` (chat/completions, 120 s timeout).
+- `shared_tools.bridge` → local child process (`gateway_bridge.mjs` via stdio MCP); no socket.
+- `media_tools` → loopback `music_backend_url` (default 127.0.0.1:8188) + local `ffmpeg`/transcriber.
+- `company-tools.mjs` (client-side) → member's `FLOYD_CODE_BASE_URL`.
+No endpoint is reachable beyond configuration. **Still to do (E3):** capture this as a live
+allow-list assertion rather than prose, then add the service to the P5 manifest (E5).

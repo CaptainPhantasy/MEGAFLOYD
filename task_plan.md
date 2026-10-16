@@ -99,8 +99,8 @@ Ship gate = **close D-1**: egress review, then add to the P5 build manifest.
 | Phase | Task | Gate |
 |---|---|---|
 | E1 | First-run bootstrap so a clean checkout can start | clean-dir boot serves `/healthz` 200 **done** `491e1d7`; guarded `98db924` |
-| E2 | De-hardcode internal endpoints (tool defaults, provider seed, install link) | grep + gitleaks clean **done** `be0e4f0` |
-| E3 | Egress review: enumerate `gateway_bridge.mjs` / `model_access.py` relay / catalog fetch / feedback upload / media tools | VERIFIED inventory; no endpoint beyond config |
+| E2 | De-hardcode internal endpoints + host-local paths (tool defaults, provider seed, install link, speech/ffmpeg/gateway/ComfyUI/llama-swap) | grep + gitleaks clean **done** `be0e4f0`, `86b7fb6` |
+| E3 | Egress review: enumerate `gateway_bridge.mjs` / `model_access.py` relay / catalog fetch / feedback upload / media tools | inventory done (see findings §K); confirm no endpoint beyond config |
 | E4 | Resume README gaps: portable-app command-window files; browser reply timing + reconnection checks | targeted tests + boot smoke |
 | E5 | Add service to the P5 build manifest; close D-1 | manifest lists it; D-1 = IN-shipped |
 
