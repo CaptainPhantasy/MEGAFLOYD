@@ -159,14 +159,16 @@ standard sizes; README written in the Floyd Labs voice with real live screenshot
 
 ## D-8 — Where git branch/status disclosure lives in Floyd Code (B1)
 
-**Status:** OPEN (raised 2026-10-16). Blocks B1 coding; design in `docs/B1-CONTEXT-ASSEMBLY.md`.
+**Status:** DECIDED — option (a), 2026-10-16. Design in `docs/B1-CONTEXT-ASSEMBLY.md`.
 
 **Context (VERIFIED):** Go bakes `GitStatus` into `PromptDat`; Floyd Code discloses the *date* via
 `features/dateChange` reminders and does **not** disclose git branch/status at all, though
 `app/git/gitService.ts` can produce it.
 
-**Options:** (a) session-start **reminder** carrying branch + short status — mirrors the existing
-date pattern (recommended); (b) a `${git_status}` prompt variable filled in
-`buildSystemPromptContext`.
+**Decision:** mirror the codebase's own convention — a **session-start reminder** carrying branch
+and a short status, not a `${git_status}` prompt variable. Consistent with `dateChange`, and it can
+refresh when the tree changes, which a static prompt var cannot.
 
-**To close:** pick one, then implement with a `src/human/test/**` vitest and the package gate.
+**First unit landed:** `src/features/gitStatus/gitStatusDisclosure.ts` (pure formatter) +
+`test/features/gitStatus/gitStatusDisclosure.test.ts` (4 tests). Package typecheck + that test pass.
+**Remaining:** the reminder actor + feature registration (design doc step 2–3).

@@ -195,3 +195,15 @@ allow-list assertion rather than prose, then add the service to the P5 manifest 
   retried (slow ≠ disconnected); writes are never retried; unreadable replies are reported.
 - **Gap left:** `platform.js` has no executable test harness (browser DOM globals). Noted for a
   follow-up (node:test + minimal DOM stub, or accept `node --check` only until then).
+
+## §L — agent-core-v2 build/test gotchas (VERIFIED 2026-10-16)
+
+- **`#/` import scope is split.** `src/human/package.json` redefines `#/*` -> `src/human/*.ts` for
+  every file under `src/human/`. A test under `src/human/test/**` importing `#/features/...`
+  resolves to `src/human/features/...` and fails with "Cannot find module". Cross-subtree tests
+  belong in the package's top-level `test/` dir (in the vitest `include`), where `#/*` -> `src/*.ts`.
+- **Toolchain present in `/Users/floyd/MEGAFLOYD/floyd-code`:** node v26.9.0, pnpm 10.33.0,
+  `tsc`/`vitest` at `floyd-code/node_modules/.bin`. Package gate:
+  `../../node_modules/.bin/tsc -p tsconfig.json --noEmit` (exit 0, clean) and
+  `../../node_modules/.bin/vitest run <path>`.
+- B1 unit landed: `src/features/gitStatus/gitStatusDisclosure.ts` + `test/features/gitStatus/`.

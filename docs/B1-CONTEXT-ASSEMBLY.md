@@ -48,9 +48,18 @@ Record the choice in `docs/DECISIONS.md` before coding.
 
 ## First code step (after B1-D1)
 
-1. Read `features/dateChange/dateChangeService.ts` as the pattern to mirror.
+1. Read `features/dateChange/dateChangeService.ts` as the pattern to mirror. ✓
 2. Add git disclosure using `IGitService.status(sessionContext.cwd)` (branch + porcelain summary),
    only when the dir is a git work tree (`findGitWorkTree`, already imported in `context.ts`).
-3. Vitest under `src/human/test/**` asserting: non-git dir → no disclosure; clean repo → branch
-   only; dirty repo → branch + counts.
+   **In progress:** the pure formatter is done (`src/features/gitStatus/gitStatusDisclosure.ts`);
+   the reminder actor + feature registration remain.
+3. Vitest under `test/features/**` (NOT `src/human/test/**` — see the gotcha below) asserting:
+   non-git dir → no disclosure; clean repo → branch only; dirty repo → branch + counts. ✓ (4 tests)
 4. Gate: package `typecheck` + `vitest run`.
+
+## Gotcha — `#/` import scope is split
+
+`src/human/package.json` redefines `#/*` → `src/human/*.ts` for every file under `src/human/`.
+So a human test importing `#/features/...` silently targets `src/human/features/...` and fails.
+Tests that reach outside the human subtree belong in the package's top-level `test/` dir
+(`test/**` is in the vitest `include`), where `#/*` → `src/*.ts`.
