@@ -4,6 +4,11 @@ dist/
 dist-native/
 dist-web/
 build/
+# EXCEPTION: floyd-code/build is NOT build output — it holds hand-written bundler/loader
+# helpers (raw-text-plugin.mjs, raw-text-loader.mjs, register-raw-text-loader.mjs) imported
+# by tsdown + vitest configs across packages. Committed so a fresh clone can build.
+!floyd-code/build/
+!floyd-code/build/**
 .turbo/
 coverage/
 *.tsbuildinfo
