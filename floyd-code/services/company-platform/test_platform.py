@@ -2,6 +2,7 @@ import base64
 import hashlib
 import importlib.util
 import json
+import re
 import shutil
 import tempfile
 import threading
@@ -508,6 +509,50 @@ class PlatformTest(unittest.TestCase):
         self._import_app(home)  # a restart must reuse the config, never rotate the key
         self.assertEqual(json.loads(config_file.read_text())['csrf_secret'], csrf)
         self.assertEqual(key_file.read_text().strip(), key)
+
+
+class EgressReview(unittest.TestCase):
+    """Enforce the D-1 egress review (findings §K).
+
+    Every literal network host and every outbound call site must be deliberately
+    reviewed and recorded here. Adding one makes this test fail, which is the
+    point: an unreviewed endpoint cannot reach the shipping build silently.
+    """
+
+    SOURCES = ['app.py', 'company_platform.py', 'model_access.py', 'shared_tools.py',
+               'media_tools.py', 'feedback_store.py', 'company-tools.mjs',
+               'gateway_bridge.mjs', 'platform.js']
+    # Loopback is free; models.dev is the documented, overridable catalog default.
+    ALLOWED_LITERAL_HOSTS = {'127.0.0.1', 'localhost', 'models.dev'}
+    # Reviewed count of outbound call sites per file; a change here needs review.
+    REVIEWED_CALL_SITES = {'company_platform.py': 2, 'model_access.py': 2, 'shared_tools.py': 1,
+                           'media_tools.py': 5, 'company-tools.mjs': 1, 'gateway_bridge.mjs': 1,
+                           'platform.js': 1}
+
+    def source(self, name):
+        return (Path(__file__).parent / name).read_text(encoding='utf-8')
+
+    def test_no_unreviewed_literal_egress_host(self):
+        offenders = []
+        for name in self.SOURCES:
+            for host in re.findall(r'https?://([^/"\'\s:)]+)', self.source(name)):
+                if host not in self.ALLOWED_LITERAL_HOSTS:
+                    offenders.append(name + ' -> ' + host)
+        self.assertEqual(offenders, [], 'unreviewed egress host(s): ' + repr(offenders))
+
+    def test_outbound_call_sites_match_the_reviewed_inventory(self):
+        pattern = re.compile(r'urlopen\(|build_opener\(|urllib\.request\.Request\(|fetch\(|'
+                             r'subprocess\.(?:run|Popen)\(|StdioClientTransport\(')
+        found = {name: count for name in self.SOURCES
+                 if (count := len(pattern.findall(self.source(name))))}
+        self.assertEqual(found, self.REVIEWED_CALL_SITES)
+
+    def test_each_call_site_targets_configuration_not_a_baked_endpoint(self):
+        self.assertIn("provider['base_url']", self.source('model_access.py'))
+        self.assertIn('catalog_url', self.source('company_platform.py'))
+        self.assertIn("_configured('music_backend_url'", self.source('media_tools.py'))
+        self.assertIn('process.env.FLOYD_COMPANY_GATEWAY_ROOT', self.source('gateway_bridge.mjs'))
+        self.assertIn('FLOYD_CODE_BASE_URL', self.source('company-tools.mjs'))
 
 
 if __name__ == '__main__':
