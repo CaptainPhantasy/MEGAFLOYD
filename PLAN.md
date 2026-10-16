@@ -19,30 +19,41 @@ Go floyd (behaviour source):
 - hooks: internal/hooks/{hooks.go,input.go,runner.go} — events PreToolUse, PostToolUse, SessionStart, Stop; decisions allow/deny/halt
 - guards added this session: internal/shell/redirect.go (validateRedirs), recover in background goroutine
 
-Portable pack staged here: /Users/floyd/floyd-merge/prompt-pack/
-- templates/        = copy of internal/agent/templates
-- prompt.go.reference = copy of the Go assembly logic (spec, not to compile)
-- hooks/            = reserved for ported hook definitions
+Portable pack (canonical) lives HERE, in this repo: docs/prompt-pack/
+- templates/           = canonical copy of internal/agent/templates (edit here only)
+- prompt.go.reference  = the Go assembly logic (spec, not to compile)
+- MANIFEST.md          = interface + checksums + the real PromptDat struct
+- hooks/               = reserved for ported hook definitions
+Guard: `node scripts/verify-prompt-pack.mjs` (drift check) / `--sync` (push canonical -> Go tree).
+The old staging copy at /Users/floyd/floyd-merge/prompt-pack/ is advisory and outside git.
+The derived Go copy (floyd-go/internal/agent/templates/) is required by //go:embed and must
+never be edited directly.
 
 ## Plug points on the Floyd Code side (from grep)
 
+Paths verified 2026-10-16; all live under `floyd-code/packages/agent-core-v2/src/`.
+
 | Task | File(s) to extend |
 |---|---|
-| Prompt/profile injection | packages/agent-core-v2/src/app/agentProfileCatalog/{agentProfileCatalog.ts,profile-shared.ts} |
-| System/context files (AGENTS.md today, add FLOYD.md + .supercache) | packages/agent-core-v2/src/workspace/workspaceAgentProfileLoader/internal/systemFile.ts , userAgentProfileLoaderService.ts |
-| Workspace instructions | packages/agent-core-v2/src/features/workspaceInstructions/ , agentsMdReminder/ |
-| Session bootstrap (git status/branch/commits, cwd, env markers) | packages/agent-core-v2/src/features/sessionInit/ |
-| Tool discipline rules | packages/agent-core-v2/src/features/externalHooks/{agentExternalHooksService.ts,internal/types.ts} |
-| Compaction/summary wording | packages/agent-core-v2/src/features/fullCompaction/ (+ templates summary.md) |
+| Prompt/profile injection | `app/agentProfileCatalog/agentProfileCatalog.ts`, `app/agentProfileCatalog/profile-shared.ts` |
+| System/context files (AGENTS.md today, add FLOYD.md + .supercache) | `workspace/workspaceAgentProfileLoader/internal/systemFile.ts`, `workspace/workspaceAgentProfileLoader/userAgentProfileLoaderService.ts` |
+| Workspace instructions | `workspace/workspaceInstructions/workspaceInstructionsService.ts`, `agent/agentsMdReminder/agentsMdReminderService.ts` |
+| Session bootstrap (git status/branch/commits, cwd, env markers) | `features/sessionInit/` |
+| Tool discipline rules | `features/externalHooks/agent/agentExternalHooksService.ts`, `features/externalHooks/internal/types.ts` |
+| Compaction/summary wording | `agent/fullCompaction/fullCompactionService.ts` (+ `compactionInstruction.ts`) |
 
 ## Phases
 
 P0 inventory + build proof  [done]
 - Floyd Code v2.0.2 runs; Go deployable tree builds (/tmp/floyd-deploy, 84 MB, exit 0); Go repo builds and tests green for internal/shell.
 
-P1 portable prompt pack  [staged, needs wiring]
-- keep templates as data; define variables: CWD, ENV, GIT_STATUS, GIT_BRANCH, RECENT_COMMITS, FLOYD_MD, SUPERCACHE, SKILLS, MCP_PROMPTS, IDENTITY.
-- gate: manifest + variable list reviewed; no code changes to Floyd Code yet.
+P1 portable prompt pack  [done: canonical pack + guard + manifest]
+- templates are data; the canonical copy is `docs/prompt-pack/templates/`; the Go tree keeps a
+  //go:embed-required derived copy. Drift guard: `scripts/verify-prompt-pack.mjs`.
+- The real template interface is the `PromptDat` struct (`internal/agent/prompt/prompt.go:31`),
+  NOT the variable names previously listed here (CWD/ENV/GIT_STATUS/... — none exist in the code).
+  See `docs/prompt-pack/MANIFEST.md` §2 for the struct and §3 for per-template placeholders.
+- gate: manifest + variable list reviewed; no code changes to Floyd Code yet.  [met]
 
 P2 context assembly in Floyd Code
 - new service in agent-core-v2 that fills the pack at session start, reusing sessionInit for git data.

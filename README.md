@@ -19,6 +19,25 @@ existing installs.** This is a scratch project: break it freely.
 - Do not copy `credentials` files from any existing install into this repo.
 - Do not push secrets. `pnpm-lock.yaml` is fine; `.env*`, `credentials`, `*.db*` are ignored.
 
+## Prerequisites (measured 2026-10-16)
+
+| Tool | Required | This machine |
+|---|---|---|
+| node | `>=24.15.0` | v26.9.0 ✓ |
+| pnpm | `10.33.0` (packageManager) | 10.25.0 — run `corepack enable` to fetch the pinned version |
+| go | `1.26.6` (go.mod) | go1.25.7 — first `go build` downloads the toolchain via `GOTOOLCHAIN` |
+
+`GOTOOLCHAIN` note: `floyd-go/go.mod` declares `go 1.26.6`, so a local go1.25.x triggers a
+one-time toolchain download on first build (needs network). Set `GOTOOLCHAIN=local` to fail
+fast instead of downloading.
+
+Prompt-pack drift guard (run from repo root):
+
+```sh
+node scripts/verify-prompt-pack.mjs          # verify every copy matches the canonical pack
+node scripts/verify-prompt-pack.mjs --sync   # push canonical -> Go tree after a template edit
+```
+
 ## Build
 
 Floyd Code half:
@@ -40,4 +59,12 @@ go test ./internal/shell/...
 
 ## Status
 
-Copied, not yet merged. See `PLAN.md` for the phase list and gates.
+Copied, not yet merged. P0 done, P1 (portable prompt pack) done — canonical pack +
+drift guard + manifest. P2–P5 not started. See `PLAN.md` for the phase list and gates.
+
+| Doc | What |
+|---|---|
+| `PLAN.md` | phases, corrected plug points, gates, risks |
+| `docs/MERGE-STATUS-20261016.md` | point-in-time audit of P0/P1 |
+| `docs/prompt-pack/MANIFEST.md` | canonical pack interface + checksums |
+| `task_plan.md` / `findings.md` / `progress.md` | live working memory for the merge |
