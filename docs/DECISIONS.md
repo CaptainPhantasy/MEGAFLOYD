@@ -86,3 +86,26 @@ toolchain for it lives in `code-app`, which is not present on this machine.
 
 **To reverse:** if `code-app` becomes available locally, sync via
 `FLOYD_CODE_REPO=<this checkout> pnpm run sync:web` and re-commit the bundle.
+
+---
+
+## D-6 — Internal host / private-IP references in committed text
+
+**Status:** PARTIALLY REMEDIATED — vendored copies left for owner decision.
+
+**Rule (from the git-steward role):** every commit is treated as a permanent public artifact. Do
+not commit internal hostnames, private IPs, or logins. Keep exact values in the local, gitignored
+`.floyd/.supercache` and use placeholders (`<console-host>`, `<inference-host>`, `<login-user>`)
+in tracked docs.
+
+**Applied:** `findings.md` §I.1/§J — the console host, private IP, and login I had added
+(`e9a3309`) are replaced with placeholders; the real values live only in `.floyd/.supercache`.
+
+**Open (vendored, NOT introduced here):** `floyd-code/services/company-platform/`
+(`company-tools.mjs:7`, `company_platform.py:93`) ships internal endpoints as defaults. The dir is
+OUT of the ship build (D-1) but present in the tree. **To close:** either sanitize the defaults or
+record them as accepted-and-internal; owner's call, since editing them diverges from upstream
+provenance.
+
+**History note:** the replaced values remain in commit `e9a3309`. Not worth a history rewrite for
+a tailnet hostname in the owner's own org repo unless this repo is public — confirm visibility.

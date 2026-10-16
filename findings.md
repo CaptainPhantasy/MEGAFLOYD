@@ -113,8 +113,9 @@ makes packaging fail loudly if it is absent — correct behavior; the tree simpl
 
 ### I.1 The console is live (VERIFIED 2026-10-16)
 
-- `https://inference.tail58d565.ts.net:8446/` serves the **Floyd Code Web** SPA
-  (`<title>Floyd Code Web</title>`; served by the inference host, Tailscale name `inference`).
+- `https://<console-host>:8446/` serves the **Floyd Code Web** SPA
+  (`<title>Floyd Code Web</title>`; served by the inference host over the tailnet; exact hostname
+  held locally in `.floyd/.supercache`, not committed).
   Nav: *FloydCode · Providers · My account · Administration* — this is the admin console the
   owner referred to. `GET /healthz` → `{"ok": true}`.
 - `/approve?user_code=<code>` is the **OAuth device-authorization approval page**
@@ -156,5 +157,6 @@ client — C2 is integration/reuse, not greenfield.
 ## J. Toolchain reality check (2026-10-16)
 
 - Mac (client-only): node v26.9.0 both trees; **pnpm 10.33.0** on the SanDisk1Tb clone.
-- Inference host: Ubuntu 7.0.0-38, reachable at `100.78.109.105`, login `LEGACYAI\floyd`; **no
-  docker/podman** — plain node processes + systemd. MCP secret-broker runs there (port 9717).
+- Inference host: Ubuntu 7.0.0-38, reached over the tailnet; exact address + login held locally
+  in `.floyd/.supercache` (not committed). **no docker/podman** — plain node processes + systemd.
+  MCP secret-broker runs there (port 9717).
