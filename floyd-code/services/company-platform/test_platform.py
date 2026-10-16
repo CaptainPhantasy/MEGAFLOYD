@@ -134,6 +134,15 @@ class PlatformTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn('destination', data['error_description'].lower())
 
+    def test_media_tools_report_not_configured_rather_than_using_host_paths(self):
+        _, headers = self.member('media-member')
+        _, token = self.device(headers)
+        audio = base64.b64encode(b'RIFF0000WAVEfmt ').decode()
+        body = {'id': 'speech-transcribe', 'arguments': {'audio_base64': audio, 'filename': 'clip.wav'}}
+        status, data, _ = self.request('/company/tools/call', 'POST', body, token['access_token'])
+        self.assertEqual(status, 503, data)
+        self.assertEqual(data.get('error'), 'media_not_configured')
+
     def test_sign_out_blocks_browser_saved_basic_credentials(self):
         saved = {'Authorization': 'Basic ' + base64.b64encode(('owner:' + self.key).encode()).decode()}
         _, info, _ = self.request('/admin/api/overview', headers=saved)

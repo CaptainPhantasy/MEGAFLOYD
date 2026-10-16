@@ -1,5 +1,6 @@
 import {readFileSync} from 'node:fs';
-const root=process.env.FLOYD_COMPANY_GATEWAY_ROOT || '/srv/organized/services/MCP_SERVER_ROOM/mcp-gateway';
+const root=process.env.FLOYD_COMPANY_GATEWAY_ROOT || '';
+if(!root) { process.stdout.write(JSON.stringify({ok:false,code:'GATEWAY_NOT_CONFIGURED'})); process.exit(1); }
 const {Client}=await import(root+'/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js');
 const {StdioClientTransport}=await import(root+'/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js');
 const input=JSON.parse(readFileSync(0,'utf8'));

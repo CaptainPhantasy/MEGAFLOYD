@@ -101,6 +101,14 @@ def bootstrap_config() -> dict:
         "catalog_url": os.environ.get("FLOYD_CATALOG_URL", "https://models.dev/api.json"),
         "company_model_base": os.environ.get("FLOYD_COMPANY_MODEL_BASE", ""),
         "install_url": os.environ.get("FLOYD_INSTALL_URL", ""),
+        # Optional host-local integrations. Blank means "unset": the media and gateway
+        # features degrade to a clear 'not configured' error instead of a broken default.
+        "company_model_settings": os.environ.get("FLOYD_COMPANY_MODEL_SETTINGS", ""),
+        "company_gateway_root": os.environ.get("FLOYD_COMPANY_GATEWAY_ROOT", ""),
+        "speech_model_path": os.environ.get("FLOYD_SPEECH_MODEL", ""),
+        "speech_cli": os.environ.get("FLOYD_SPEECH_CLI", ""),
+        "ffmpeg_path": os.environ.get("FLOYD_FFMPEG", ""),
+        "music_backend_url": os.environ.get("FLOYD_MUSIC_BACKEND_URL", ""),
     }
     write_config(config)
     write_secret(ADMIN_KEY_PATH, admin_key + "\n")

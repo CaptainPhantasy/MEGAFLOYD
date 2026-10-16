@@ -4,6 +4,7 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import threading
@@ -36,8 +37,11 @@ class SharedTools:
 
     def bridge(self, method, arguments):
         config = self.platform.config()
-        command = config.get('company_gateway_command') or [
-            '/home/linuxbrew/.linuxbrew/bin/node', str(Path(__file__).with_name('gateway_bridge.mjs'))]
+        command = config.get('company_gateway_command')
+        if not command:
+            env_command = os.environ.get('FLOYD_COMPANY_GATEWAY_COMMAND')
+            command = env_command.split() if env_command else [
+                shutil.which('node') or 'node', str(Path(__file__).with_name('gateway_bridge.mjs'))]
         if not self.capacity.acquire(blocking=False):
             self.platform.fail(429, 'Company tools are busy. Try again shortly.', 'tools_busy')
         process = None

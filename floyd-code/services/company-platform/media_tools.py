@@ -2,7 +2,9 @@
 import base64
 import binascii
 import json
+import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -13,7 +15,6 @@ import uuid
 from pathlib import Path
 
 
-SPEECH_MODEL = '/home/douglas/models-library/imported/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/nemotron-3.5-asr-streaming-0.6b-F32.gguf'
 SCHEMAS = {
     'speech-transcribe': {'name': 'Turn a recording into text', 'inputSchema': {
         'type': 'object', 'properties': {'audio_base64': {'type': 'string'},
@@ -33,6 +34,21 @@ class MediaTools:
         self.platform = platform
         self.speech_capacity = threading.BoundedSemaphore(2)
         self.music_capacity = threading.BoundedSemaphore(1)
+
+    def _configured(self, key, env, default=''):
+        """Read a setting from config.json, then the environment, then a default."""
+        value = self.platform.config().get(key)
+        if not isinstance(value, str) or not value.strip():
+            value = os.environ.get(env, default)
+        return value.strip() if isinstance(value, str) else ''
+
+    def _which(self, key, env, binary):
+        """Resolve a tool: explicit setting first, else the first on PATH."""
+        return self._configured(key, env) or (shutil.which(binary) or '')
+
+    def comfy_base(self):
+        return (self._configured('music_backend_url', 'FLOYD_MUSIC_BACKEND_URL')
+                or 'http://127.0.0.1:8188').rstrip('/')
 
     def initialize(self, conn):
         conn.execute('CREATE TABLE IF NOT EXISTS media_jobs(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,'
@@ -68,6 +84,11 @@ class MediaTools:
             self.platform.fail(400, 'Choose a recording smaller than 22 MB.')
         if not isinstance(language, str) or not re.fullmatch(r'[a-zA-Z]{2,3}(?:-[a-zA-Z]{2,4})?', language):
             self.platform.fail(400, 'Choose a language such as en-US.')
+        ffmpeg = self._which('ffmpeg_path', 'FLOYD_FFMPEG', 'ffmpeg')
+        speech_cli = self._which('speech_cli', 'FLOYD_SPEECH_CLI', 'transcribe-cli')
+        speech_model = self._configured('speech_model_path', 'FLOYD_SPEECH_MODEL')
+        if not (ffmpeg and speech_cli and speech_model):
+            self.platform.fail(503, 'The recording service is not configured on this server.', 'media_not_configured')
         if not self.speech_capacity.acquire(blocking=False):
             self.platform.fail(429, 'Recording tools are busy. Try again shortly.')
         try:
@@ -75,12 +96,12 @@ class MediaTools:
                 folder = Path(folder)
                 original, wav, output = folder / ('input' + suffix), folder / 'recording.wav', folder / 'text.txt'
                 original.write_bytes(audio)
-                subprocess.run(['/usr/bin/ffmpeg', '-nostdin', '-v', 'error', '-protocol_whitelist', 'file,pipe',
+                subprocess.run([ffmpeg, '-nostdin', '-v', 'error', '-protocol_whitelist', 'file,pipe',
                     '-i', str(original), '-t', '300', '-ac', '1', '-ar', '16000', '-y', str(wav)],
                     check=True, timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(['/srv/organized/services/floyd-transcribe/bin/transcribe-cli', '-q',
+                subprocess.run([speech_cli, '-q',
                     '--backend', 'cpu', '--threads', '6', '--timestamps', 'none', '--language', language,
-                    '-m', SPEECH_MODEL, '--output', str(output), str(wav)], check=True, timeout=45,
+                    '-m', speech_model, '--output', str(output), str(wav)], check=True, timeout=45,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 text = output.read_text().strip()
                 return {'text': text, 'model': 'Nemotron 3.5 Speech', 'truncated_after_seconds': 300}
@@ -90,7 +111,7 @@ class MediaTools:
             self.speech_capacity.release()
 
     def comfy(self, path, body=None):
-        request = urllib.request.Request('http://127.0.0.1:8188' + path,
+        request = urllib.request.Request(self.comfy_base() + path,
             data=json.dumps(body).encode() if body is not None else None,
             headers={'Content-Type': 'application/json'})
         with urllib.request.urlopen(request, timeout=8) as response:
@@ -151,10 +172,17 @@ class MediaTools:
                     if rows:
                         saved = rows[0]
                         name, subfolder = saved['filename'], saved.get('subfolder', '')
-                        scratch = (Path('/opt/ComfyUI/temp') / subfolder / name).resolve()
-                        if saved.get('type') != 'temp' or not scratch.is_relative_to(Path('/opt/ComfyUI/temp').resolve()):
+                        if (saved.get('type') != 'temp' or not name or Path(name).is_absolute()
+                                or any(sep in name for sep in ('/', '\\'))
+                                or any(part == '..' for part in Path(subfolder or '.').parts)):
                             raise RuntimeError('The music engine returned an unexpected output folder.')
-                        with urllib.request.urlopen('http://127.0.0.1:8188/view?' + urllib.parse.urlencode(saved), timeout=8) as response:
+                        root = self._configured('music_output_root', 'FLOYD_MUSIC_OUTPUT_ROOT')
+                        scratch = None
+                        if root:
+                            scratch = (Path(root) / subfolder / name).resolve()
+                            if not scratch.is_relative_to(Path(root).resolve()):
+                                raise RuntimeError('The music engine returned an unexpected output folder.')
+                        with urllib.request.urlopen(self.comfy_base() + '/view?' + urllib.parse.urlencode(saved), timeout=8) as response:
                             audio = response.read(16 * 1024 * 1024 + 1)
                         if not audio or len(audio) > 16 * 1024 * 1024:
                             raise RuntimeError('The music engine returned no complete recording.')
@@ -162,7 +190,8 @@ class MediaTools:
                                   'model': 'MiniMax Music3', 'bytes': len(audio)}
                         with self.platform.database() as conn:
                             conn.execute("UPDATE media_jobs SET status='complete',output_json=? WHERE id=?", (json.dumps(result), id_))
-                        scratch.unlink(missing_ok=True)
+                        if scratch is not None:
+                            scratch.unlink(missing_ok=True)
                         return
                 time.sleep(2)
             raise TimeoutError('The music request exceeded 15 minutes.')

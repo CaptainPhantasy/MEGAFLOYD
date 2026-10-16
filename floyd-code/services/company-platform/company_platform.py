@@ -521,10 +521,10 @@ class CompanyPlatform:
             previous = json.loads(row['models_json'])
             upstream = self.catalog()['providers'].get(id_, {}).get('models', {})
             settings = {}
-            settings_path = Path(self.config().get('company_model_settings', '/srv/organized/services/llama-swap/config/config.yaml'))
-            if id_ == 'company-local' and settings_path.exists():
+            settings_path = self.config().get('company_model_settings', '')
+            if id_ == 'company-local' and settings_path and Path(settings_path).exists():
                 import yaml
-                settings = yaml.safe_load(settings_path.read_text()).get('models', {})
+                settings = yaml.safe_load(Path(settings_path).read_text()).get('models', {})
             models = {}
             for item in payload['data']:
                 if not isinstance(item, dict) or not isinstance(item.get('id'), str):
