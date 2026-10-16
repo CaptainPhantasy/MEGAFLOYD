@@ -185,3 +185,13 @@ Owner reversed D-1: service is IN the ship build. Work landed this session:
 - `company-tools.mjs` (client-side) → member's `FLOYD_CODE_BASE_URL`.
 No endpoint is reachable beyond configuration. **Still to do (E3):** capture this as a live
 allow-list assertion rather than prose, then add the service to the P5 manifest (E5).
+
+**§K.1 — E4 scoping (VERIFIED 2026-10-16).** The README's two open items:
+- "portable app's built-in command window … missing files" — **not this service**; it is an app
+  packaging gap. Reclassified off Track E (do not chase it here).
+- "browser reply timing and reconnection checks remain unfinished" — **this service** (the console
+  SPA, `platform.js`). `api()` had a single 45 s abort and collapsed every failure to one message.
+  Now: idempotent reads (GET/HEAD) retry twice with 500 ms/1 s backoff; an explicit timeout is not
+  retried (slow ≠ disconnected); writes are never retried; unreadable replies are reported.
+- **Gap left:** `platform.js` has no executable test harness (browser DOM globals). Noted for a
+  follow-up (node:test + minimal DOM stub, or accept `node --check` only until then).

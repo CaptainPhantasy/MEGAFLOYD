@@ -21,18 +21,43 @@ finally {
 function field(parent, text, type = 'text', value = '') { const id = 'f-' + crypto.randomUUID(); const l = el('label', text); l.htmlFor = id; const n = el('input'); n.id = id; n.type = type; n.value = value; add(parent, l, n); return n; }
 function section(title, parent = main) { const s = el('section'); add(s, el('h2', title)); parent.append(s); return s; }
 function errorBox(parent, text) { parent.append(el('p', text, 'error')); }
-async function api(path, method = 'GET', body) { let response; try {
+async function api(path, method = 'GET', body) {
     const options = { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, signal: AbortSignal.timeout(45000) };
-    if (body !== undefined && method !== 'GET' && method !== 'HEAD') options.body = JSON.stringify(body);
-    response = await fetch(path, options);
+    if (body !== undefined && method !== 'GET' && method !== 'HEAD')
+        options.body = JSON.stringify(body);
+    const safe = method === 'GET' || method === 'HEAD';
+    let response;
+    for (let attempt = 0; ; attempt++) {
+        try {
+            response = await fetch(path, options);
+            break;
+        }
+        catch (error) {
+            // A timeout means the server is slow, not that the connection dropped, so
+            // it is not retried. Writes are never retried: they must not apply twice.
+            const slow = error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+            if (!safe || slow || attempt >= 2) {
+                throw new Error(safe
+                    ? 'The company server did not answer. Check your connection and try again.'
+                    : 'The connection was lost. Your change has not been confirmed. Reload the page before trying again.');
+            }
+            await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+        }
+    }
+    let data;
+    try {
+        data = await response.json();
+    }
+    catch {
+        throw new Error('The company server returned an unreadable reply. Reload the page before trying again.');
+    }
+    if (!response.ok) {
+        const e = new Error(data.error_description || 'This action could not be completed.');
+        e.status = response.status;
+        throw e;
+    }
+    return data;
 }
-catch {
-    throw new Error('The connection was lost. Your change has not been confirmed. Reload the page before trying again.');
-} const data = await response.json(); if (!response.ok) {
-    const e = new Error(data.error_description || 'This action could not be completed.');
-    e.status = response.status;
-    throw e;
-} return data; }
 async function copy(value) { if (navigator.clipboard) {
     await navigator.clipboard.writeText(value);
     tell('Copied.');

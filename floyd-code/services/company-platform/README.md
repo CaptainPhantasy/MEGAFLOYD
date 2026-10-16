@@ -8,4 +8,4 @@ Keep `config.json`, the administrator key, account records and uploads outside s
 
 `company-tools.mjs` runs through the coding app’s built-in program runner and uses the signed-in member’s saved access. It never includes the owner’s server credentials.
 
-This is a testing checkpoint. The portable app’s built-in command window still needs its missing files added. Browser reply timing and reconnection checks remain unfinished. The included speech and music work is retained from this checkpoint; no model training is included.
+This is a testing checkpoint. The console client retries idempotent reads with bounded backoff and reports a slow server distinctly from a dropped connection; the portable app's built-in command window is a separate packaging gap, not part of this service. The included speech and music work is retained from this checkpoint; no model training is included.
