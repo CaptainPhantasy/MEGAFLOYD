@@ -313,3 +313,11 @@ func TestDispatchSlashInputRunsBuiltins(t *testing.T) {
 	require.True(t, handled)
 	require.False(t, ws.skip, "/yolo must toggle Never Ask off")
 }
+
+func TestSlashAndPaletteKeyBindings(t *testing.T) {
+	t.Parallel()
+
+	km := DefaultKeyMap()
+	require.Contains(t, km.Editor.Commands.Keys(), "/")
+	require.Contains(t, km.Commands.Keys(), "ctrl+p")
+}
