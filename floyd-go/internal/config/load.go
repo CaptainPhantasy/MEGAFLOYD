@@ -1362,6 +1362,28 @@ func projectBoundary(dir string) string {
 	return abs
 }
 
+// GlobalAgentsDirs returns the default directories for extensibility agent
+// definitions shown in the agent library dialog.
+func GlobalAgentsDirs() []string {
+	if floydAgents := os.Getenv("FLOYD_AGENTS_DIR"); floydAgents != "" {
+		return []string{floydAgents}
+	}
+
+	paths := []string{
+		filepath.Join(home.Config(), appName, "agents"),
+	}
+
+	// Include agents shipped next to the binary, when present.
+	if execPath, err := os.Executable(); err == nil {
+		extensibilityAgents := filepath.Join(filepath.Dir(execPath), "extensibility", "agents")
+		if _, err := os.Stat(extensibilityAgents); err == nil {
+			paths = append(paths, extensibilityAgents)
+		}
+	}
+
+	return paths
+}
+
 // GlobalSkillsDirs returns the default directories for Agent Skills.
 // Skills in these directories are auto-discovered and their files can be read
 // without permission prompts.

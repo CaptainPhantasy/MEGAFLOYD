@@ -1911,6 +1911,41 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.SessionsID)
 		cmds = append(cmds, m.loadSession(msg.Session.ID))
 
+	// Agent library dialog messages.
+	case dialog.ActionSelectAgent:
+		m.dialog.CloseDialog(dialog.AgentLibraryID)
+		// Insert agent prompt into editor.
+		prompt := fmt.Sprintf("# %s\n\n%s", msg.AgentName, msg.SystemPrompt)
+		m.textarea.SetValue(prompt)
+		m.textarea.Focus()
+		m.setState(m.state, uiFocusEditor)
+
+	// Skills library dialog messages.
+	case dialog.ActionSelectSkill:
+		m.dialog.CloseDialog(dialog.SkillsLibraryID)
+		// Insert skill content into editor.
+		content := fmt.Sprintf("# %s\n\n%s\n\n%s", msg.SkillName, msg.SkillDescription, msg.SkillContent)
+		m.textarea.SetValue(content)
+		m.textarea.Focus()
+		m.setState(m.state, uiFocusEditor)
+
+	case dialog.ActionRenameSession:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if m.session != nil {
+			if cmd := m.openRenameSessionDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+
+	case dialog.ActionToggleMCP:
+		cmds = append(cmds, m.toggleMCP(msg.Name))
+		// Refresh the MCP dialog to show updated state.
+		if dia := m.dialog.Dialog(dialog.MCPServersID); dia != nil {
+			if mcpDialog, ok := dia.(*dialog.MCPServers); ok {
+				mcpDialog.Refresh()
+			}
+		}
+
 	// Open dialog message.
 	case dialog.ActionOpenDialog:
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -4443,6 +4478,30 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.MCPServersID:
+		if cmd := m.openMCPServersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ConfigAuditID:
+		if cmd := m.openConfigAuditDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.AgentLibraryID:
+		if cmd := m.openAgentLibrary(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.SkillsLibraryID:
+		if cmd := m.openSkillsLibrary(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.PluginsLibraryID:
+		if cmd := m.openPluginsLibrary(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.RenameSessionID:
+		if cmd := m.openRenameSessionDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4578,6 +4637,151 @@ func (m *UI) openFilesDialog() tea.Cmd {
 	event.FilePickerOpened()
 
 	return cmd
+}
+
+// openMCPServersDialog opens the MCP servers dialog.
+func (m *UI) openMCPServersDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MCPServersID) {
+		m.dialog.BringToFront(dialog.MCPServersID)
+		return nil
+	}
+
+	mcpDialog, err := dialog.NewMCPServers(m.com)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(mcpDialog)
+	return nil
+}
+
+// toggleMCP toggles the enabled/disabled state of an MCP server and
+// persists the change through the workspace config store.
+func (m *UI) toggleMCP(name string) tea.Cmd {
+	cfg := m.com.Config()
+
+	mcpConfig, exists := cfg.MCP[name]
+	if !exists {
+		return util.ReportError(fmt.Errorf("MCP server %q not found", name))
+	}
+
+	mcpConfig.Disabled = !mcpConfig.Disabled
+	cfg.MCP[name] = mcpConfig
+
+	if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "mcp."+name+".disabled", mcpConfig.Disabled); err != nil {
+		return util.ReportError(fmt.Errorf("failed to save MCP config: %w", err))
+	}
+
+	status := "enabled"
+	if mcpConfig.Disabled {
+		status = "disabled"
+	}
+	return util.CmdHandler(util.NewInfoMsg(fmt.Sprintf("MCP server %q %s (restart session to apply)", name, status)))
+}
+
+// openConfigAuditDialog opens the config audit dialog.
+func (m *UI) openConfigAuditDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ConfigAuditID) {
+		m.dialog.BringToFront(dialog.ConfigAuditID)
+		return nil
+	}
+
+	// Find project config path.
+	cfg := m.com.Config()
+	globalConfigPath := config.GlobalConfig()
+	var projectConfigPath string
+
+	if cfg != nil {
+		workingDir := m.com.Workspace.WorkingDir()
+		// Look for project-level config.
+		configNames := []string{"floyd.json", ".floyd.json"}
+		for _, name := range configNames {
+			path := filepath.Join(workingDir, name)
+			if _, err := os.Stat(path); err == nil {
+				projectConfigPath = path
+				break
+			}
+		}
+	}
+
+	// Run the audit.
+	audit := dialog.RunConfigAudit(globalConfigPath, projectConfigPath, nil)
+
+	configAuditDialog, err := dialog.NewConfigAudit(m.com, audit)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(configAuditDialog)
+	return nil
+}
+
+// openAgentLibrary opens the agent library dialog.
+func (m *UI) openAgentLibrary() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.AgentLibraryID) {
+		// Bring to front if already open.
+		m.dialog.BringToFront(dialog.AgentLibraryID)
+		return nil
+	}
+
+	agentLibrary, err := dialog.NewAgentLibrary(m.com, config.GlobalAgentsDirs())
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(agentLibrary)
+	return nil
+}
+
+// openSkillsLibrary opens the skills library dialog.
+func (m *UI) openSkillsLibrary() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SkillsLibraryID) {
+		// Bring to front if already open.
+		m.dialog.BringToFront(dialog.SkillsLibraryID)
+		return nil
+	}
+
+	skillsLibrary, err := dialog.NewSkillsLibrary(m.com, config.GlobalSkillsDirs())
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(skillsLibrary)
+	return nil
+}
+
+// openPluginsLibrary opens the plugins (MCP servers) library dialog.
+func (m *UI) openPluginsLibrary() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.PluginsLibraryID) {
+		// Bring to front if already open.
+		m.dialog.BringToFront(dialog.PluginsLibraryID)
+		return nil
+	}
+
+	pluginsLibrary, err := dialog.NewPluginsLibrary(m.com)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(pluginsLibrary)
+	return nil
+}
+
+// openRenameSessionDialog opens the rename session dialog for the
+// current session.
+func (m *UI) openRenameSessionDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.RenameSessionID) {
+		m.dialog.BringToFront(dialog.RenameSessionID)
+		return nil
+	}
+
+	if m.session == nil {
+		return util.ReportWarn("No active session to rename")
+	}
+
+	renameDialog, _ := dialog.NewRenameSession(m.com, *m.session)
+	m.dialog.OpenDialog(renameDialog)
+	return nil
 }
 
 // openPermissionsDialog opens the permissions dialog for a permission request.
