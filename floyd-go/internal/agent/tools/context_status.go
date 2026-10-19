@@ -41,9 +41,13 @@ func NewContextStatusTool(sessions session.Service, contextWindow int64) fantasy
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get session: %v", err)), nil
 			}
 
-			// TODO(port-wave3): the chassis session model does not track
-			// cache-read tokens yet; report zero until it does.
+			// The chassis session model does not persist cache-read
+			// tokens separately: the agent loop folds cache reads into
+			// the stored PromptTokens (agent.go updateSessionTokenCounters),
+			// so the honest per-session cache figure is unknown and
+			// reported as zero with that caveat in the summary below.
 			cacheReadTokens := int64(0)
+			cacheNote := " (cache reads are folded into prompt tokens by this build)"
 
 			// Calculate both total and effective tokens
 			totalTokens := sess.PromptTokens + sess.CompletionTokens
@@ -95,19 +99,21 @@ func NewContextStatusTool(sessions session.Service, contextWindow int64) fantasy
 					"⚠️ CONTEXT WARNING: %.1f%% of window used\n"+
 						"  Total: %d tokens | Effective: %d tokens (%.0f%% cached)\n"+
 						"  Remaining: %d tokens | Window: %d\n"+
-						"  Session will compact when remaining tokens fall below threshold.",
+						"  Session will compact when remaining tokens fall below threshold.%s",
 					percentUsed,
 					totalTokens, effectiveTokens, cachePercent,
 					remaining, contextWindow,
+					cacheNote,
 				)
 			} else {
 				summary = fmt.Sprintf(
 					"Context: %.1f%% used\n"+
 						"  Total: %d tokens | Effective: %d tokens (%.0f%% cached)\n"+
-						"  Remaining: %d tokens | Window: %d",
+						"  Remaining: %d tokens | Window: %d%s",
 					percentUsed,
 					totalTokens, effectiveTokens, cachePercent,
 					remaining, contextWindow,
+					cacheNote,
 				)
 			}
 

@@ -197,6 +197,14 @@ type sessionAgent struct {
 	// nil-checks it before consulting the loop state.
 	ralphLoop *ralph.Loop
 
+	// budgetCfg is the configured budget template; nil disables budget
+	// enforcement.
+	budgetCfg *BudgetConfig
+	// budgets holds the per-session TokenBudget instances. Entries are
+	// created lazily from budgetCfg on the first run of a session; a nil
+	// budgetCfg leaves every check a no-op.
+	budgets *csync.Map[string, *TokenBudget]
+
 	// dispatchMu holds a per-session mutex that serializes the
 	// accepted -> (cancel-on-entry | queued | active) transition in
 	// Run against a concurrent Cancel. The lock is held only during
@@ -257,12 +265,17 @@ type SessionAgentOptions struct {
 	// DataDirectory is the .floyd directory path used to persist ralph
 	// loop state. Empty disables the loop for this agent.
 	DataDirectory string
+	// Budget configures the per-session token spend cap. Nil disables
+	// budget enforcement for this agent.
+	Budget *BudgetConfig
 }
 
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
 	agent := &sessionAgent{
+		budgetCfg:            opts.Budget,
+		budgets:              csync.NewMap[string, *TokenBudget](),
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
@@ -868,6 +881,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
+			}
+
+			// Enforce the per-session token budget before each step. A
+			// spent-out budget aborts the stream; a crossed warning
+			// threshold injects a system message once.
+			if proceed, warning := a.budgetCheck(call.SessionID); !proceed {
+				return callContext, prepared, fmt.Errorf("%s", warning)
+			} else if warning != "" {
+				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(warning)}, prepared.Messages...)
 			}
 
 			// Use latest tools (updated by SetTools when MCP tools change).
@@ -2022,6 +2044,32 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 
 	session.Cost += cost
 	updateSessionTokenCounters(session, usage)
+	a.budgetRecord(session.ID, cost)
+}
+
+// budgetCheck returns the session's budget verdict before the next
+// stream step. The budget instance is created lazily from budgetCfg on
+// first use.
+func (a *sessionAgent) budgetCheck(sessionID string) (proceed bool, warning string) {
+	if a.budgetCfg == nil {
+		return true, ""
+	}
+	budget, ok := a.budgets.Get(sessionID)
+	if !ok || budget == nil {
+		budget = NewTokenBudget(a.budgetCfg)
+		a.budgets.Set(sessionID, budget)
+	}
+	return budget.Check()
+}
+
+// budgetRecord adds a cost observation to the session's budget.
+func (a *sessionAgent) budgetRecord(sessionID string, costUSD float64) {
+	if a.budgetCfg == nil {
+		return
+	}
+	if budget, ok := a.budgets.Get(sessionID); ok && budget != nil {
+		budget.Record(costUSD)
+	}
 }
 
 func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {

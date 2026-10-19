@@ -18,10 +18,9 @@ type ToolProgressEvent struct {
 }
 
 // progressBroker is the global broker for tool progress events.
-// UI components subscribe to this to receive real-time progress updates.
-//
-// TODO(port-wave3): subscribers live in the UI layer, which is not ported
-// yet; tools publish here today and the events are simply unread.
+// UI components subscribe to this to receive real-time progress updates;
+// internal/app republishes every event onto the app event broker so
+// local and client/server UIs both receive it.
 var progressBroker = pubsub.NewBroker[ToolProgressEvent]()
 
 // SubscribeProgress returns a channel that receives tool progress events.

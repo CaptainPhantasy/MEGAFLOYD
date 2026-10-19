@@ -6,10 +6,9 @@ import (
 
 // TokenBudget provides configurable token budget tracking with
 // threshold-based warnings and hard caps. It hooks into the
-// agent's Stream lifecycle to enforce spending limits.
-//
-// TODO(port-wave3): not yet enforced by the chassis session agent; the
-// v5.3 line consults it from the run loop's config surface.
+// agent's Stream lifecycle to enforce spending limits. The chassis
+// session agent consults it from PrepareStep and records usage costs
+// in updateSessionUsage.
 type TokenBudget struct {
 	// MaxTokensUSD is the hard cap in USD. When cumulative cost
 	// exceeds this, the agent is stopped. Zero means unlimited.

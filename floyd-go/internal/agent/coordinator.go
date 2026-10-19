@@ -651,6 +651,14 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	if !isSubAgent {
 		dataDir = c.cfg.Config().Options.DataDirectory
 	}
+	var budget *BudgetConfig
+	if cfgBudget := c.cfg.Config().Options.Budget; cfgBudget != nil {
+		budget = &BudgetConfig{
+			MaxUSD:      cfgBudget.MaxUSD,
+			WarnPercent: cfgBudget.WarnPercent,
+		}
+	}
+
 	result := NewSessionAgent(SessionAgentOptions{
 		LargeModel:           large,
 		SmallModel:           small,
@@ -667,6 +675,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		SessionStartRunner:   c.eventHookRunner(hooks.EventSessionStart, isSubAgent),
 		StopRunner:           c.eventHookRunner(hooks.EventStop, isSubAgent),
 		DataDirectory:        dataDir,
+		Budget:               budget,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the

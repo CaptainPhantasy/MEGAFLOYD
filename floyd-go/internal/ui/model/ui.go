@@ -749,6 +749,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notifyWindowFocused = true
 	case tea.BlurMsg:
 		m.notifyWindowFocused = false
+	case app.ToolProgressMsg:
+		// Live tool progress from the tools progress broker (forwarded
+		// by internal/app). Shown in the status bar while a tool runs;
+		// a completion clears it. Client/server mode drops these at the
+		// server event envelope — TODO(port-wave4) proto payload.
+		switch msg.Status {
+		case "completed":
+			m.status.ClearInfoMsg()
+		case "started", "in_progress":
+			if msg.Message != "" {
+				m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: msg.Message})
+			}
+		}
+
 	case pubsub.Event[notify.Notification]:
 		if cmd := m.handleAgentNotification(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
