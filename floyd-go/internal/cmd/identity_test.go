@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"text/template"
 
 	"github.com/spf13/cobra"
 )
@@ -140,6 +141,39 @@ func TestVersionLineUsesCLIName(t *testing.T) {
 			}
 			if got := out.String(); got != tt.want {
 				t.Fatalf("version output = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDefaultVersionTemplateUsesCLIName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		cliName string
+		want    string
+	}{
+		{"megafloyd", megafloydBinaryName, "megafloyd version 1.2.3\n"},
+		{"floyd", floydBinaryName, "floyd version 1.2.3\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cmd := &cobra.Command{Use: "floyd", Version: "1.2.3"}
+			applyCLIName(cmd, tt.cliName)
+			tmpl, err := template.New("version").Parse(defaultVersionTemplate)
+			if err != nil {
+				t.Fatalf("parse version template: %v", err)
+			}
+			var out bytes.Buffer
+			if err := tmpl.Execute(&out, cmd); err != nil {
+				t.Fatalf("execute version template: %v", err)
+			}
+			if got := out.String(); got != tt.want {
+				t.Fatalf("terminal version line = %q, want %q", got, tt.want)
 			}
 		})
 	}
