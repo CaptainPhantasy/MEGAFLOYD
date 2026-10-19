@@ -33,6 +33,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/history"
 	"github.com/legacy-ai/floyd/internal/log"
 	"github.com/legacy-ai/floyd/internal/lsp"
+	megafloydmemory "github.com/legacy-ai/floyd/internal/megafloyd/memory"
 	megafloydskills "github.com/legacy-ai/floyd/internal/megafloyd/skills"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/permission"
@@ -174,6 +175,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	if err := megafloydskills.InstallCommands(cfg.Options.DataDirectory); err != nil {
 		slog.Warn("Failed to install megafloyd skills", "error", err)
 	}
+
+	// Record the project memory checkpoint the prompt layer injects into
+	// its dynamic context. Non-fatal: a read-only working directory must
+	// never block startup.
+	app.writeMemoryCheckpoint(ctx)
 
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {
@@ -771,6 +777,10 @@ func (app *App) Shutdown() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Record the checkpoint while the database is still open; the parallel
+	// cleanup funcs below release it.
+	app.writeMemoryCheckpoint(shutdownCtx)
+
 	// Drain any debounced message updates before the DB-close cleanup
 	// runs in the parallel block below. message.Service buffers
 	// streaming deltas (see internal/message/message.go) and we must
@@ -813,6 +823,32 @@ func (app *App) Shutdown() {
 		}
 	}
 	wg.Wait()
+}
+
+// checkpointTimeout bounds the startup and shutdown checkpoint writes.
+const checkpointTimeout = 3 * time.Second
+
+// writeMemoryCheckpoint records the project memory checkpoint that the
+// prompt layer injects into dynamic context. It runs at startup (session
+// begin) and on shutdown. Failures are logged and never fatal; a stale
+// checkpoint is left alone without a warning.
+func (app *App) writeMemoryCheckpoint(ctx context.Context) {
+	cwd := app.config.WorkingDir()
+	if cwd == "" {
+		return
+	}
+
+	cp := megafloydmemory.Checkpoint{}
+	if last, err := app.Sessions.GetLast(ctx); err == nil {
+		cp.SessionID = last.ID
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, checkpointTimeout)
+	defer cancel()
+	if err := (megafloydmemory.Writer{CWD: cwd}).Write(ctx, cp); err != nil &&
+		!errors.Is(err, megafloydmemory.ErrStale) {
+		slog.Warn("Failed to write project memory checkpoint", "error", err)
+	}
 }
 
 // checkForUpdates checks for available updates.
