@@ -1,19 +1,22 @@
-# Replay — Re-Run A Recorded Sequence
+# Replay — Read The Journal And Evidence
 
-Re-execute a previously recorded run (reproduction, session steps, benchmark) against the current state and compare outcomes to the original. Regression detection by literal repetition.
+Show what a job recorded. The `replay` tool is read-only: it never re-executes commands or repeats mutations, and its own output states that no commands are executed.
 
 ## Usage
 ```
-/replay <RECORD-REF>
+/replay <JOB-ID> [REQUIREMENT]
 ```
 
+## Tool
+`replay` — parameters: `job_id` (required), `requirement` (optional filter).
+
 ## Procedure
-1. Load the record: a repro script from `.harness/repro/` (see /reproduce), a transcript via `transcript_export`, or a recorded session via `floyd session show <id>`.
-2. Extract the steps in order: commands run, inputs given, environment pinned. Steps that no longer exist (renamed files, dead endpoints) are listed as BROKEN before starting.
-3. Re-execute faithfully via `bash` — same commands, same order, same flags. Independent steps may batch through `parallel_bash` only when the record shows they were independent.
-4. Capture each step's outcome; diff against the recorded outcomes (exit codes, key output lines).
-5. Report: steps replayed, outcomes MATCHED / CHANGED (with the delta) / BROKEN. CHANGED outcomes are leads — tie each to /debug or /why for the cause.
+1. Call `replay` with `job_id` to list the whole journal in order, then the evidence grouped by requirement.
+2. Use the journal ids with the `why` tool. Use the evidence section to compare commands, exit codes, artifact hashes, output hashes, and excerpt paths.
+3. To run a check again, use `bash` deliberately and record fresh evidence with `prove`. Do not describe `replay` as a re-run.
 
 ## Rules
-- Replay does not "fix" steps that fail — fidelity is the method. Adaptation happens after reporting, explicitly.
-- Deep record/replay plumbing (cradle-to-grave step capture) is future Go work; today's records are repro scripts and transcripts, and this skill executes exactly those.
+- Journal entries show id, tool, action, detail, and result.
+- Evidence rows show the requirement verdict, command, exit code, artifact hash, output hash, and excerpt path relative to the job directory.
+- The journal and evidence are append-only records; changing the artifact can make old passes `unchecked`, which the tool shows as recorded.
+- A `requirement` filter that matches nothing prints an empty evidence section; it does not error. Omit the filter to list everything.
