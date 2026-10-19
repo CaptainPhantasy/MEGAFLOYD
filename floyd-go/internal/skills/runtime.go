@@ -8,27 +8,15 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	"github.com/legacy-ai/floyd/internal/extensibility"
 )
 
 // Runtime specifies how a skill is executed at runtime.
-// TODO(port-wave2): replace with extensibility.Runtime once the
-// extensibility package is ported from the v5.3 line.
-type Runtime struct {
-	Type    string            `yaml:"type"` // bash, node, python, builtin
-	Command string            `yaml:"command,omitempty"`
-	Env     map[string]string `yaml:"env,omitempty"`
-	Timeout int               `yaml:"timeout,omitempty"` // seconds
-}
+type Runtime = extensibility.Runtime
 
 // ExecutableSkill is a skill definition carrying a runtime configuration.
-// TODO(port-wave2): replace with extensibility.YAMLSkill once the
-// extensibility package is ported from the v5.3 line.
-type ExecutableSkill struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description"`
-	Path        string   `yaml:"path"`
-	Runtime     *Runtime `yaml:"runtime,omitempty"`
-}
+type ExecutableSkill = extensibility.YAMLSkill
 
 // ExecutorResult holds the output of a skill execution.
 type ExecutorResult struct {
