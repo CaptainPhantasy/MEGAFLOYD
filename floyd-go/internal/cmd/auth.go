@@ -33,35 +33,16 @@ func buildAuthRuntime() (*authRuntime, error) {
 	if cfg.Version == "" {
 		cfg.Version = "devel"
 	}
-	if cfg.OAuthHost == "" {
-		return nil, fmt.Errorf(
-			"%w: set MEGAFLOYD_AUTH_HOST or FLOYD_CODE_OAUTH_HOST",
-			megafloydauth.ErrNotConfigured,
-		)
-	}
-	credentialsDir := cfg.CredentialsPath()
-	if credentialsDir == "" {
-		return nil, fmt.Errorf(
-			"%w: no megafloyd home directory", megafloydauth.ErrNotConfigured,
-		)
-	}
-	name, err := megafloydauth.StorageName(
-		megafloydauth.CredentialKey(cfg.OAuthHost, cfg.BaseURL),
-	)
+	manager, err := megafloydauth.NewManager(cfg)
 	if err != nil {
 		return nil, err
 	}
-	store := megafloydauth.FileStore{Dir: credentialsDir}
-	path, err := store.Path(name)
+	path, err := manager.CredentialPath()
 	if err != nil {
 		return nil, err
 	}
 	return &authRuntime{
-		Manager: &megafloydauth.Manager{
-			Flow:  megafloydauth.NewClient(cfg),
-			Store: store,
-			Name:  name,
-		},
+		Manager:   manager,
 		Host:      cfg.OAuthHost,
 		StorePath: path,
 	}, nil
@@ -108,8 +89,21 @@ Access and refresh tokens are never printed.`,
 	RunE: runAuthStatus,
 }
 
+var authTokenCmd = &cobra.Command{
+	Use:    "token",
+	Short:  "Print the stored access token",
+	Hidden: true,
+	Long: `Print the stored access token to standard output.
+
+This command exists for provider credential templates such as
+$(floyd auth token). It prints a secret; do not run it where the output is
+recorded.`,
+	Args: cobra.NoArgs,
+	RunE: runAuthToken,
+}
+
 func init() {
-	authCmd.AddCommand(authLoginCmd, authLogoutCmd, authStatusCmd)
+	authCmd.AddCommand(authLoginCmd, authLogoutCmd, authStatusCmd, authTokenCmd)
 }
 
 func runAuthLogin(cmd *cobra.Command, _ []string) error {
@@ -205,6 +199,19 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	if status.Scope != "" {
 		fmt.Fprintf(out, "  Scope: %s\n", status.Scope)
 	}
+	return nil
+}
+
+func runAuthToken(cmd *cobra.Command, _ []string) error {
+	runtime, err := authRuntimeFactory()
+	if err != nil {
+		return err
+	}
+	token, err := runtime.Manager.AccessToken(cmd.Context())
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), token)
 	return nil
 }
 

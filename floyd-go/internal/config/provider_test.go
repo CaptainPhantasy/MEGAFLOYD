@@ -10,6 +10,9 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/fantasy/providers/anthropic"
+	"github.com/legacy-ai/floyd/internal/csync"
+	"github.com/legacy-ai/floyd/internal/env"
 	"github.com/stretchr/testify/require"
 )
 
@@ -439,4 +442,128 @@ func TestCacheStore_ReplacesFileInsteadOfRewritingIt(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1, "only the cache file should remain")
 	require.Equal(t, "providers.json", entries[0].Name())
+}
+
+func TestIsCompanyAuthAPIKey(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{
+		"company-auth://default",
+		" company-auth://default ",
+		"company-auth://",
+	} {
+		require.True(t, IsCompanyAuthAPIKey(value), value)
+	}
+	for _, value := range []string{
+		"",
+		"sk-real-key",
+		"COMPANY-AUTH://default",
+		"$(floyd auth token)",
+	} {
+		require.False(t, IsCompanyAuthAPIKey(value), value)
+	}
+}
+
+func TestCompanyAuthProviderIDs(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{Providers: csync.NewMap[string, ProviderConfig]()}
+	cfg.Providers.Set("zeta", ProviderConfig{APIKey: CompanyAuthAPIKeyScheme + "default"})
+	cfg.Providers.Set("alpha", ProviderConfig{
+		APIKey:         "resolved-placeholder",
+		APIKeyTemplate: CompanyAuthAPIKeyScheme + "default",
+	})
+	cfg.Providers.Set("real", ProviderConfig{APIKey: "sk-real"})
+	cfg.Providers.Set("disabled", ProviderConfig{
+		APIKey:  CompanyAuthAPIKeyScheme + "default",
+		Disable: true,
+	})
+
+	require.Equal(t, []string{"alpha", "zeta"}, CompanyAuthProviderIDs(cfg))
+	require.Nil(t, CompanyAuthProviderIDs(nil))
+	require.Nil(t, CompanyAuthProviderIDs(&Config{}))
+}
+
+func TestCompanyAuthRefreshCommandQuotesExecutable(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t,
+		"$('/opt/floyd' auth token)",
+		CompanyAuthRefreshCommand("/opt/floyd"))
+	require.Equal(t,
+		`$('/tmp/my floyd' auth token)`,
+		CompanyAuthRefreshCommand("/tmp/my floyd"))
+	require.Equal(t,
+		`$('/tmp/it'\''s floyd' auth token)`,
+		CompanyAuthRefreshCommand("/tmp/it's floyd"))
+	require.Empty(t, CompanyAuthRefreshCommand("  "))
+}
+
+// TestCompanyAuthRefreshCommandResolvesThroughShellResolver proves the
+// template the coordinator re-resolves after a 401 is valid shell and yields
+// the command's output verbatim, including when the executable path has a
+// space.
+func TestCompanyAuthRefreshCommandResolvesThroughShellResolver(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "fake floyd")
+	require.NoError(t, os.WriteFile(executable,
+		[]byte("#!/bin/sh\nprintf '%s\\n' token-from-command\n"), 0o755))
+
+	resolver := NewShellVariableResolver(env.New())
+	got, err := resolver.ResolveValue(CompanyAuthRefreshCommand(executable))
+	require.NoError(t, err)
+	require.Equal(t, "token-from-command", got)
+}
+
+func TestSetProviderCompanyAuthCredentialInMemoryOnly(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "floyd.json")
+	const onDisk = `{"providers":{"company":{"api_key":"company-auth://default"}}}`
+	require.NoError(t, os.WriteFile(configPath, []byte(onDisk), 0o600))
+
+	cfg := &Config{Providers: csync.NewMap[string, ProviderConfig]()}
+	cfg.Providers.Set("company", ProviderConfig{
+		ID:     "company",
+		Type:   catwalk.Type("openai"),
+		APIKey: CompanyAuthAPIKeyScheme + "default",
+	})
+	cfg.Providers.Set("anthropic-company", ProviderConfig{
+		ID:     "anthropic-company",
+		Type:   anthropic.Name,
+		APIKey: CompanyAuthAPIKeyScheme + "default",
+	})
+	cfg.Providers.Set("real", ProviderConfig{
+		ID:     "real",
+		Type:   catwalk.Type("openai"),
+		APIKey: "sk-real",
+	})
+	store := NewTestStore(cfg)
+	store.globalDataPath = configPath
+
+	const template = "$(/opt/floyd auth token)"
+	require.True(t, store.SetProviderCompanyAuthCredential("company", "token-1", template))
+	require.True(t, store.SetProviderCompanyAuthCredential("anthropic-company", "token-1", template))
+	require.False(t, store.SetProviderCompanyAuthCredential("real", "token-1", template))
+	require.False(t, store.SetProviderCompanyAuthCredential("missing", "token-1", template))
+	require.False(t, store.SetProviderCompanyAuthCredential("company", "", template))
+
+	got, _ := store.Config().Providers.Get("company")
+	require.Equal(t, "token-1", got.APIKey)
+	require.Equal(t, template, got.APIKeyTemplate)
+
+	got, _ = store.Config().Providers.Get("anthropic-company")
+	require.Equal(t, "Bearer token-1", got.APIKey)
+
+	got, _ = store.Config().Providers.Get("real")
+	require.Equal(t, "sk-real", got.APIKey)
+	require.Empty(t, got.APIKeyTemplate)
+
+	// The credential path must never persist a token or the template.
+	disk, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Equal(t, onDisk, string(disk))
 }
