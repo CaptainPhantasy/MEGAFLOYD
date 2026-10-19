@@ -40,7 +40,7 @@ const (
 )
 
 // Chassis environment variables. Each is read by the Go chassis; see
-// docs/megafloyd-namespace.md for the read sites.
+// docs/megafloyd-namespace.md at the repository root for the read sites.
 const (
 	ChassisGlobalConfigEnv = "FLOYD_GLOBAL_CONFIG"
 	ChassisGlobalDataEnv   = "FLOYD_GLOBAL_DATA"
