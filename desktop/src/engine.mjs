@@ -15,6 +15,7 @@ import {
   megafloydBinaryCandidates,
   nodeWrapperCandidates,
 } from './config.mjs';
+import { fetchMeta, tokenFromUrl } from './meta.mjs';
 import { redactSecrets } from './redact.mjs';
 
 const URL_PATTERN = /(http:\/\/127\.0\.0\.1:(\d+)\/[^\s]*#token=[A-Za-z0-9_-]+)/;
@@ -45,6 +46,7 @@ export class Engine extends EventEmitter {
     this.healthTimer = null;
     this.healthFailures = 0;
     this.serverPort = null;
+    this.handshakePending = false;
     this.pidFile = path.join(homeDir, 'desktop', 'engine.pid');
     this.state = {
       status: 'idle',
@@ -59,6 +61,11 @@ export class Engine extends EventEmitter {
       startedAt: null,
       workspace: this.workspace,
       webLog: path.join(homeDir, 'logs', 'web-server.log'),
+      engineVersion: null,
+      protocolMajor: null,
+      platformCommit: null,
+      capabilities: null,
+      metaWarnings: [],
     };
   }
 
@@ -146,7 +153,13 @@ export class Engine extends EventEmitter {
       pid: null,
       error: null,
       workspace: this.workspace,
+      engineVersion: null,
+      protocolMajor: null,
+      platformCommit: null,
+      capabilities: null,
+      metaWarnings: [],
     });
+    this.handshakePending = false;
     this.log.info('engine starting', { binary: binary.file, source: binary.source, port, node });
 
     const env = {
@@ -173,11 +186,54 @@ export class Engine extends EventEmitter {
     this.writePid(child.pid);
 
     let settled = false;
-    const becomeReady = (url) => {
+    const becomeReady = async (url) => {
       if (settled) return;
       settled = true;
       clearTimeout(this.startTimer);
       this.startTimer = null;
+
+      // Spec C4: prove the API contract before any UI is loaded.
+      this.handshakePending = true;
+      let meta;
+      try {
+        meta = await fetchMeta({ port, token: tokenFromUrl(url) });
+      } catch (error) {
+        meta = { ok: false, error: `meta probe failed: ${error?.message ?? error}` };
+      }
+      this.handshakePending = false;
+
+      this.setState({
+        engineVersion: meta.engineVersion ?? null,
+        protocolMajor: meta.protocolMajor ?? null,
+        platformCommit: meta.platformCommit ?? null,
+        capabilities: meta.capabilities ?? null,
+        metaWarnings: meta.warnings ?? [],
+      });
+
+      if (!meta.ok) {
+        this.log.error('engine capability handshake failed', { error: meta.error });
+        this.setState({
+          status: 'failed',
+          detail: 'Engine failed the capability handshake',
+          error: meta.error,
+          url: null,
+          pid: null,
+        });
+        this.stopHealthMonitor();
+        // Refuse the UI and leave no orphan listener behind.
+        this.stopping = true;
+        const childPid = this.listenerPid(port);
+        if (childPid) {
+          try {
+            process.kill(childPid, 'SIGTERM');
+          } catch {
+            // Already gone.
+          }
+        }
+        if (this.child) this.stopChild(this.child);
+        return;
+      }
+
       this.setState({
         status: 'ready',
         detail: `Engine ready on port ${port}`,
@@ -186,7 +242,13 @@ export class Engine extends EventEmitter {
         error: null,
         startedAt: Date.now(),
       });
-      this.log.info('engine ready', { port });
+      this.log.info('engine ready', {
+        port,
+        engineVersion: meta.engineVersion,
+        protocolMajor: meta.protocolMajor,
+        platformCommit: meta.platformCommit ?? 'not-reported',
+      });
+      for (const warning of meta.warnings) this.log.warn('engine meta warning', { warning });
       this.startHealthMonitor();
     };
 
@@ -237,7 +299,14 @@ export class Engine extends EventEmitter {
       this.child = null;
       if (this.stopping) {
         this.stopHealthMonitor();
-        this.setState({ status: 'stopped', detail: 'Engine stopped', url: null, pid: null });
+        if (this.state.status !== 'failed') {
+          this.setState({ status: 'stopped', detail: 'Engine stopped', url: null, pid: null });
+        }
+        return;
+      }
+      if (this.handshakePending) {
+        this.log.info('handoff process exited during meta handshake', { code, signal });
+        this.setState({ pid: this.listenerPid(port) });
         return;
       }
       if (settled && this.state.status === 'ready') {

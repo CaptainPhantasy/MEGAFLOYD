@@ -39,8 +39,10 @@ idle ──start──▶ starting ──ready signal──▶ ready
 - Discovery order is fixed in `desktop/src/config.mjs`.
 - Port: prefers 58627, falls back to an ephemeral loopback port.
 - Readiness: the handoff prints `Web UI: http://127.0.0.1:<port>/sessions/#token=<token>`;
-  the main process parses that line. If it is missed, the token file is read and
-  `/api/v1/meta` probed.
+  the main process parses that line. It then calls `/api/v1/meta` with the fragment
+  token, records engine version, protocol major and capabilities, and refuses the UI
+  when the protocol major differs (spec C4). If the ready line is missed, startup
+  times out; this platform build does not persist a token file to fall back to.
 - Restart policy: 1.5 s × attempt, at most three restarts per five minutes, then the
   status page with the log path.
 - Shutdown: SIGTERM, 8 s grace, SIGKILL. The engine is killed when the app quits, so no

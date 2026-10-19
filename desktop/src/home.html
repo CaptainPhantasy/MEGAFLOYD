@@ -95,12 +95,16 @@
 
       <div class="meta">
         <dl>
-          <dt>Version</dt><dd id="m-version">—</dd>
-          <dt>Engine</dt><dd id="m-engine">—</dd>
+          <dt>Desktop</dt><dd id="m-version">—</dd>
+          <dt>Engine version</dt><dd id="m-engine-version">—</dd>
+          <dt>Protocol</dt><dd id="m-protocol">—</dd>
+          <dt>Commit</dt><dd id="m-commit">—</dd>
+          <dt>Binary</dt><dd id="m-engine">—</dd>
           <dt>Source</dt><dd id="m-source">—</dd>
           <dt>Port</dt><dd id="m-port">—</dd>
           <dt>Home</dt><dd id="m-home">—</dd>
           <dt>Workspace</dt><dd id="m-workspace">—</dd>
+          <dt>Warnings</dt><dd id="m-warnings">—</dd>
         </dl>
       </div>
     </main>
@@ -127,10 +131,18 @@
         $('detail').textContent = next.detail || '';
         $('open').disabled = next.status !== 'ready';
         $('hint').style.display = next.status === 'missing' ? 'block' : 'none';
+        $('m-engine-version').textContent = next.engineVersion || '—';
+        $('m-protocol').textContent = next.protocolMajor ? `major ${next.protocolMajor}` : '—';
+        const buildCommit = info?.provenance?.platform?.commit;
+        $('m-commit').textContent = next.platformCommit || (buildCommit ? `${buildCommit} (bundled)` : '—');
         $('m-engine').textContent = next.entry || '—';
         $('m-source').textContent = next.source || '—';
         $('m-port').textContent = next.port ? String(next.port) : '—';
         $('m-workspace').textContent = next.workspace || '—';
+        $('m-warnings').textContent =
+          Array.isArray(next.metaWarnings) && next.metaWarnings.length > 0
+            ? next.metaWarnings.join('; ')
+            : '—';
         const error = next.error || (next.status === 'ready' ? '' : '');
         $('error').textContent = error;
         $('error').style.display = error ? 'block' : 'none';

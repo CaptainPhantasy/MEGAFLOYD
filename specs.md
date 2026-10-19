@@ -81,9 +81,18 @@ Rules for this document:
   status page and refuse to load a UI whose protocol major differs.
 - **SHOULD**: the desktop warn (not fail) on a newer engine with unknown
   capabilities.
-- Evidence: none yet — `meta` is probed only for reachability
-  (`engine.mjs:394`); fields are unpinned.
-- Status: OPEN.
+- Evidence: `desktop/src/meta.mjs`; `desktop/src/engine.mjs` (`becomeReady`);
+  `desktop/test/meta.test.mjs`. The descriptor is fetched with the fragment
+  token before any UI load and recorded in engine state.
+- Verified 2026-10-19: `make smoke` reports `engineVersion: "2.0.2"`,
+  `protocolMajor: 2`, all six capabilities, no warnings; `make smoke-ui`
+  still loads the platform UI. A meta fixture with major 3 is refused.
+- NOTE: the pinned platform meta does not expose `protocol_version` or
+  `platform_commit`. The desktop falls back to the server-version major and
+  shows the build provenance commit as `(bundled)`; a declared
+  `protocol_version` wins when present.
+- Status: PARTIAL — desktop handshake and refusal are MET; the platform fields
+  the MUST names are not reported yet.
 - Acceptance: meta fixture with old/new major versions; correct refuse/warn
   behavior in tests.
 
@@ -323,5 +332,6 @@ Rules for this document:
 |---|---|---|
 | 2026-10-19 | Initial draft from the desktop shell as built | `1d15945` |
 
-Open items, in contract order: C4, C6, C16 (bundle), C17 (update channel),
-C18 (signing), C20 cross-CI. Partials: C5, C7, C8, C10, C11, C12, C19.
+Open items, in contract order: C6, C16 (bundle), C17 (update channel),
+C18 (signing), C20 cross-CI. Partials: C4 (platform fields), C5, C7, C8, C10,
+C11, C12, C19.

@@ -79,6 +79,7 @@ check('app.asar contents', () => {
   const required = [
     '/src/main.mjs',
     '/src/engine.mjs',
+    '/src/meta.mjs',
     '/src/redact.mjs',
     '/src/preload.cjs',
     '/src/home.html',

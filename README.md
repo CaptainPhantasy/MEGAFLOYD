@@ -109,9 +109,10 @@ Invocation: `megafloyd --web` with `MEGAFLOYD_HOME`, `MEGAFLOYD_WEB_PORT`,
 
 ## Status
 
-Working and verified on this machine: build, 14/14 structural checks, headless handoff,
-window + platform UI load, PTY spawn from the packaged tree, clean shutdown, no legacy
-`~/.config/floyd` writes with a fresh `MEGAFLOYD_HOME`.
+Working and verified on this machine: build, 21/21 unit tests, 14/14 structural checks,
+headless handoff, meta capability handshake with major-version refusal, window + platform
+UI load, PTY spawn from the packaged tree, clean shutdown, no legacy `~/.config/floyd`
+writes with a fresh `MEGAFLOYD_HOME`.
 
 Not yet:
 
@@ -119,7 +120,7 @@ Not yet:
 - Auto-update — deliberately removed; needs a MEGAFLOYD-owned feed.
 - Windows/Linux packaging — the base app is arm64 macOS.
 - Session store reconciliation between the Go chassis and the web engine (spec C6).
-- Capability handshake against `/api/v1/meta` (spec C4) and a diagnostics bundle (C16).
+- Diagnostics bundle (spec C16).
 - The web UI does not yet consume the desktop badge/notification calls.
 
 ## Provenance

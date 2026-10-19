@@ -85,6 +85,22 @@ the IPC bridge, so the diagnostics copy cannot carry the token either.
 `bridge: "object"` proves the sandboxed preload loaded from inside `app.asar`;
 `windowTitle: "MEGAFLOYD"` proves native branding survives the UI's own document title.
 
+## Capability handshake (`/api/v1/meta`, spec C4)
+
+```
+engineVersion: "2.0.2"
+protocolMajor: 2
+capabilities: { websocket, file_upload, fs_query, mcp, tasks, terminal }
+metaWarnings: []
+```
+
+The descriptor is fetched with the token from the ready URL fragment before the window
+navigates. Unit tests cover the pinned contract, a major-3 refusal (including a declared
+`protocol_version`), unknown capabilities, missing advertised capabilities, failed
+features, a 401, and a non-zero envelope. `platformCommit` is `null` because the pinned
+engine does not report it; the status page shows the build provenance commit with a
+`(bundled)` marker.
+
 ## Live launch and shutdown
 
 - `MEGAFLOYD_HOME=/tmp/mf-live ./MEGAFLOYD.app/Contents/MacOS/MEGAFLOYD` → listener on
