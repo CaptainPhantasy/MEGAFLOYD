@@ -918,6 +918,16 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// itself is still wrapped from the coder's side.
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, postToolHookRunner, isSubAgent)
 
+	// Active-job scope enforcement runs inside the plan guard so plan mode
+	// remains authoritative for its own file, and outside the hook wrapper
+	// so a scope denial is decided before user hooks and tool permissions.
+	filteredTools = wrapToolsWithScopeGuard(
+		filteredTools,
+		c.cfg.Config().Options.DataDirectory,
+		plans,
+		c.cfg.WorkingDir(),
+	)
+
 	// Plan mode enforcement runs outside the hook wrapper so a plan
 	// denial is decided before user hooks and tool permissions.
 	filteredTools = wrapToolsWithPlanGuard(filteredTools, plans, c.permissions, c.cfg.WorkingDir())
