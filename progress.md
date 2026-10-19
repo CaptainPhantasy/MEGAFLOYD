@@ -111,3 +111,13 @@ it; no config was changed. After install the same build exits 0.
 
 - 2026-10-19 ~01:20: checkpoint written (process fix). Wave 3 still running. Web/backend correction recorded: exists, ships as-is, nothing rebuilt.
 - 2026-10-19 ~02:30: OWNER-CONFIRMED GAP. Intelligence layer content was never ported: donor-only templates (floyd_protocol, floyd-general, protocol_kernel, superfloyd-coder, mcp_tools_reference, deterministic/) absent; 7 same-name templates differ; prompt assembly (prompt.go vs prompts.go) unreconciled; chassis runs stock Crush coder.md.tpl; prompt-pack is inert. Fix work dispatched (work/intelligence-prompt). Verification must be behavioral: assembled-prompt diff vs donor, not file presence.
+- 2026-10-19 ~02:30: INTELLIGENCE LAYER PORTED AND MERGED (work/intelligence-prompt, c8550b5).
+  Templates byte-identical to donor (8/8 shasum MATCH): protocol_kernel, floyd_protocol,
+  floyd-general, superfloyd-coder, initialize, summary, title, agentic_fetch + deterministic/.
+  Kernel injected as its own system message after prefix, before role. Dynamic context
+  (cwd/git/date/.supercache) now built via BuildCacheablePrompts (was dead code) and injected
+  uncached. PromptDat extended with AvailMCPXML/AvailPluginXML/PluginInstrXML (empty until
+  chassis registry exposes XML helpers; runtime MCP instructions already injected separately).
+  Gates: build 0; agent suite -race green; render + selection + kernel tests PASS.
+  Binary rebuilt: dist/darwin-arm64/megafloyd, version c3d2f6f, smoke OK.
+  UNVERIFIED: live provider session (no credentials exercised), real API-call kernel position.
