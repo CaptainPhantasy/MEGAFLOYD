@@ -86,6 +86,7 @@ func init() {
 		promptCmd,
 		scoreboardCmd,
 		resilienceCmd,
+		adminCmd,
 	)
 }
 
