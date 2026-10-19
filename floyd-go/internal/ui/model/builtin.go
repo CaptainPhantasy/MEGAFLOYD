@@ -20,6 +20,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/clipboard"
 	"github.com/legacy-ai/floyd/internal/commands"
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/megafloydweb"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/shell"
@@ -75,6 +76,8 @@ const (
 	handlerFeedback
 	handlerReload
 	handlerReloadTUI
+	handlerWeb
+	handlerRemoteControl
 )
 
 // builtinHandlerFor maps a canonical command name to its handler.
@@ -150,6 +153,10 @@ func builtinHandlerFor(name string) builtinHandlerID {
 		return handlerReload
 	case "reload-tui":
 		return handlerReloadTUI
+	case "web":
+		return handlerWeb
+	case "remote-control":
+		return handlerRemoteControl
 	default:
 		return handlerUnknown
 	}
@@ -372,6 +379,12 @@ func (m *UI) runBuiltin(name, args string, fromPalette bool) tea.Cmd {
 		return func() tea.Msg {
 			return builtinResultMsg{Info: "UI styles reapplied.", ReloadTUI: true}
 		}
+
+	case handlerWeb:
+		return m.runWebHandoff(false)
+
+	case handlerRemoteControl:
+		return m.runWebHandoff(true)
 
 	default:
 		return nil
@@ -1194,6 +1207,43 @@ func (m *UI) reapplyTUI() {
 	m.notifyBackend = selectNotificationBackend(m.caps, cfg)
 	m.isTransparent = cfg.Options != nil && cfg.Options.TUI.IsTransparent()
 	m.updateLayoutAndSize()
+}
+
+// runWebHandoff starts or reuses the Node web server and reports the URL
+// that opens the current workspace. The engine owns the port, executable,
+// bundle, and environment defaults; the UI supplies the workspace and the
+// active session. All IO happens inside the returned command, never in
+// Update.
+func (m *UI) runWebHandoff(remote bool) tea.Cmd {
+	opts := megafloydweb.Options{
+		CWD: m.com.Workspace.WorkingDir(),
+	}
+	if m.session != nil {
+		opts.SessionID = m.session.ID
+	}
+	label := "web server"
+	if remote {
+		label = "remote control"
+	}
+	start := megafloydweb.StartWeb
+	if remote {
+		start = megafloydweb.StartRemoteControl
+	}
+	return func() tea.Msg {
+		result, err := start(context.Background(), opts)
+		if err != nil {
+			return builtinResultMsg{Err: fmt.Errorf("failed to start %s: %w", label, err)}
+		}
+		url := result.URL
+		if remote {
+			url = result.RemoteControlURL
+		}
+		return builtinResultMsg{
+			Title: "Web UI",
+			Body:  url,
+			Info:  strings.Join(result.Warnings, "\n"),
+		}
+	}
 }
 
 // runBtw runs a one-shot side completion in a temporary session that is
