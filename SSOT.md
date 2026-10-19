@@ -84,6 +84,12 @@ separation between owner intent and agent implementation is mandatory.
 25. UI extras: config audit dialog, MCP dialog, rename session, diffview
     chroma syntax, terminal component/session, prompt usage display
 26. Node MCP bridges wired as config: room, steer, supercache, terminal
+27. [OWNER-DIRECTIVE 2026-10-19] Output-simplification engine: the agent is
+    forced to simplify every output — short lines, plain words, decision
+    first, at-a-glance readable on a phone. Not because the owner is
+    non-technical; because he runs many sessions and his cognitive
+    bandwidth must not be spent decoding prose or buzzwords. Never make him
+    ask for a repeat.
 
 ### C. Packaging & delivery (wave 4)
 27. `megafloyd` launcher binary + own home dir; MEGAFLOYD_* env namespace;
