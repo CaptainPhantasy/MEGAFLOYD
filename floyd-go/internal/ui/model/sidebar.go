@@ -115,6 +115,8 @@ func (m *UI) updateSidebarScrollState() {
 		mcpSection,
 		"",
 		skillsSection,
+		"",
+		m.promptQuotaInfo(contentWidth),
 	)
 
 	totalLines := strings.Count(content, "\n") + 1

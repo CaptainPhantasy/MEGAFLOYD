@@ -21,6 +21,12 @@ type KeyMap struct {
 		HistoryPrev key.Binding
 		HistoryNext key.Binding
 
+		// AcceptSuggestion accepts the inline ghost-text suggestion.
+		AcceptSuggestion key.Binding
+
+		// StashPrompt shelves the current draft and recalls it later.
+		StashPrompt key.Binding
+
 		// CopySelection copies the current textarea selection to the
 		// clipboard.
 		CopySelection key.Binding
@@ -174,6 +180,14 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.HistoryNext = key.NewBinding(
 		key.WithKeys("down"),
+	)
+	km.Editor.AcceptSuggestion = key.NewBinding(
+		key.WithKeys(AcceptSuggestionPrimaryBinding, "ctrl+]"),
+		key.WithHelp("^y/^]", "accept suggestion"),
+	)
+	km.Editor.StashPrompt = key.NewBinding(
+		key.WithKeys("alt+s"),
+		key.WithHelp("alt+s", "stash/recall"),
 	)
 	km.Editor.CopySelection = key.NewBinding(
 		key.WithKeys("ctrl+shift+c"),

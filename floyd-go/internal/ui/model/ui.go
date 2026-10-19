@@ -156,6 +156,15 @@ type (
 	// closeDialogMsg is sent to close the current dialog.
 	closeDialogMsg struct{}
 
+	// promptUsageLoadedMsg is sent when local prompt usage has been loaded.
+	promptUsageLoadedMsg struct {
+		userMessages map[string]int64
+	}
+
+	// promptUsageRefreshTickMsg is sent periodically to refresh prompt
+	// usage.
+	promptUsageRefreshTickMsg struct{}
+
 	// hyperRefreshDoneMsg is sent after a silent Hyper OAuth refresh
 	// finishes. It carries the original model-selection action so the
 	// selection can be resumed.
@@ -270,6 +279,16 @@ type UI struct {
 	completionsStartIndex    int
 	completionsQuery         string
 	completionsPositionStart image.Point // x,y where user typed '@'
+
+	// commandSuggestion holds the inline ghost-text suggestion shown after
+	// the caret in the editor (history-based; see suggestion.go).
+	commandSuggestion string
+	// stashedPrompt holds text shelved with the stash key (alt+s) so an
+	// interrupted draft can be recalled after sending something else.
+	stashedPrompt string
+	// localUserMessages tracks local user-message timestamps keyed by
+	// message ID for the prompt-quota panel (see prompt_usage.go).
+	localUserMessages map[string]int64
 
 	// Chat components
 	chat *Chat
@@ -462,6 +481,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		todoSpinner:         todoSpinner,
 		lspStates:           make(map[string]workspace.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
+		localUserMessages:   make(map[string]int64),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
 		initialSessionID:    initialSessionID,
@@ -534,6 +554,9 @@ func (m *UI) Init() tea.Cmd {
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
+	// load prompt usage and start its refresh ticker
+	cmds = append(cmds, m.loadPromptUsage())
+	cmds = append(cmds, m.startPromptUsageRefreshTicker())
 	// Prime the memoized LSP state off-thread.
 	if cmd := m.requestLSPRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -670,6 +693,10 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 	m.focus = focus
 	// Changing the state may change layout, so update it.
 	m.updateLayoutAndSize()
+	// Update command suggestion when focus changes to editor.
+	if focus == uiFocusEditor {
+		m.updateCommandSuggestion()
+	}
 }
 
 // loadCustomCommands loads the custom commands asynchronously.
@@ -722,6 +749,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notifyWindowFocused = true
 	case tea.BlurMsg:
 		m.notifyWindowFocused = false
+	case app.ToolProgressMsg:
+		// Live tool progress from the tools progress broker (forwarded
+		// by internal/app). Shown in the status bar while a tool runs;
+		// a completion clears it. Client/server mode drops these at the
+		// server event envelope — TODO(port-wave4) proto payload.
+		switch msg.Status {
+		case "completed":
+			m.status.ClearInfoMsg()
+		case "started", "in_progress":
+			if msg.Message != "" {
+				m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: msg.Message})
+			}
+		}
+
 	case pubsub.Event[notify.Notification]:
 		if cmd := m.handleAgentNotification(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -855,6 +896,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.promptHistory.messages = msg.messages
 		m.promptHistory.index = -1
 		m.promptHistory.draft = ""
+		m.updateCommandSuggestion()
+
+	case promptUsageLoadedMsg:
+		m.localUserMessages = msg.userMessages
+
+	case promptUsageRefreshTickMsg:
+		// Reload prompt usage and schedule the next refresh.
+		cmds = append(cmds, m.loadPromptUsage())
+		cmds = append(cmds, m.startPromptUsageRefreshTicker())
 
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
@@ -891,6 +941,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autoExpandPillsIfReasonable()
 		}
 	case pubsub.Event[message.Message]:
+		// Track local user-message counts for the prompt-quota panel.
+		if msg.Payload.Role == message.User {
+			switch msg.Type {
+			case pubsub.CreatedEvent, pubsub.UpdatedEvent:
+				if m.localUserMessages == nil {
+					m.localUserMessages = make(map[string]int64)
+				}
+				m.localUserMessages[msg.Payload.ID] = msg.Payload.CreatedAt
+			case pubsub.DeletedEvent:
+				delete(m.localUserMessages, msg.Payload.ID)
+			}
+		}
 		// Check if this is a child session message for an agent tool.
 		if m.session == nil {
 			break
@@ -1911,6 +1973,41 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.SessionsID)
 		cmds = append(cmds, m.loadSession(msg.Session.ID))
 
+	// Agent library dialog messages.
+	case dialog.ActionSelectAgent:
+		m.dialog.CloseDialog(dialog.AgentLibraryID)
+		// Insert agent prompt into editor.
+		prompt := fmt.Sprintf("# %s\n\n%s", msg.AgentName, msg.SystemPrompt)
+		m.textarea.SetValue(prompt)
+		m.textarea.Focus()
+		m.setState(m.state, uiFocusEditor)
+
+	// Skills library dialog messages.
+	case dialog.ActionSelectSkill:
+		m.dialog.CloseDialog(dialog.SkillsLibraryID)
+		// Insert skill content into editor.
+		content := fmt.Sprintf("# %s\n\n%s\n\n%s", msg.SkillName, msg.SkillDescription, msg.SkillContent)
+		m.textarea.SetValue(content)
+		m.textarea.Focus()
+		m.setState(m.state, uiFocusEditor)
+
+	case dialog.ActionRenameSession:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if m.session != nil {
+			if cmd := m.openRenameSessionDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+
+	case dialog.ActionToggleMCP:
+		cmds = append(cmds, m.toggleMCP(msg.Name))
+		// Refresh the MCP dialog to show updated state.
+		if dia := m.dialog.Dialog(dialog.MCPServersID); dia != nil {
+			if mcpDialog, ok := dia.(*dialog.MCPServers); ok {
+				mcpDialog.Refresh()
+			}
+		}
+
 	// Open dialog message.
 	case dialog.ActionOpenDialog:
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -2698,6 +2795,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case key.Matches(msg, m.keyMap.Editor.AcceptSuggestion):
+				m.acceptCommandSuggestion()
+			case key.Matches(msg, m.keyMap.Editor.StashPrompt):
+				if cmd := m.stashRecallPrompt(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Editor.Escape):
 				cmd := m.handleHistoryEscape(msg)
 				if cmd != nil {
@@ -2746,6 +2849,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				prevHeight := m.textarea.Height()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+				m.updateCommandSuggestion()
 
 				// Bang mode: enter when "!" is typed at the start of the
 				// prompt, optionally preceded by whitespace (either on an
@@ -4118,7 +4222,7 @@ func (m *UI) renderEditorView(width int) string {
 	}
 	return strings.Join([]string{
 		attachmentsView,
-		m.textarea.View(),
+		m.renderEditorSuggestion(m.textarea.View()),
 		"", // margin at bottom of editor
 	}, "\n")
 }
@@ -4443,6 +4547,30 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.MCPServersID:
+		if cmd := m.openMCPServersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ConfigAuditID:
+		if cmd := m.openConfigAuditDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.AgentLibraryID:
+		if cmd := m.openAgentLibrary(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.SkillsLibraryID:
+		if cmd := m.openSkillsLibrary(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.PluginsLibraryID:
+		if cmd := m.openPluginsLibrary(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.RenameSessionID:
+		if cmd := m.openRenameSessionDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4578,6 +4706,151 @@ func (m *UI) openFilesDialog() tea.Cmd {
 	event.FilePickerOpened()
 
 	return cmd
+}
+
+// openMCPServersDialog opens the MCP servers dialog.
+func (m *UI) openMCPServersDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MCPServersID) {
+		m.dialog.BringToFront(dialog.MCPServersID)
+		return nil
+	}
+
+	mcpDialog, err := dialog.NewMCPServers(m.com)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(mcpDialog)
+	return nil
+}
+
+// toggleMCP toggles the enabled/disabled state of an MCP server and
+// persists the change through the workspace config store.
+func (m *UI) toggleMCP(name string) tea.Cmd {
+	cfg := m.com.Config()
+
+	mcpConfig, exists := cfg.MCP[name]
+	if !exists {
+		return util.ReportError(fmt.Errorf("MCP server %q not found", name))
+	}
+
+	mcpConfig.Disabled = !mcpConfig.Disabled
+	cfg.MCP[name] = mcpConfig
+
+	if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "mcp."+name+".disabled", mcpConfig.Disabled); err != nil {
+		return util.ReportError(fmt.Errorf("failed to save MCP config: %w", err))
+	}
+
+	status := "enabled"
+	if mcpConfig.Disabled {
+		status = "disabled"
+	}
+	return util.CmdHandler(util.NewInfoMsg(fmt.Sprintf("MCP server %q %s (restart session to apply)", name, status)))
+}
+
+// openConfigAuditDialog opens the config audit dialog.
+func (m *UI) openConfigAuditDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ConfigAuditID) {
+		m.dialog.BringToFront(dialog.ConfigAuditID)
+		return nil
+	}
+
+	// Find project config path.
+	cfg := m.com.Config()
+	globalConfigPath := config.GlobalConfig()
+	var projectConfigPath string
+
+	if cfg != nil {
+		workingDir := m.com.Workspace.WorkingDir()
+		// Look for project-level config.
+		configNames := []string{"floyd.json", ".floyd.json"}
+		for _, name := range configNames {
+			path := filepath.Join(workingDir, name)
+			if _, err := os.Stat(path); err == nil {
+				projectConfigPath = path
+				break
+			}
+		}
+	}
+
+	// Run the audit.
+	audit := dialog.RunConfigAudit(globalConfigPath, projectConfigPath, nil)
+
+	configAuditDialog, err := dialog.NewConfigAudit(m.com, audit)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(configAuditDialog)
+	return nil
+}
+
+// openAgentLibrary opens the agent library dialog.
+func (m *UI) openAgentLibrary() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.AgentLibraryID) {
+		// Bring to front if already open.
+		m.dialog.BringToFront(dialog.AgentLibraryID)
+		return nil
+	}
+
+	agentLibrary, err := dialog.NewAgentLibrary(m.com, config.GlobalAgentsDirs())
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(agentLibrary)
+	return nil
+}
+
+// openSkillsLibrary opens the skills library dialog.
+func (m *UI) openSkillsLibrary() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SkillsLibraryID) {
+		// Bring to front if already open.
+		m.dialog.BringToFront(dialog.SkillsLibraryID)
+		return nil
+	}
+
+	skillsLibrary, err := dialog.NewSkillsLibrary(m.com, config.GlobalSkillsDirs())
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(skillsLibrary)
+	return nil
+}
+
+// openPluginsLibrary opens the plugins (MCP servers) library dialog.
+func (m *UI) openPluginsLibrary() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.PluginsLibraryID) {
+		// Bring to front if already open.
+		m.dialog.BringToFront(dialog.PluginsLibraryID)
+		return nil
+	}
+
+	pluginsLibrary, err := dialog.NewPluginsLibrary(m.com)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(pluginsLibrary)
+	return nil
+}
+
+// openRenameSessionDialog opens the rename session dialog for the
+// current session.
+func (m *UI) openRenameSessionDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.RenameSessionID) {
+		m.dialog.BringToFront(dialog.RenameSessionID)
+		return nil
+	}
+
+	if m.session == nil {
+		return util.ReportWarn("No active session to rename")
+	}
+
+	renameDialog, _ := dialog.NewRenameSession(m.com, *m.session)
+	m.dialog.OpenDialog(renameDialog)
+	return nil
 }
 
 // openPermissionsDialog opens the permissions dialog for a permission request.

@@ -275,10 +275,30 @@ type TUIOptions struct {
 	// Here we can add themes later or any TUI related options
 	//
 
-	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
-	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
-	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Floyd,enum=default,enum=compact,enum=none,default=default"`
+	Completions Completions        `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool              `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	Scrollbar   string             `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	ExitBanner  ExitBanner         `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Floyd,enum=default,enum=compact,enum=none,default=default"`
+	PromptQuota *PromptQuotaConfig `json:"prompt_quota,omitempty" jsonschema:"description=Prompt usage quota display settings"`
+}
+
+// BudgetConfig is the configuration surface for per-session token
+// budgets; see internal/agent.TokenBudget for enforcement.
+type BudgetConfig struct {
+	// MaxUSD is the maximum spend in USD for a single session.
+	MaxUSD float64 `json:"max_usd,omitempty" jsonschema:"description=Maximum token spend in USD per session,example=5.0,example=10.0"`
+	// WarnPercent is the percentage of the budget at which a warning is
+	// injected into the conversation. Default: 80.
+	WarnPercent float64 `json:"warn_percent,omitempty" jsonschema:"description=Percentage of budget at which a warning is injected,example=80,default=80"`
+}
+
+// PromptQuotaConfig controls prompt usage tracking and display.
+type PromptQuotaConfig struct {
+	Enabled       *bool `json:"enabled,omitempty" jsonschema:"description=Show prompt quota in sidebar,default=true"`
+	Limit5h       int   `json:"limit_5h,omitempty" jsonschema:"description=5-hour prompt limit for warnings,default=1600"`
+	Limit7d       int   `json:"limit_7d,omitempty" jsonschema:"description=7-day prompt limit for warnings,default=8000"`
+	WarnPercent   int   `json:"warn_percent,omitempty" jsonschema:"description=Percentage at which to show warning color (yellow),default=75"`
+	DangerPercent int   `json:"danger_percent,omitempty" jsonschema:"description=Percentage at which to show danger color (red),default=90"`
 }
 
 // IsTransparent reports whether the TUI draws a transparent background. The
@@ -368,17 +388,18 @@ type Options struct {
 	// the SQLite database and workspace overrides. Relative paths are
 	// resolved against the working directory; absolute paths are used
 	// verbatim. After defaulting the stored value is always absolute.
-	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.floyd,example=.floyd"`
-	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
-	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
-	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
-	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
-	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
-	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=FLOYD.md,example=CLAUDE.md,example=docs/LLMs.md"`
-	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
-	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
-	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
-	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=floyd-config"`
+	DataDirectory             string        `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.floyd,example=.floyd"`
+	DisabledTools             []string      `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
+	DisableProviderAutoUpdate bool          `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	DisableDefaultProviders   bool          `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
+	Attribution               *Attribution  `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
+	DisableMetrics            bool          `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	InitializeAs              string        `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=FLOYD.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	AutoLSP                   *bool         `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
+	Progress                  *bool         `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
+	Notifications             string        `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
+	DisabledSkills            []string      `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=floyd-config"`
+	Budget                    *BudgetConfig `json:"budget,omitempty" jsonschema:"description=Token budget settings for cost control"`
 }
 
 type MCPs map[string]MCPConfig

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -80,6 +81,24 @@ floyd run --continue "Follow up on your last response"
 		if err != nil {
 			slog.Error("Failed to read from stdin", "error", err)
 			return err
+		}
+
+		// SuperFloyd lane guards (see superfloyd_resilience.go). These are
+		// no-ops outside the superfloyd binary lane. The gates must stay
+		// lane-gated: the chassis client path connects to (and spawns)
+		// the server only after this point, so an ungated gate would
+		// abort short prompts before the server ever comes up.
+		//
+		// TODO(port-wave4): enforceRetryBudget/maybeTripCircuitBreaker/
+		// recordRunSuccess need the resolved per-workspace data directory,
+		// which both chassis run paths construct only after this point;
+		// wire them when the guard layer can see the workspace.
+		SetupSuperFloydMode(filepath.Base(os.Args[0]))
+		prompt = applyAutoStabilizeIfNeeded(ctx, nil, prompt)
+		if isSuperFloydBinary() {
+			if gate := applyRunQualityGates(prompt); gate.Enabled && len(gate.Violations) > 0 {
+				return fmt.Errorf("run quality gates blocked execution: %s", strings.Join(gate.Violations, "; "))
+			}
 		}
 
 		if prompt == "" {

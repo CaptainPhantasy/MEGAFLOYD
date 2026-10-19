@@ -179,5 +179,5 @@ func TestHardeningStaleBackupFileAbsent(t *testing.T) {
 
 // The donor's repo-wide hygiene tests (no context.TODO() under internal/,
 // no TODO/FIXME markers in internal/agent/) were not ported: the chassis
-// legitimately carries TODO markers, including the TODO(port-wave3)
+// legitimately carries TODO markers, including the TODO(port-wave4)
 // deferrals required by the port plan.

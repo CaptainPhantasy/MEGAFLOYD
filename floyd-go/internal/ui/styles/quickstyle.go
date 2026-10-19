@@ -733,6 +733,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.PromptBangDotsBlurred = s.Editor.PromptBangDotsFocused.Foreground(o.fgMoreSubtle)
 	s.Editor.PromptQuestionIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgBase).Background(o.primary).Bold(true).SetString(" ? ")
 	s.Editor.PromptQuestionIconBlurred = s.Editor.PromptQuestionIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+
+	// Ghost-text suggestions render faintly after the caret.
+	s.Editor.GhostSuggestion = lipgloss.NewStyle().Foreground(o.fgSubtle).Faint(true)
 	s.Editor.QuestionSelected = lipgloss.NewStyle().Foreground(o.secondary).Bold(true)
 	s.Editor.QuestionUnselected = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Editor.QuestionBody = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
@@ -833,6 +836,13 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Sidebar
 	s.Sidebar.SessionTitle = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Sidebar.WorkingDir = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+
+	// Prompt-quota panel in the sidebar.
+	s.Sidebar.QuotaTitle = subtle
+	s.Sidebar.QuotaOk = base.Foreground(o.success)
+	s.Sidebar.QuotaWarn = base.Foreground(o.warning)
+	s.Sidebar.QuotaDanger = base.Foreground(o.error)
+	s.Sidebar.QuotaNote = muted
 
 	// ModelInfo
 	s.ModelInfo.Icon = lipgloss.NewStyle().Foreground(o.fgMostSubtle)

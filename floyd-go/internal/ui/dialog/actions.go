@@ -67,6 +67,10 @@ type (
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
+	// ActionRenameSession is a message to open the rename session dialog.
+	ActionRenameSession struct {
+		SessionID string
+	}
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction
@@ -83,6 +87,25 @@ type (
 	ActionAttachSkill struct {
 		ID   string
 		Name string
+	}
+	// ActionToggleMCP is a message to toggle an MCP server's enabled state.
+	ActionToggleMCP struct {
+		Name string
+	}
+	// ActionSelectAgent is a message indicating an agent has been selected
+	// from the agent library.
+	ActionSelectAgent struct {
+		AgentName        string
+		AgentDescription string
+		SystemPrompt     string
+	}
+	// ActionSelectSkill is a message indicating a skill has been selected
+	// from the skills library.
+	ActionSelectSkill struct {
+		SkillName        string
+		SkillDescription string
+		SkillContent     string
+		SkillCategory    string
 	}
 	// ActionRunMCPPrompt is a message to run a custom command.
 	ActionRunMCPPrompt struct {

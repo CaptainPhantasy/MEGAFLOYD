@@ -451,11 +451,15 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
+		NewCommandItem(c.com.Styles, "agent_library", "Agent Library", "", ActionOpenDialog{AgentLibraryID}),
+		NewCommandItem(c.com.Styles, "skills_library", "Skills Library", "", ActionOpenDialog{SkillsLibraryID}),
+		NewCommandItem(c.com.Styles, "plugins_library", "Plugins Library", "", ActionOpenDialog{PluginsLibraryID}),
 	}
 
 	// Only show compact command if there's an active session
 	if c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "rename_session", "Rename Session", "", ActionRenameSession{SessionID: c.sessionID}))
 	}
 
 	// Add reasoning toggle for models that support it
@@ -537,6 +541,8 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	commands = append(
 		commands,
 		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "ctrl+y", ActionToggleYoloMode{}),
+		NewCommandItem(c.com.Styles, "toggle_mcp", "MCP Servers", "", ActionOpenDialog{MCPServersID}),
+		NewCommandItem(c.com.Styles, "config_audit", "Config Audit", "", ActionOpenDialog{ConfigAuditID}),
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)

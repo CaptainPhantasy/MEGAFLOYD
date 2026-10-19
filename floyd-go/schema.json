@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/charmbracelet/floyd/internal/config/config",
+  "$id": "https://github.com/legacy-ai/floyd/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
     "Attribution": {
@@ -24,6 +24,28 @@
           "type": "boolean",
           "description": "Add Generated with Floyd line to commit messages and issues and PRs",
           "default": true
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "BudgetConfig": {
+      "properties": {
+        "max_usd": {
+          "type": "number",
+          "description": "Maximum token spend in USD per session",
+          "examples": [
+            5.0,
+            10.0
+          ]
+        },
+        "warn_percent": {
+          "type": "number",
+          "description": "Percentage of budget at which a warning is injected",
+          "default": 80,
+          "examples": [
+            80
+          ]
         }
       },
       "additionalProperties": false,
@@ -100,6 +122,10 @@
           "type": "object",
           "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
         },
+        "heartbeat": {
+          "$ref": "#/$defs/HeartbeatConfig",
+          "description": "Keep-alive loop that re-prompts the model after each completed turn so it does not sit idle between turns"
+        },
         "env": {
           "additionalProperties": {
             "type": "string"
@@ -110,6 +136,35 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "HeartbeatConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable the heartbeat auto-continue loop",
+          "default": false
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Synthetic user message sent on each heartbeat tick",
+          "default": "[built-in]"
+        },
+        "max_consecutive": {
+          "type": "integer",
+          "description": "Maximum consecutive heartbeat continuations before the harness stops and waits for the user",
+          "default": 25
+        },
+        "cooldown_seconds": {
+          "type": "integer",
+          "description": "Seconds to wait after a completed turn before the heartbeat prompt fires",
+          "default": 2
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "enabled"
+      ]
     },
     "HookConfig": {
       "properties": {
@@ -477,6 +532,11 @@
           "type": "array",
           "description": "Paths to directories containing Agent Skills (folders with SKILL.md files)"
         },
+        "agent_name": {
+          "type": "string",
+          "description": "Identity name injected into prompt templates (overridden by FLOYD_IDENTITY env)",
+          "default": "Floyd"
+        },
         "tui": {
           "$ref": "#/$defs/TUIOptions",
           "description": "Terminal user interface options"
@@ -576,6 +636,10 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "budget": {
+          "$ref": "#/$defs/BudgetConfig",
+          "description": "Token budget settings for cost control"
         }
       },
       "additionalProperties": false,
@@ -593,6 +657,37 @@
           },
           "type": "array",
           "description": "List of tools that don't require permission prompts"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "PromptQuotaConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Show prompt quota in sidebar",
+          "default": true
+        },
+        "limit_5h": {
+          "type": "integer",
+          "description": "5-hour prompt limit for warnings",
+          "default": 1600
+        },
+        "limit_7d": {
+          "type": "integer",
+          "description": "7-day prompt limit for warnings",
+          "default": 8000
+        },
+        "warn_percent": {
+          "type": "integer",
+          "description": "Percentage at which to show warning color (yellow)",
+          "default": 75
+        },
+        "danger_percent": {
+          "type": "integer",
+          "description": "Percentage at which to show danger color (red)",
+          "default": 90
         }
       },
       "additionalProperties": false,
@@ -825,6 +920,10 @@
           ],
           "description": "Exit banner style after quitting Floyd",
           "default": "default"
+        },
+        "prompt_quota": {
+          "$ref": "#/$defs/PromptQuotaConfig",
+          "description": "Prompt usage quota display settings"
         }
       },
       "additionalProperties": false,

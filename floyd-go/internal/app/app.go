@@ -604,6 +604,11 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
 	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "run-completions", app.runCompletions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
+	app.serviceEventsWG.Add(1)
+	go func() {
+		defer app.serviceEventsWG.Done()
+		app.forwardToolProgress(ctx)
+	}()
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
 	if app.Skills != nil {
 		setupSubscriber(ctx, app.serviceEventsWG, "skills", app.Skills.SubscribeEvents, app.events)

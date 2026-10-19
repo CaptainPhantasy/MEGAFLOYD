@@ -16,9 +16,6 @@ import (
 // task dispatch. It wraps the existing Coordinator and adds a task queue,
 // agent assignment, and result collection protocol.
 //
-// TODO(port-wave3): no chassis consumer yet — the v5.3 line drives swarm
-// dispatch from the command layer; wire it there when cmd lands.
-//
 // Usage:
 //
 //	swarm := NewSwarmCoordinator(coordinator)
