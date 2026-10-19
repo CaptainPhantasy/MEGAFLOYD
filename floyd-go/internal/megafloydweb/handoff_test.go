@@ -58,6 +58,26 @@ func TestStartFailsBeforeServeWhenTheServerIsMissing(t *testing.T) {
 	require.Contains(t, err.Error(), "does not point at a file")
 }
 
+func TestStartHonorsProvidedPaths(t *testing.T) {
+	t.Parallel()
+
+	bundle := filepath.Join(t.TempDir(), "dist-web")
+	writeFixture(t, filepath.Join(bundle, "index.html"))
+	missingServer := filepath.Join(t.TempDir(), "missing.mjs")
+
+	_, err := Start(context.Background(), Options{
+		HomeDir:       t.TempDir(),
+		Port:          freePort(t),
+		SkipTailscale: true,
+		NodePath:      "/opt/node",
+		Paths:         Paths{Server: missingServer, Bundle: bundle},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not point at a file",
+		"the caller-supplied server path must be used instead of a fresh search")
+}
+
 func TestWaitRemoteControlURLReadsTheLock(t *testing.T) {
 	t.Parallel()
 

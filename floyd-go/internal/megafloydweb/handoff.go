@@ -164,12 +164,24 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if !alreadyRunning {
 		paths = opts.Paths
 		if paths.Server == "" || paths.Node == "" || paths.Bundle == "" {
+			nodePath := opts.NodePath
+			if nodePath == "" {
+				nodePath = paths.Node
+			}
+			serverPath := opts.ServerPath
+			if serverPath == "" {
+				serverPath = paths.Server
+			}
+			bundlePath := opts.BundlePath
+			if bundlePath == "" {
+				bundlePath = paths.Bundle
+			}
 			resolved, err := Resolve(ResolveOptions{
 				CWD:        opts.CWD,
 				Executable: opts.Executable,
-				NodePath:   opts.NodePath,
-				ServerPath: opts.ServerPath,
-				BundlePath: opts.BundlePath,
+				NodePath:   nodePath,
+				ServerPath: serverPath,
+				BundlePath: bundlePath,
 			})
 			if err != nil {
 				return Result{}, err
