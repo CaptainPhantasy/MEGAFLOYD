@@ -781,12 +781,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewProjectMapTool(c.cfg.WorkingDir()),
 		tools.NewManageScratchpadTool(c.cfg.WorkingDir()),
 		tools.NewListSymbolsTool(c.cfg.WorkingDir()),
-		tools.NewApplyPatchTool(c.cfg.WorkingDir()),
-		tools.NewSmartReplaceTool(c.cfg.WorkingDir()),
+		tools.NewApplyPatchTool(c.permissions, c.cfg.WorkingDir()),
+		tools.NewSmartReplaceTool(c.permissions, c.cfg.WorkingDir()),
 		tools.NewGetActiveDiffTool(c.cfg.WorkingDir()),
-		tools.NewSpawnLabTool(c.cfg.WorkingDir()),
-		tools.NewExecuteLabTool(),
-		tools.NewTeardownLabTool(),
+		tools.NewSpawnLabTool(c.permissions, c.cfg.WorkingDir()),
+		tools.NewExecuteLabTool(c.permissions),
+		tools.NewTeardownLabTool(c.permissions),
 	)
 
 	// Question tool is interactive-only and not available to sub-agents.

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"charm.land/fantasy"
+	"github.com/legacy-ai/floyd/internal/permission"
 )
 
 //go:embed apply_unified_diff.md
@@ -23,11 +24,33 @@ type ApplyPatchParams struct {
 	Patch string `json:"patch" jsonschema:"description=The unified diff block to apply (must be standard a/b diff format)"`
 }
 
-func NewApplyPatchTool(wd string) fantasy.AgentTool {
+func NewApplyPatchTool(permissions permission.Service, wd string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		"apply_patch",
 		string(applyUnifiedDiffDescription),
 		func(ctx context.Context, params ApplyPatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			// A unified diff can touch any file under the working
+			// directory, so the permission request covers the whole
+			// tree rather than a single path.
+			granted, err := permissions.Request(
+				ctx,
+				permission.CreatePermissionRequest{
+					SessionID:   GetSessionFromContext(ctx),
+					Path:        wd,
+					ToolCallID:  call.ID,
+					ToolName:    "apply_patch",
+					Action:      "write",
+					Description: "Apply a unified diff patch to the working directory",
+					Params:      params,
+				},
+			)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			if !granted {
+				return NewPermissionDeniedResponse(), nil
+			}
+
 			// Check if patch binary exists
 			patchBin, err := lookupBinary("patch")
 			if err != nil {

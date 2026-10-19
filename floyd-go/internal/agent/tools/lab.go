@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"charm.land/fantasy"
+	"github.com/legacy-ai/floyd/internal/permission"
 )
 
 const (
@@ -19,7 +20,7 @@ type SpawnLabParams struct {
 	Image     string `json:"image" jsonschema:"The Docker image to use (default: floyd-lab:full)"`
 }
 
-func NewSpawnLabTool(workingDir string) fantasy.AgentTool {
+func NewSpawnLabTool(permissions permission.Service, workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		SpawnLabToolName,
 		"Spawns a persistent, privileged Docker lab using ORBSTACK live mounts. The current host workspace is mirrored into the container at /workspace instantly.",
@@ -30,6 +31,27 @@ func NewSpawnLabTool(workingDir string) fantasy.AgentTool {
 			image := params.Image
 			if image == "" {
 				image = "floyd-lab:full"
+			}
+
+			// The lab mounts the host workspace and the Docker socket,
+			// so spawning it needs explicit permission like any other
+			// privileged execution.
+			granted, err := permissions.Request(
+				ctx,
+				permission.CreatePermissionRequest{
+					SessionID:   GetSessionFromContext(ctx),
+					ToolCallID:  call.ID,
+					ToolName:    SpawnLabToolName,
+					Action:      "execute",
+					Description: fmt.Sprintf("Spawn privileged Docker lab %q (image %s) mounting %s and the Docker socket", params.SessionID, image, workingDir),
+					Params:      params,
+				},
+			)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			if !granted {
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			// Force remove existing instance with context awareness
@@ -60,13 +82,31 @@ type ExecuteLabParams struct {
 	Command   string `json:"command" jsonschema:"The shell command to execute inside the persistent lab"`
 }
 
-func NewExecuteLabTool() fantasy.AgentTool {
+func NewExecuteLabTool(permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ExecuteLabToolName,
 		"Executes a command inside the active persistent lab and returns the output.",
 		func(ctx context.Context, params ExecuteLabParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.SessionID == "" || params.Command == "" {
 				return fantasy.NewTextErrorResponse("session_id and command are required"), nil
+			}
+
+			granted, err := permissions.Request(
+				ctx,
+				permission.CreatePermissionRequest{
+					SessionID:   GetSessionFromContext(ctx),
+					ToolCallID:  call.ID,
+					ToolName:    ExecuteLabToolName,
+					Action:      "execute",
+					Description: fmt.Sprintf("Execute in lab %s: %s", params.SessionID, params.Command),
+					Params:      params,
+				},
+			)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			if !granted {
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			args := []string{"exec", params.SessionID, "bash", "-c", params.Command}
@@ -84,13 +124,31 @@ type TeardownLabParams struct {
 	SessionID string `json:"session_id" jsonschema:"Unique identifier matching the spawned lab"`
 }
 
-func NewTeardownLabTool() fantasy.AgentTool {
+func NewTeardownLabTool(permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		TeardownLabToolName,
 		"Destroys the persistent lab container and cleans up resources.",
 		func(ctx context.Context, params TeardownLabParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.SessionID == "" {
 				return fantasy.NewTextErrorResponse("session_id is required"), nil
+			}
+
+			granted, err := permissions.Request(
+				ctx,
+				permission.CreatePermissionRequest{
+					SessionID:   GetSessionFromContext(ctx),
+					ToolCallID:  call.ID,
+					ToolName:    TeardownLabToolName,
+					Action:      "execute",
+					Description: fmt.Sprintf("Tear down lab container %s", params.SessionID),
+					Params:      params,
+				},
+			)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			if !granted {
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			if err := exec.CommandContext(ctx, "docker", "rm", "-f", params.SessionID).Run(); err != nil {

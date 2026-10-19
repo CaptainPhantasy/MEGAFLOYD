@@ -3,11 +3,14 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/legacy-ai/floyd/internal/fsext"
+	"github.com/legacy-ai/floyd/internal/permission"
 )
 
 //go:embed smart_replace.md
@@ -19,7 +22,7 @@ type SmartReplaceParams struct {
 	Replace  string `json:"replace" jsonschema:"description=The new text block"`
 }
 
-func NewSmartReplaceTool(wd string) fantasy.AgentTool {
+func NewSmartReplaceTool(permissions permission.Service, wd string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		"smart_replace",
 		string(smartReplaceDescription),
@@ -33,6 +36,26 @@ func NewSmartReplaceTool(wd string) fantasy.AgentTool {
 
 			if strings.Contains(content, params.Search) {
 				newContent := strings.Replace(content, params.Search, params.Replace, 1)
+
+				granted, err := permissions.Request(
+					ctx,
+					permission.CreatePermissionRequest{
+						SessionID:   GetSessionFromContext(ctx),
+						Path:        fsext.PathOrPrefix(fullPath, wd),
+						ToolCallID:  call.ID,
+						ToolName:    "smart_replace",
+						Action:      "write",
+						Description: fmt.Sprintf("Replace text in %s", fullPath),
+						Params:      params,
+					},
+				)
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				if !granted {
+					return NewPermissionDeniedResponse(), nil
+				}
+
 				if err := os.WriteFile(fullPath, []byte(newContent), 0o644); err != nil {
 					return fantasy.NewTextResponse(err.Error()), nil
 				}
