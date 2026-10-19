@@ -32,6 +32,10 @@ export default defineConfig({
   },
   deps: {
     onlyBundle: false,
+    // `floyd web` must start from a fresh clone without node_modules. The
+    // runtime dependencies are bundled so the tracked dist/main.mjs is
+    // self-contained; the SEA config does the same for every non-builtin.
+    alwaysBundle: [/^qrcode$/, /^ws$/],
   },
   outputOptions: {
     codeSplitting: false,
