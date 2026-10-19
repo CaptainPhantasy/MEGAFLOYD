@@ -110,3 +110,4 @@ it; no config was changed. After install the same build exits 0.
   file phase B3 will read.
 
 - 2026-10-19 ~01:20: checkpoint written (process fix). Wave 3 still running. Web/backend correction recorded: exists, ships as-is, nothing rebuilt.
+- 2026-10-19 ~02:30: OWNER-CONFIRMED GAP. Intelligence layer content was never ported: donor-only templates (floyd_protocol, floyd-general, protocol_kernel, superfloyd-coder, mcp_tools_reference, deterministic/) absent; 7 same-name templates differ; prompt assembly (prompt.go vs prompts.go) unreconciled; chassis runs stock Crush coder.md.tpl; prompt-pack is inert. Fix work dispatched (work/intelligence-prompt). Verification must be behavioral: assembled-prompt diff vs donor, not file presence.
