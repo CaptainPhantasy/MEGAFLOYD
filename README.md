@@ -59,7 +59,7 @@ npx --yes pnpm@10.33.0 --filter @legacy-ai/floyd-code run build
 npx --yes pnpm@10.33.0 --filter @legacy-ai/floyd-code deploy --prod --legacy ../../platform/web
 ```
 
-Pinned at `platform-src/PLATFORM-COMMIT` (`1d15945`). `platform/` and `platform-src/`
+Pinned at `platform-src/PLATFORM-COMMIT` (`bd08789`). `platform/` and `platform-src/`
 are build inputs and are not committed.
 
 ## Desktop surfaces
@@ -128,6 +128,6 @@ Not yet:
 
 Base: Kimi desktop 3.2.17 (`3.2.17.4`, Electron 43.7.3), extracted from
 `kimi_3.2.17.dmg` (sha256 `9da2a4fc…`); the DMG ships a wrapper, the app is its
-`Contents/Helpers/Kimi.app`. Platform: commit `1d15945`, Floyd Code 2.0.2.
+`Contents/Helpers/Kimi.app`. Platform: commit `bd08789`, Floyd Code 2.0.2.
 The same data is written to `Contents/Resources/provenance.json` at build time.
 See `docs/REBRAND.md` for the mutation list and `specs.md` for the contract.

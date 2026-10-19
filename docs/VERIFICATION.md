@@ -2,7 +2,7 @@
 
 Machine: macOS (arm64), Electron 43.7.3, Node 26.9.0.
 Artifact: `MEGAFLOYD.app` 1.0.0, built from `vendor/Kimi-3.2.17-arm64.app` with the
-platform at `platform-src/PLATFORM-COMMIT` = `1d15945417b4db307962800b74457bb4c54cd4d5`.
+platform at `platform-src/PLATFORM-COMMIT` = `bd08789417b4db307962800b74457bb4c54cd4d5`.
 
 ## Build provenance
 
@@ -32,7 +32,7 @@ PASS  platform web embedded  17.6 MB server + bundle
 PASS  asar integrity fuse disabled  fuse off
 PASS  status page installed  6928 bytes
 PASS  icon installed  150625 bytes
-PASS  provenance recorded  Kimi 3.2.17 / Electron 43.7.3 / 1d15945
+PASS  provenance recorded  Kimi 3.2.17 / Electron 43.7.3 / bd08789
 PASS  code signature  ad-hoc signature valid
 PASS  no quarantine attribute  clean
 

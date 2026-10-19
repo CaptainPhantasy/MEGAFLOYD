@@ -7,8 +7,8 @@ binary (`platform-src/floyd-go`), the Node engine and web UI
 (`platform-src/floyd-code`, Floyd Code 2.0.2), and the owner's external
 services (auth server, MCP room).
 
-Pinned platform: `platform-src/PLATFORM-COMMIT` = `1d15945` (commit
-`1d15945417b4db307962800b74457bb4c54cd4d5`).
+Pinned platform: `platform-src/PLATFORM-COMMIT` = `bd08789` (commit
+`bd08789417b4db307962800b74457bb4c54cd4d5`).
 App version: 1.0.0. Engine version: 2.0.2. Go version: stamped at build.
 
 Rules for this document:
@@ -58,7 +58,7 @@ Rules for this document:
   `GET /api/v1/meta` (token-authenticated where required).
 - **MUST NOT**: the desktop persist the token in `localStorage`, logs, crash
   reports, or the status page.
-- NOTE (platform build `1d15945`): the engine keeps the token in memory and
+- NOTE (platform build `bd08789`): the engine keeps the token in memory and
   prints it in the ready line; a fresh home contains no `server.token` while
   the server runs. The desktop consumes the printed URL and does not depend on
   the file. The platform-side token-file MUST remains unmet.
@@ -104,7 +104,7 @@ Rules for this document:
   paths MUST NOT be written when a MEGAFLOYD home is set.
 - **MUST**: the engine receive the same home so config, skills, commands,
   jobs, plans, and the session store agree with the CLI.
-- Evidence: `config.mjs:8-22`; platform hardening landed in commit `1d15945`.
+- Evidence: `config.mjs:8-22`; platform hardening landed in commit `bd08789`.
 - Verified 2026-10-19: with a fresh `MEGAFLOYD_HOME`, a full run created nothing
   under `~/.config/floyd` or `~/.local/share/floyd` (mtime check).
 - Status: PARTIAL. Known leaks found in the platform audit:
@@ -302,7 +302,7 @@ Rules for this document:
   platform commit inside the artifact.
 - Evidence: `build.mjs` writes `Contents/Resources/provenance.json`; `verify.mjs`
   fails the gate when it is missing or incomplete (2026-10-19: Kimi 3.2.17 /
-  Electron 43.7.3 / platform `1d15945`).
+  Electron 43.7.3 / platform `bd08789`).
 - Status: PARTIAL — provenance is recorded and gated; Developer ID signing and
   notarization are deferred by the owner.
 - Acceptance: `codesign --verify --deep --strict` and `spctl` pass on a
@@ -340,7 +340,7 @@ Rules for this document:
 
 | Date | Change | Platform commit |
 |---|---|---|
-| 2026-10-19 | Initial draft from the desktop shell as built | `1d15945` |
+| 2026-10-19 | Initial draft from the desktop shell as built | `bd08789` |
 
 Open items, in contract order: C6 (unified store), C16 (bundle), C17 (update
 channel), C18 (signing), C20 cross-CI. Partials: C4 (platform fields), C5, C6
