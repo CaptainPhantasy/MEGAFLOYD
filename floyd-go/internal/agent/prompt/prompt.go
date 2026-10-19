@@ -40,7 +40,14 @@ type PromptDat struct {
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
-	AgentName          string
+	// AvailMCPXML, AvailPluginXML and PluginInstrXML mirror the v5.3 prompt
+	// interface used by the superfloyd role templates. They stay empty until
+	// the chassis MCP/plugin registries expose prompt-XML helpers; the
+	// templates guard every use with {{if}} so the sections simply omit.
+	AvailMCPXML    string
+	AvailPluginXML string
+	PluginInstrXML string
+	AgentName      string
 }
 
 type ContextFile struct {
