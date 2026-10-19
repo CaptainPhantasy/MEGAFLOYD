@@ -211,3 +211,24 @@ becomes a real skill in megafloyd, triggered by its name:
 Combining rule: when two skills' work overlaps 90%+, build ONE skill that
 answers to both names (e.g. /branch + /fork). No skill may be replaced by
 "something roughly equivalent" — the named trigger must do the named job.
+
+### F. Web/TUI handoff fixes [OWNER-DIRECTIVE 2026-10-19]
+
+Three verified bugs in the existing f7 web/TUI handoff MUST be fixed in
+megafloyd so they never recur:
+
+1. Tailscale-ready web UI. At web-server start, auto-detect the Tailscale
+   IPv4 (`tailscale ip -4`) and MagicDNS hostname (`tailscale status --json`
+   .Self.DNSName). Add both (`*.ts.net` and `100.x.x.x`) to the server's
+   allowed-hosts allowlist by default (no more 40301 Invalid Host header).
+   Bind loopback + Tailscale interface (or 0.0.0.0 in --remote/--tailscale
+   mode). Print the clickable https://<magicdns>/sessions/...#token= URL in
+   the banner instead of 127.0.0.1.
+2. Terminal teardown. On every TUI exit/panic/handoff path, write
+   "\x1b[<u\x1b[>4;0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?25h"
+   to stdout before exit (disables Kitty CSI-u + mouse modes, shows cursor).
+   Spawned web server must have stdin redirected to /dev/null so the pane
+   returns to a usable prompt.
+3. Resume into web mode. `<cli> -r <session_id> --web` starts/reuses the
+   background web server on a deterministic port, registers the Tailscale
+   route, and prints the ready-to-click Tailscale URL.
