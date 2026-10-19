@@ -175,6 +175,22 @@ type (
 	}
 )
 
+// ActionRunBuiltin dispatches a registered builtin slash command. The same
+// action backs both palette selection and hand-typed slash input.
+type ActionRunBuiltin struct {
+	Name string
+	Args string
+	// FromPalette is true when the command was chosen from the palette
+	// without arguments; commands that require input then prompt for it.
+	FromPalette bool
+}
+
+// ActionSetPermissionMode applies a permission mode chosen in the picker.
+type ActionSetPermissionMode struct {
+	// SkipRequests is true for Never Ask and false for Ask When Needed.
+	SkipRequests bool
+}
+
 // ActionCmd represents an action that carries a [tea.Cmd] to be passed to the
 // Bubble Tea program loop.
 type ActionCmd struct {
