@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/invopop/jsonschema"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/oauth"
 	"github.com/legacy-ai/floyd/internal/oauth/copilot"
-	"github.com/invopop/jsonschema"
 )
 
 const (

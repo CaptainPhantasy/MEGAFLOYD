@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/session"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 

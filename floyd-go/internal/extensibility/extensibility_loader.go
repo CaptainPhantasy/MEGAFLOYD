@@ -32,12 +32,12 @@ func LoadIndex(indexPath string) ([]IndexEntry, error) {
 
 	var entries []IndexEntry
 	scanner := bufio.NewScanner(file)
-	
+
 	var currentCategory string
-	
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		if strings.HasPrefix(line, "## 📍") {
 			categoryHeader := strings.TrimPrefix(line, "## 📍 ")
 			if strings.Contains(categoryHeader, "COMMANDS") {
@@ -53,14 +53,14 @@ func LoadIndex(indexPath string) ([]IndexEntry, error) {
 			// Parse agent skill or command definition
 			name := strings.TrimPrefix(strings.TrimPrefix(line, "#### "), "`/")
 			name = strings.Split(name, "`")[0] // extract name from markdown
-			
+
 			// Next few lines contain description and path
 			description := ""
 			path := ""
-			
+
 			for i := 0; i < 5 && scanner.Scan(); i++ {
 				nextLine := strings.TrimSpace(scanner.Text())
-				
+
 				// Skip until we find a field that starts with dash, indicating content
 				if strings.HasPrefix(nextLine, "- ") {
 					if strings.Contains(nextLine, "**Purpose:**") || strings.Contains(nextLine, "Purpose:") {
@@ -76,20 +76,20 @@ func LoadIndex(indexPath string) ([]IndexEntry, error) {
 							path = strings.ReplaceAll(path, "`", "")
 						}
 					}
-					
+
 					if description != "" && path != "" {
 						break
 					}
 				}
 			}
-			
+
 			if name != "" && path != "" {
 				// Determine exact category based on the path
 				cat := currentCategory
 				if cat == "command" {
 					cat = "agent" // commands are actually agents in this context
 				}
-				
+
 				entry := IndexEntry{
 					Name:        name,
 					Description: description,
@@ -117,7 +117,7 @@ func LoadIndex(indexPath string) ([]IndexEntry, error) {
 						}
 						path = strings.TrimSpace(strings.ReplaceAll(path, "`", ""))
 					}
-					
+
 					if name != "" && path != "" {
 						entry := IndexEntry{
 							Name:        name,
@@ -131,11 +131,11 @@ func LoadIndex(indexPath string) ([]IndexEntry, error) {
 			}
 		}
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("error reading index file: %w", err)
 	}
-	
+
 	return entries, nil
 }
 
@@ -143,12 +143,12 @@ func LoadIndex(indexPath string) ([]IndexEntry, error) {
 func LoadItem(entry IndexEntry) (string, error) {
 	// Resolve path (handle ~, relative paths)
 	absPath := resolvePath(entry.Path)
-	
+
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read item from path '%s': %w", absPath, err)
 	}
-	
+
 	return string(content), nil
 }
 
@@ -159,14 +159,14 @@ func resolvePath(path string) string {
 		homeDir, _ := os.UserHomeDir()
 		return filepath.Join(homeDir, strings.TrimPrefix(path, "~/"))
 	}
-	
+
 	// Handle relative to project root
 	if !filepath.IsAbs(path) && !strings.HasPrefix(path, "/") {
 		// For now, assuming relative paths are relative to current working directory
 		wd, _ := os.Getwd()
 		return filepath.Join(wd, path)
 	}
-	
+
 	return path
 }
 

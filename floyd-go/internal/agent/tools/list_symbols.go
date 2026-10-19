@@ -22,11 +22,11 @@ func NewListSymbolsTool(wd string) fantasy.AgentTool {
 		string(listSymbolsDescription),
 		func(ctx context.Context, params ListSymbolsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			pattern := `^(func|type|interface|class|const|var|export class|export function|export const) `
-			
+
 			cmd := exec.CommandContext(ctx, "grep", "-En", pattern, params.FilePath)
 			cmd.Dir = wd
-			out, _ := cmd.CombinedOutput() 
-			
+			out, _ := cmd.CombinedOutput()
+
 			if len(out) == 0 {
 				pattern = `(class .* \{|function .*\(|const .* = .*=>|let .* = .*=>)`
 				cmd = exec.CommandContext(ctx, "grep", "-En", pattern, params.FilePath)
@@ -38,7 +38,7 @@ func NewListSymbolsTool(wd string) fantasy.AgentTool {
 			if res == "" {
 				res = "No standard structural symbols found using lightweight scan."
 			}
-			
+
 			return fantasy.NewTextResponse(fmt.Sprintf("Structural symbols found:\n%s", res)), nil
 		},
 	)

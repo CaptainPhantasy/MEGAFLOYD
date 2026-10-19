@@ -10,11 +10,11 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/ordered"
 	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/fsext"
 	"github.com/legacy-ai/floyd/internal/ui/list"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/ordered"
 )
 
 const (

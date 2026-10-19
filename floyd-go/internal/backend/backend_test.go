@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/proto"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 

@@ -33,7 +33,7 @@ func NewSmartReplaceTool(wd string) fantasy.AgentTool {
 
 			if strings.Contains(content, params.Search) {
 				newContent := strings.Replace(content, params.Search, params.Replace, 1)
-				if err := os.WriteFile(fullPath, []byte(newContent), 0644); err != nil {
+				if err := os.WriteFile(fullPath, []byte(newContent), 0o644); err != nil {
 					return fantasy.NewTextResponse(err.Error()), nil
 				}
 				return fantasy.NewTextResponse("Strict replace successful."), nil

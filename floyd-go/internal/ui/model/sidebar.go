@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/ultraviolet/layout"
 	mcp "github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/logo"
-	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/ultraviolet/layout"
 )
 
 // modelInfo renders the current model information including reasoning

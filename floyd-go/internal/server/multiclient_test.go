@@ -8,9 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/backend"
 	"github.com/legacy-ai/floyd/internal/proto"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 

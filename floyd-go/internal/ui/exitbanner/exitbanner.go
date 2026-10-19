@@ -6,13 +6,13 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/ui/logo"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
 	"github.com/legacy-ai/floyd/internal/version"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 // FallbackWidth is used when stdout is not a terminal, so the banner still

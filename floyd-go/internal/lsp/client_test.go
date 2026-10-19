@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/env"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stretchr/testify/require"
 )
 

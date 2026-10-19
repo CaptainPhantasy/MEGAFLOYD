@@ -52,7 +52,7 @@ func (s *checkpointService) checkpointPath(id string) string {
 }
 
 func (s *checkpointService) ensureDir() error {
-	return os.MkdirAll(s.baseDir, 0755)
+	return os.MkdirAll(s.baseDir, 0o755)
 }
 
 // Save persists a checkpoint to disk
@@ -69,7 +69,7 @@ func (s *checkpointService) Save(checkpoint *Checkpoint) error {
 	}
 
 	path := s.checkpointPath(checkpoint.ID)
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write checkpoint file: %w", err)
 	}
 

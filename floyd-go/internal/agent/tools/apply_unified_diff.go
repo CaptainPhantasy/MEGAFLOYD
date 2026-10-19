@@ -35,9 +35,9 @@ func NewApplyPatchTool(wd string) fantasy.AgentTool {
 			}
 
 			patchFile := filepath.Join(wd, ".floyd", "temp.patch")
-			os.MkdirAll(filepath.Dir(patchFile), 0755)
-			
-			if err := os.WriteFile(patchFile, []byte(params.Patch), 0644); err != nil {
+			os.MkdirAll(filepath.Dir(patchFile), 0o755)
+
+			if err := os.WriteFile(patchFile, []byte(params.Patch), 0o644); err != nil {
 				return fantasy.NewTextResponse(err.Error()), nil
 			}
 			defer os.Remove(patchFile)

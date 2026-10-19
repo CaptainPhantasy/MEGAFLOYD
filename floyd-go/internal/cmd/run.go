@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"charm.land/log/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/term"
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/client"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/event"
@@ -22,9 +25,6 @@ import (
 	"github.com/legacy-ai/floyd/internal/ui/anim"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
 	"github.com/legacy-ai/floyd/internal/workspace"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/term"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 

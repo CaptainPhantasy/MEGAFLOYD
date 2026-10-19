@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/legacy-ai/floyd/internal/agent/hyper"
 	"github.com/legacy-ai/floyd/internal/home"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
-	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )

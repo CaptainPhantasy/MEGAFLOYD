@@ -3,11 +3,11 @@ package dialog
 import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/list"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 )
 

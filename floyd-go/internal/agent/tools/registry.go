@@ -33,22 +33,22 @@ type RegistryEntry struct {
 
 // ToolRegistry represents the complete tool registry.
 type ToolRegistry struct {
-	TotalTools   int                    `json:"total_tools"`
-	TotalServers int                    `json:"total_servers"`
-	Tools        []RegistryEntry        `json:"tools"`
-	ByServer     map[string][]string    `json:"by_server"`
-	ByCategory   map[string][]string    `json:"by_category"`
-	Version      string                 `json:"version"`
-	GeneratedAt  string                 `json:"generated_at"`
+	TotalTools   int                 `json:"total_tools"`
+	TotalServers int                 `json:"total_servers"`
+	Tools        []RegistryEntry     `json:"tools"`
+	ByServer     map[string][]string `json:"by_server"`
+	ByCategory   map[string][]string `json:"by_category"`
+	Version      string              `json:"version"`
+	GeneratedAt  string              `json:"generated_at"`
 }
 
 // BuildRegistry builds the complete tool registry from all available MCP tools.
 func BuildRegistry() *ToolRegistry {
 	registry := &ToolRegistry{
-		ByServer:   make(map[string][]string),
-		ByCategory: make(map[string][]string),
-		Tools:      make([]RegistryEntry, 0),
-		Version:    "1.0",
+		ByServer:    make(map[string][]string),
+		ByCategory:  make(map[string][]string),
+		Tools:       make([]RegistryEntry, 0),
+		Version:     "1.0",
 		GeneratedAt: time.Now().Format(time.RFC3339),
 	}
 
@@ -117,20 +117,20 @@ func categorizeTool(name, server string) string {
 
 	// Fallback: categorize by tool name prefix
 	prefixes := map[string]string{
-		"cache_":    "cache",
-		"git_":      "git",
-		"edit_":     "editing",
-		"run_":      "testing",
-		"format_":   "formatting",
-		"lint_":     "linting",
-		"build_":    "build",
-		"test_":     "testing",
-		"start_":    "terminal",
-		"create_":   "creation",
-		"list_":     "query",
-		"get_":      "query",
-		"search_":   "query",
-		"find_":     "query",
+		"cache_":  "cache",
+		"git_":    "git",
+		"edit_":   "editing",
+		"run_":    "testing",
+		"format_": "formatting",
+		"lint_":   "linting",
+		"build_":  "build",
+		"test_":   "testing",
+		"start_":  "terminal",
+		"create_": "creation",
+		"list_":   "query",
+		"get_":    "query",
+		"search_": "query",
+		"find_":   "query",
 	}
 
 	for prefix, category := range prefixes {
@@ -332,8 +332,8 @@ func ServerCount() int {
 // builtinEntries stores tools registered at init time by built-in packages.
 // Use RegisterBuiltin to add entries during init().
 var (
-	builtinMu     sync.RWMutex
-	builtinTools  []RegistryEntry
+	builtinMu    sync.RWMutex
+	builtinTools []RegistryEntry
 )
 
 // RegisterBuiltin adds a built-in tool to the unified registry.

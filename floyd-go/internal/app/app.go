@@ -17,6 +17,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/term"
 	"github.com/legacy-ai/floyd/internal/agent"
 	"github.com/legacy-ai/floyd/internal/agent/notify"
 	"github.com/legacy-ai/floyd/internal/agent/ralph"
@@ -42,8 +44,6 @@ import (
 	"github.com/legacy-ai/floyd/internal/ui/styles"
 	"github.com/legacy-ai/floyd/internal/update"
 	"github.com/legacy-ai/floyd/internal/version"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/term"
 )
 
 // UpdateAvailableMsg is sent when a new version is available.

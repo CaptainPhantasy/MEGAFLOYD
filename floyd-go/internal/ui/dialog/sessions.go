@@ -11,11 +11,11 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/list"
 	"github.com/legacy-ai/floyd/internal/ui/util"
-	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // SessionsID is the identifier for the session selector dialog.

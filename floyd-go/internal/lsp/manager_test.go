@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/legacy-ai/floyd/internal/csync"
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
+	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/stretchr/testify/require"
 )
 

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/db"
 	"github.com/legacy-ai/floyd/internal/pubsub"
-	"github.com/google/uuid"
 )
 
 const (

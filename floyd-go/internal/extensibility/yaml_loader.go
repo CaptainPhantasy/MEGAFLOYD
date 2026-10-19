@@ -11,10 +11,10 @@ import (
 
 // YAMLIndex is the top-level structure for a skills.yaml configuration file.
 type YAMLIndex struct {
-	Version int            `yaml:"version"`
-	Skills  []YAMLSkill    `yaml:"skills"`
-	Agents  []YAMLSkill    `yaml:"agents,omitempty"`
-	Plugins []YAMLSkill    `yaml:"plugins,omitempty"`
+	Version int         `yaml:"version"`
+	Skills  []YAMLSkill `yaml:"skills"`
+	Agents  []YAMLSkill `yaml:"agents,omitempty"`
+	Plugins []YAMLSkill `yaml:"plugins,omitempty"`
 }
 
 // YAMLSkill represents a single skill/agent/plugin definition in YAML.

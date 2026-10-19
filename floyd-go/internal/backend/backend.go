@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/app"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/csync"
@@ -23,7 +24,6 @@ import (
 	"github.com/legacy-ai/floyd/internal/skills"
 	"github.com/legacy-ai/floyd/internal/ui/util"
 	"github.com/legacy-ai/floyd/internal/version"
-	"github.com/google/uuid"
 )
 
 // Common errors returned by backend operations.

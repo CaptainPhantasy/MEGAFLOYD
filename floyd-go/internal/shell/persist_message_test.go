@@ -3,10 +3,10 @@ package shell
 import (
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/db"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/session"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 

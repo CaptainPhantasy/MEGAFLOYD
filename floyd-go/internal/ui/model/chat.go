@@ -7,15 +7,15 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/clipperhouse/displaywidth"
+	"github.com/clipperhouse/uax29/v2/words"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/ui/anim"
 	"github.com/legacy-ai/floyd/internal/ui/chat"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/list"
-	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/clipperhouse/displaywidth"
-	"github.com/clipperhouse/uax29/v2/words"
 )
 
 // Constants for multi-click detection.

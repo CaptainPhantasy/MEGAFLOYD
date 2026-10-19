@@ -4,9 +4,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/legacy-ai/floyd/internal/ui/chat"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/legacy-ai/floyd/internal/ui/chat"
 	"github.com/stretchr/testify/require"
 )
 

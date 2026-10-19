@@ -13,8 +13,8 @@ import (
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
-	"github.com/legacy-ai/floyd/internal/stringext"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/legacy-ai/floyd/internal/stringext"
 )
 
 type MessageRole string

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/pubsub"
-	"github.com/google/uuid"
 )
 
 // hookApprovalKey is the unexported context key used to mark a tool call as

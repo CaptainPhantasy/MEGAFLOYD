@@ -39,7 +39,7 @@ func NewTokenBudget(cfg *BudgetConfig) *TokenBudget {
 		warnPct = 80
 	}
 	return &TokenBudget{
-		MaxTokensUSD: cfg.MaxUSD,
+		MaxTokensUSD:  cfg.MaxUSD,
 		WarnAtPercent: warnPct,
 	}
 }

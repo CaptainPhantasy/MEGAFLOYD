@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/legacy-ai/floyd/internal/ui/attachments"
 	"github.com/legacy-ai/floyd/internal/ui/dialog"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
 )
 

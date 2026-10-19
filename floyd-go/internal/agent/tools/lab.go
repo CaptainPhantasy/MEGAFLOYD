@@ -46,7 +46,7 @@ func NewSpawnLabTool(workingDir string) fantasy.AgentTool {
 				image,
 				"tail", "-f", "/dev/null",
 			}
-			
+
 			if err := exec.CommandContext(ctx, "docker", args...).Run(); err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to spawn lab via OrbStack: %v", err)), nil
 			}
@@ -71,7 +71,7 @@ func NewExecuteLabTool() fantasy.AgentTool {
 
 			args := []string{"exec", params.SessionID, "bash", "-c", params.Command}
 			out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
-			
+
 			resultStr := string(out)
 			if err != nil {
 				resultStr = fmt.Sprintf("Execution Error:\n%s\n%v", resultStr, err)
@@ -92,11 +92,11 @@ func NewTeardownLabTool() fantasy.AgentTool {
 			if params.SessionID == "" {
 				return fantasy.NewTextErrorResponse("session_id is required"), nil
 			}
-			
+
 			if err := exec.CommandContext(ctx, "docker", "rm", "-f", params.SessionID).Run(); err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Teardown failed: %v", err)), nil
 			}
-			
+
 			return fantasy.NewTextResponse(fmt.Sprintf("Successfully tore down lab for session %s", params.SessionID)), nil
 		})
 }

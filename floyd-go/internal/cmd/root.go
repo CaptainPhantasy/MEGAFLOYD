@@ -24,6 +24,11 @@ import (
 	fang "charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
+	xstrings "github.com/charmbracelet/x/exp/strings"
+	"github.com/charmbracelet/x/term"
 	"github.com/legacy-ai/floyd/internal/app"
 	"github.com/legacy-ai/floyd/internal/client"
 	"github.com/legacy-ai/floyd/internal/config"
@@ -41,11 +46,6 @@ import (
 	ui "github.com/legacy-ai/floyd/internal/ui/model"
 	"github.com/legacy-ai/floyd/internal/version"
 	"github.com/legacy-ai/floyd/internal/workspace"
-	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
-	xstrings "github.com/charmbracelet/x/exp/strings"
-	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 

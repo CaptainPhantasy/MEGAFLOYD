@@ -6,11 +6,11 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/ui/chat"
 	"github.com/legacy-ai/floyd/internal/ui/common"
-	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // testMessageItem is a minimal chat item used to populate the chat list

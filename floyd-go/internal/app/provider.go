@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/legacy-ai/floyd/internal/config"
 	xstrings "github.com/charmbracelet/x/exp/strings"
+	"github.com/legacy-ai/floyd/internal/config"
 )
 
 // parseModelStr parses a model string into provider filter and model ID.

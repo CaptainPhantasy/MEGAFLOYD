@@ -233,8 +233,10 @@ func (hm *HealthMonitor) GetRestartState(name string) (attempts int, lastError e
 }
 
 // Global health monitor instance
-var healthMonitor *HealthMonitor
-var healthMonitorOnce sync.Once
+var (
+	healthMonitor     *HealthMonitor
+	healthMonitorOnce sync.Once
+)
 
 // GetHealthMonitor returns the singleton health monitor for the given
 // config store. The first caller's store wins; later calls with a different

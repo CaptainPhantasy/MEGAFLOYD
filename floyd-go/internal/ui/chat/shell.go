@@ -8,11 +8,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/legacy-ai/floyd/internal/ui/anim"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/list"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // shellSeq provides unique IDs for ShellItems even when the same

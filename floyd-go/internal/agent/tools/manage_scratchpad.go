@@ -36,14 +36,14 @@ func NewManageScratchpadTool(wd string) fantasy.AgentTool {
 				}
 				return fantasy.NewTextResponse(string(b)), nil
 			case "write":
-				os.MkdirAll(filepath.Dir(path), 0755)
-				if err := os.WriteFile(path, []byte(params.Content), 0644); err != nil {
+				os.MkdirAll(filepath.Dir(path), 0o755)
+				if err := os.WriteFile(path, []byte(params.Content), 0o644); err != nil {
 					return fantasy.NewTextResponse(err.Error()), nil
 				}
 				return fantasy.NewTextResponse("Scratchpad written."), nil
 			case "append":
-				os.MkdirAll(filepath.Dir(path), 0755)
-				f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				os.MkdirAll(filepath.Dir(path), 0o755)
+				f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 				if err != nil {
 					return fantasy.NewTextResponse(err.Error()), nil
 				}

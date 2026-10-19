@@ -5,11 +5,11 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/list"
 	"github.com/legacy-ai/floyd/internal/ui/notification"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/sahilm/fuzzy"
 )
 

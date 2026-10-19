@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
+	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
+	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/fsext"
-	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
-	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
 

@@ -71,7 +71,7 @@ func NewTranscriptExportTool(sessions session.Service, messages message.Service,
 
 			// Create transcripts directory
 			transcriptsDir := filepath.Join(workingDir, ".floyd", "transcripts")
-			if err := os.MkdirAll(transcriptsDir, 0755); err != nil {
+			if err := os.MkdirAll(transcriptsDir, 0o755); err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to create transcripts directory: %v", err)), nil
 			}
 
@@ -87,7 +87,7 @@ func NewTranscriptExportTool(sessions session.Service, messages message.Service,
 			content := generateTranscriptMarkdown(sess, msgs, toolExecs, percentUsed, totalTokens, contextWindow, workingDir, params.Reason)
 
 			// Write the file
-			if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+			if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to write transcript: %v", err)), nil
 			}
 

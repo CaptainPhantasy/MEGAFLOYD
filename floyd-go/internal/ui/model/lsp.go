@@ -9,11 +9,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/legacy-ai/floyd/internal/lsp"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
 	"github.com/legacy-ai/floyd/internal/workspace"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 // lspStatesTTL bounds how long the memoized LSP state may go without a

@@ -17,10 +17,10 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
+	"github.com/charmbracelet/x/etag"
 	"github.com/legacy-ai/floyd/internal/agent/hyper"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/home"
-	"github.com/charmbracelet/x/etag"
 )
 
 type syncer[T any] interface {

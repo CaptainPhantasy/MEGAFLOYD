@@ -6,12 +6,12 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/legacy-ai/floyd/internal/clipboard"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
 	"github.com/legacy-ai/floyd/internal/ui/util"
 	"github.com/legacy-ai/floyd/internal/workspace"
-	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // MaxAttachmentSize defines the maximum allowed size for file attachments (5 MB).
