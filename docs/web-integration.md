@@ -98,11 +98,11 @@ Default bind, read from `src/cli/sub/web/shared.ts` and verified in `--help`:
   `--insecure-no-tls` is passed; remote shutdown and remote terminals are off by
   default.
 
-A prebuilt Node server ships in the same package:
+The Node server entry is tracked in this repository and is self-contained:
 
 ```
-/Users/floyd/MEGAFLOYD-git/floyd-code/apps/floyd-code/dist/main.mjs   17,564,330 B
-sha256 3e401fbfac6c3b5a05c2d9239b5838165c37c99977bc5f7ab981123f1470e94f
+floyd-code/apps/floyd-code/dist/main.mjs   17,816,667 B
+sha256 e2cf8b5590b3a8ff6b6c425d5900035b81a7a366ab1baa89f0b641d980e50570
 
 $ node dist/main.mjs --version
 2.0.2
@@ -152,39 +152,32 @@ Goal: ship the same bytes, unchanged.
 
 ### 5.1 Keep the bundle layout intact
 
-Copy all 524 files into a stable directory in megafloyd. Proposed path:
-`web/dist-web/`. Nothing is renamed or rewritten.
+The 524 files stay at `floyd-code/apps/floyd-code/dist-web`, tracked in
+git. Nothing is renamed or rewritten.
 
 ```
-web/dist-web/index.html
-web/dist-web/boot.js
-web/dist-web/favicon.ico
-web/dist-web/assets/...            # 521 files, hashed names
+floyd-code/apps/floyd-code/dist-web/index.html
+floyd-code/apps/floyd-code/dist-web/boot.js
+floyd-code/apps/floyd-code/dist-web/favicon.ico
+floyd-code/apps/floyd-code/dist-web/assets/...     # hashed names
 ```
 
 The server must mount this directory at the origin root. `index.html` requests
 `/assets/...` with a leading slash, so serving it from a sub-path such as `/web/`
 would break every asset URL.
 
-### 5.2 Run the existing prebuilt server
+### 5.2 Run the tracked server
 
-Copy the prebuilt server beside it:
-
-```
-web/package.json                   # copy of apps/floyd-code/package.json
-web/dist/main.mjs                  # 17.5 MB, self-contained CLI bundle
-web/dist/search-worker.mjs
-web/dist-web/...
-```
-
-Start it:
+`floyd-go/internal/megafloydweb` runs the entry point in place:
 
 ```
-node web/dist/main.mjs web --host --port 58627 --no-open
+node floyd-code/apps/floyd-code/dist/main.mjs web --no-open --port 58627
 ```
 
-`getHostPackageRoot()` finds `web/package.json`, so the server resolves
-`web/dist-web` without any flag or environment variable.
+`getHostPackageRoot()` finds `floyd-code/apps/floyd-code/package.json`, so the
+server resolves `dist-web` beside it without any flag or environment variable.
+Both `dist/main.mjs` and `dist/search-worker.mjs` are tracked. The entry is
+self-contained: `ws` and `qrcode` are bundled, so no `node_modules` is needed.
 
 For remote access, keep the bind loopback-only and put Caddy / Tailscale in front.
 If the proxy forwards a host name the server does not know, add
@@ -194,19 +187,29 @@ If the proxy forwards a host name the server does not know, add
 
 - Do not serve the bundle with a plain static file server. It calls `/api/v1` and
   `/api/v1/ws` on the same origin; without the Floyd Code server it cannot function.
-- Do not rebuild the bundle. Its source is not in this repo.
+- Do not rebuild `dist-web`. Its source is not in this repo. `dist/main.mjs`
+  is different: it is built from this repo with `pnpm --filter
+  @legacy-ai/floyd-code build`.
 - Do not rename hashed assets or move them out of `assets/`. The immutable cache
   header depends on the hash pattern.
 - Do not inline scripts into `index.html`. The server's CSP allows only `'self'`.
 
 ### 5.4 Go binary status
 
-The Go chassis has no web-serving code: searching `floyd-go` for `dist-web` or a web UI
-returned only unrelated image/URL matches. Wiring the web UI into the `megafloyd` Go
-binary is new work, not a no-rebuild step. Two options, both needing a decision:
+The sidecar option is implemented. `floyd-go/internal/megafloydweb` resolves
+Node, `dist/main.mjs`, and `dist-web`, builds a child environment with
+`FLOYD_CODE_HOME` and the allowed-host list, spawns the Node server in its own
+session, waits for `/api/v1/healthz`, and prints the tokenized URL. It is wired
+to `floyd run --web`, the root command's `--web`, and the TUI's `/web` and
+`/remote-control` commands.
 
-1. Run the Node server as a sidecar and have the launcher start both.
-2. Add a Go reverse proxy or static-plus-API bridge later.
+`dist/main.mjs` and `dist/search-worker.mjs` are now tracked. The build
+config force-bundles the app's two runtime dependencies, `ws` and `qrcode`, so
+the entry starts without `node_modules`. The live handoff and the session
+store gap are documented in `docs/web-live-handoff.md`.
+
+The Go binary still does not serve the bundle itself: it starts the Node
+sidecar. A Go reverse proxy or static-plus-API bridge remains future work.
 
 ## 6. Commands run
 
@@ -232,4 +235,8 @@ for d in <three paths>; do (cd "$d" && find . -type f -print0 | sort -z \
 
 - Find the actual deployment of `dist-web`, if one exists. Not found on 8443 or 8446.
 - Confirm that the phone UI the owner uses is this bundle. Not proven by today's probe.
-- Decide Node sidecar versus Go proxy before wiring the web UI into `megafloyd`.
+- Bridge the separate session stores. A Go session is a bare UUID in
+  `<data-dir>/floyd.db`; the Node server creates `session_<uuid>` under
+  `FLOYD_CODE_HOME` and has no import or mirror. The handoff URL therefore
+  loads the shell but not the Go transcript. See `docs/web-live-handoff.md`
+  section 5.

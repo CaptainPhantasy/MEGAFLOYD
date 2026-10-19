@@ -2,6 +2,13 @@ node_modules/
 dist/
 dist-single/
 dist-native/
+# `floyd web` runs the prebuilt Node server entry point and its search
+# worker from apps/floyd-code/dist. They are runtime files, not build
+# output, so a fresh clone can start the server without a build step.
+!apps/floyd-code/dist/
+apps/floyd-code/dist/*
+!apps/floyd-code/dist/main.mjs
+!apps/floyd-code/dist/search-worker.mjs
 .tmp-api-extractor/
 .contract-types-tmp/
 .local/
