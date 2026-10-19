@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/legacy-ai/floyd/internal/agent/hyper"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/discover"
@@ -28,7 +29,6 @@ import (
 	"github.com/legacy-ai/floyd/internal/fsext"
 	"github.com/legacy-ai/floyd/internal/home"
 	"github.com/legacy-ai/floyd/internal/shellconfig"
-	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"

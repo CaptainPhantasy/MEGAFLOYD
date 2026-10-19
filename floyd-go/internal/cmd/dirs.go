@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
+	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/spf13/cobra"
 )
 

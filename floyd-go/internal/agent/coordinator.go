@@ -40,6 +40,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/question"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/skills"
+	"github.com/legacy-ai/floyd/internal/workflow"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -637,12 +638,19 @@ func (c *coordinator) eventHookRunner(event string, isSubAgent bool) *hooks.Runn
 	return hooks.NewRunner(eventHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {	large, small, err := c.buildAgentModels(ctx, isSubAgent)
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
+	large, small, err := c.buildAgentModels(ctx, isSubAgent)
 	if err != nil {
 		return nil, err
 	}
 
 	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	// The ralph loop is a top-level, user-driven feature; sub-agents never
+	// get a loop of their own.
+	dataDir := ""
+	if !isSubAgent {
+		dataDir = c.cfg.Config().Options.DataDirectory
+	}
 	result := NewSessionAgent(SessionAgentOptions{
 		LargeModel:           large,
 		SmallModel:           small,
@@ -658,6 +666,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		RunComplete:          c.runComplete,
 		SessionStartRunner:   c.eventHookRunner(hooks.EventSessionStart, isSubAgent),
 		StopRunner:           c.eventHookRunner(hooks.EventStop, isSubAgent),
+		DataDirectory:        dataDir,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -713,9 +722,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	// Get the model name for the agent
 	modelID := ""
+	contextWindow := int64(0)
 	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
 		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
 			modelID = model.ID
+			contextWindow = int64(model.ContextWindow)
 		}
 	}
 
@@ -750,6 +761,32 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewTodosTool(c.sessions),
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+	)
+
+	// v5.3 agent tool set: parallel execution, context intelligence,
+	// self-correction support, and lab/workflow tooling.
+	allTools = append(
+		allTools,
+		tools.NewParallelBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
+		tools.NewContextStatusTool(c.sessions, contextWindow),
+		tools.NewComplexityEstimatorTool(),
+		tools.NewRefactorBlueprintTool(),
+		tools.NewFailureModeEnumeratorTool(),
+		tools.NewTranscriptExportTool(c.sessions, c.messages, contextWindow, c.cfg.WorkingDir()),
+		tools.NewArchiveQueryTool(c.messages, c.cfg.WorkingDir()),
+		tools.NewSymbolIndexTool(c.cfg.WorkingDir()),
+		tools.NewVisionTool(c.permissions, c.cfg.WorkingDir()),
+		tools.NewWorkflowTool(workflow.NewEngine(c.cfg.WorkingDir())),
+		tools.NewMCPTaskStatusTool(),
+		tools.NewProjectMapTool(c.cfg.WorkingDir()),
+		tools.NewManageScratchpadTool(c.cfg.WorkingDir()),
+		tools.NewListSymbolsTool(c.cfg.WorkingDir()),
+		tools.NewApplyPatchTool(c.permissions, c.cfg.WorkingDir()),
+		tools.NewSmartReplaceTool(c.permissions, c.cfg.WorkingDir()),
+		tools.NewGetActiveDiffTool(c.cfg.WorkingDir()),
+		tools.NewSpawnLabTool(c.permissions, c.cfg.WorkingDir()),
+		tools.NewExecuteLabTool(c.permissions),
+		tools.NewTeardownLabTool(c.permissions),
 	)
 
 	// Question tool is interactive-only and not available to sub-agents.

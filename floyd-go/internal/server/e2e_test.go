@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/app"
 	"github.com/legacy-ai/floyd/internal/backend"
 	"github.com/legacy-ai/floyd/internal/db"
@@ -21,7 +22,6 @@ import (
 	"github.com/legacy-ai/floyd/internal/permission"
 	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/pubsub"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 

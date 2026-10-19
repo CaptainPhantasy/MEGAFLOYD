@@ -13,11 +13,11 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/pubsub"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 // ListWorkspaces retrieves all workspaces from the server.

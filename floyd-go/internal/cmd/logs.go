@@ -12,8 +12,8 @@ import (
 
 	"charm.land/log/v2"
 	"github.com/charmbracelet/colorprofile"
-	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/charmbracelet/x/term"
+	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/nxadm/tail"
 	"github.com/spf13/cobra"
 )

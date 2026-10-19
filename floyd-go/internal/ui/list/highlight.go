@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/legacy-ai/floyd/internal/stringext"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/legacy-ai/floyd/internal/stringext"
 )
 
 // DefaultHighlighter is the default highlighter function that applies inverse style.

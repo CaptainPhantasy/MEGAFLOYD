@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/legacy-ai/floyd/internal/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/legacy-ai/floyd/internal/lsp"
 )
 
 type DefinitionParams struct {

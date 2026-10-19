@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/invopop/jsonschema"
 	"github.com/legacy-ai/floyd/internal/agent/hyper"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/discover"
-	"github.com/invopop/jsonschema"
 	"github.com/spf13/cobra"
 )
 

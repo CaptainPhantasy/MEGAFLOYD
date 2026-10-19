@@ -3,9 +3,9 @@ package chat
 import (
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 

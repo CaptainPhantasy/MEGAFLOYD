@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/legacy-ai/floyd/internal/pubsub"
 	"github.com/google/uuid"
+	"github.com/legacy-ai/floyd/internal/pubsub"
 )
 
 // ErrCancelled is returned by Ask when the user cancels the question.

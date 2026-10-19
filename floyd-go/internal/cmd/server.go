@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/legacy-ai/floyd/internal/config"
 	floydlog "github.com/legacy-ai/floyd/internal/log"
 	"github.com/legacy-ai/floyd/internal/server"
-	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 

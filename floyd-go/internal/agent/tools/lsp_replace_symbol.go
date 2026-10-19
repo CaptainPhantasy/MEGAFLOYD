@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/legacy-ai/floyd/internal/filetracker"
 	"github.com/legacy-ai/floyd/internal/history"
 	"github.com/legacy-ai/floyd/internal/lsp"
 	"github.com/legacy-ai/floyd/internal/permission"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 type ReplaceSymbolParams struct {

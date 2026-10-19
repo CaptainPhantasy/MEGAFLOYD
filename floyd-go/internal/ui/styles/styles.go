@@ -13,8 +13,8 @@ import (
 	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
-	"github.com/legacy-ai/floyd/internal/ui/diffview"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/legacy-ai/floyd/internal/ui/diffview"
 )
 
 const (

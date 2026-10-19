@@ -12,9 +12,9 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/home"
-	"github.com/charmbracelet/x/ansi"
 )
 
 type FileInfo struct {

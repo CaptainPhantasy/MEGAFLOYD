@@ -27,6 +27,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/ultraviolet/layout"
+	"github.com/charmbracelet/ultraviolet/screen"
+	"github.com/charmbracelet/x/editor"
+	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/legacy-ai/floyd/internal/agent/hyper"
 	"github.com/legacy-ai/floyd/internal/agent/notify"
 	agenttools "github.com/legacy-ai/floyd/internal/agent/tools"
@@ -60,11 +65,6 @@ import (
 	"github.com/legacy-ai/floyd/internal/ui/util"
 	"github.com/legacy-ai/floyd/internal/version"
 	"github.com/legacy-ai/floyd/internal/workspace"
-	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/ultraviolet/layout"
-	"github.com/charmbracelet/ultraviolet/screen"
-	"github.com/charmbracelet/x/editor"
-	xstrings "github.com/charmbracelet/x/exp/strings"
 )
 
 // Compact mode breakpoints.

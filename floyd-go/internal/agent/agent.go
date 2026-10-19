@@ -39,6 +39,7 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/legacy-ai/floyd/internal/agent/hyper"
 	"github.com/legacy-ai/floyd/internal/agent/notify"
+	"github.com/legacy-ai/floyd/internal/agent/ralph"
 	"github.com/legacy-ai/floyd/internal/agent/tools"
 	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/config"
@@ -149,6 +150,10 @@ type SessionAgent interface {
 	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
+	// RalphLoop exposes the self-correction loop so the command layer can
+	// start, cancel, and inspect it. It returns nil when the agent was
+	// built without a data directory.
+	RalphLoop() *ralph.Loop
 }
 
 type Model struct {
@@ -186,6 +191,11 @@ type sessionAgent struct {
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
+
+	// ralphLoop drives the iterative self-correction loop. It is nil for
+	// sub-agents and any agent built without a data directory; Run
+	// nil-checks it before consulting the loop state.
+	ralphLoop *ralph.Loop
 
 	// dispatchMu holds a per-session mutex that serializes the
 	// accepted -> (cancel-on-entry | queued | active) transition in
@@ -244,12 +254,15 @@ type SessionAgentOptions struct {
 	// StopRunner fires Stop hooks at every terminal run state. Nil
 	// disables the event (sub-agents never fire it).
 	StopRunner *hooks.Runner
+	// DataDirectory is the .floyd directory path used to persist ralph
+	// loop state. Empty disables the loop for this agent.
+	DataDirectory string
 }
 
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
-	return &sessionAgent{
+	agent := &sessionAgent{
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
@@ -270,6 +283,10 @@ func NewSessionAgent(
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
 	}
+	if opts.DataDirectory != "" {
+		agent.ralphLoop = ralph.New(opts.DataDirectory)
+	}
+	return agent
 }
 
 // AcceptedRun owns exactly one accept reservation taken by
@@ -1304,6 +1321,29 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// RunID does not hang.
 		a.publishCanceledQueueDrops(canceledRunIDDrops)
 	}
+	// Ralph loop: after a clean turn with nothing else queued, ask the
+	// loop whether to requeue the same prompt for another iteration.
+	// The continuation is appended here and flows through the normal
+	// dequeue path below, so accept reservations and RunComplete
+	// publishing behave exactly like any queued prompt.
+	if len(queuedMessages) == 0 && err == nil && result != nil &&
+		ctx.Err() == nil && a.ralphLoop != nil && a.ralphLoop.IsActive() {
+		lastOutput := ""
+		if currentAssistant != nil {
+			lastOutput = currentAssistant.Content().Text
+		}
+		if shouldContinue, nextPrompt, sysMsg := a.ralphLoop.Check(call.SessionID, lastOutput); shouldContinue {
+			slog.Info("Ralph loop: requeuing prompt", "prompt_len", len(nextPrompt), "system_msg", sysMsg)
+			queuedMessages = append(queuedMessages, SessionAgentCall{
+				SessionID:       call.SessionID,
+				Prompt:          fmt.Sprintf("[RALPH LOOP] %s\n\n%s", sysMsg, nextPrompt),
+				MaxOutputTokens: call.MaxOutputTokens,
+				ProviderOptions: call.ProviderOptions,
+				Temperature:     call.Temperature,
+			})
+			a.messageQueue.Set(call.SessionID, queuedMessages)
+		}
+	}
 	if len(queuedMessages) == 0 {
 		// No queued work. Clear the cancel mark only when no accepted
 		// run remains in flight that it might still cover; otherwise a
@@ -1767,6 +1807,12 @@ func hasUserTextMessage(msgs []message.Message) bool {
 }
 
 // GenerateTitle generates a session title based on the initial prompt.
+// RalphLoop returns the self-correction loop, or nil when the agent runs
+// without a data directory.
+func (a *sessionAgent) RalphLoop() *ralph.Loop {
+	return a.ralphLoop
+}
+
 func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	if userPrompt == "" {
 		return

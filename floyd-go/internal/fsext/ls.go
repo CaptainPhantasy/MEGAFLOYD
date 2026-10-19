@@ -11,10 +11,10 @@ import (
 	"sync"
 
 	"github.com/charlievieth/fastwalk"
-	"github.com/legacy-ai/floyd/internal/csync"
-	"github.com/legacy-ai/floyd/internal/home"
 	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
+	"github.com/legacy-ai/floyd/internal/csync"
+	"github.com/legacy-ai/floyd/internal/home"
 )
 
 // fastIgnoreDirs is a set of directory names that are always ignored.

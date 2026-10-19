@@ -9,13 +9,13 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/agent"
 	"github.com/legacy-ai/floyd/internal/app"
 	"github.com/legacy-ai/floyd/internal/backend"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/session"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 

@@ -8,9 +8,9 @@ import (
 	"os/signal"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/legacy-ai/floyd/internal/client"
 	"github.com/legacy-ai/floyd/internal/config"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 )
 

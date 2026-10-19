@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/legacy-ai/floyd/internal/diff"
 	"github.com/legacy-ai/floyd/internal/fsext"
 	"github.com/legacy-ai/floyd/internal/history"
@@ -17,7 +18,6 @@ import (
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
 	"github.com/legacy-ai/floyd/internal/ui/util"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // loadSessionMsg is a message indicating that a session and its files have

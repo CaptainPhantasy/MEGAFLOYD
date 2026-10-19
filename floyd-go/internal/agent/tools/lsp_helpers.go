@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/legacy-ai/floyd/internal/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/legacy-ai/floyd/internal/lsp"
 )
 
 // resolvedSymbol holds the result of resolving a symbol name to an LSP position.

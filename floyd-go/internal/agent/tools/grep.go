@@ -20,10 +20,10 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/fsext"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns

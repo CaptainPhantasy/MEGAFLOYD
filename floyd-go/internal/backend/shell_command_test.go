@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/app"
 	"github.com/legacy-ai/floyd/internal/db"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/session"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 

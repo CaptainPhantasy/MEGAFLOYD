@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/invopop/jsonschema"
+	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

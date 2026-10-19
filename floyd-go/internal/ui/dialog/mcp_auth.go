@@ -10,9 +10,9 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	mcptools "github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/ui/common"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/pkg/browser"
 )
 
