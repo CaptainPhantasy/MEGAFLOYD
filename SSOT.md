@@ -81,6 +81,12 @@ historical, non-binding, and kept only as reference).
 31. MCP room endpoint in config: public URL when cloud, tailnet URL at home
     (public endpoint published by owner under floydslabs.com)
 32. FLOYD.md identity + workethic loaded at startup; memory checkpoint files
+33. Auth-server identity: megafloyd authenticates against the owner's auth
+    server (the f7 model, inference-hosted OAuth) — not raw local API keys
+34. Admin plane: invite + accept new users, grant/revoke access to company
+    tools and models (owner-attested; verify console in wave 4)
+35. Company tools + models access control inherited by cloud and phone
+    sessions — sign in from a Codespace exactly like at home
 
 ### D. Command surface (owner-ratified 2026-10-19)
 
