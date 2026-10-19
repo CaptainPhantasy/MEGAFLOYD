@@ -638,7 +638,7 @@ func (c *coordinator) eventHookRunner(event string, isSubAgent bool) *hooks.Runn
 	return hooks.NewRunner(eventHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
+func (c *coordinator) buildAgent(ctx context.Context, promptTemplate *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
 	large, small, err := c.buildAgentModels(ctx, isSubAgent)
 	if err != nil {
 		return nil, err
@@ -691,11 +691,19 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	initCtx := context.WithoutCancel(ctx)
 
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
+		systemPrompt, err := promptTemplate.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
 		if err != nil {
 			return err
 		}
-		result.SetSystemPrompt(systemPrompt)
+		// Split into static and dynamic parts so providers can cache the
+		// stable prefix (kernel + role) while the per-request environment
+		// block stays uncached.
+		promptData := prompt.PromptDataForDynamic(initCtx, c.cfg.WorkingDir(), *c.cfg.Config())
+		cacheable := prompt.BuildCacheablePrompts(initCtx, systemPrompt, promptData)
+		result.SetSystemPrompt(cacheable.StaticPrompt)
+		if dc, ok := result.(interface{ SetDynamicContext(string) }); ok {
+			dc.SetDynamicContext(cacheable.DynamicContext)
+		}
 		return nil
 	})
 
@@ -944,16 +952,16 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	}
 
 	return Model{
-		Model:      largeModel,
-		CatwalkCfg: *largeCatwalkModel,
-		ModelCfg:   largeModelCfg,
-		FlatRate:   largeProviderCfg.FlatRate,
-	}, Model{
-		Model:      smallModel,
-		CatwalkCfg: *smallCatwalkModel,
-		ModelCfg:   smallModelCfg,
-		FlatRate:   smallProviderCfg.FlatRate,
-	}, nil
+			Model:      largeModel,
+			CatwalkCfg: *largeCatwalkModel,
+			ModelCfg:   largeModelCfg,
+			FlatRate:   largeProviderCfg.FlatRate,
+		}, Model{
+			Model:      smallModel,
+			CatwalkCfg: *smallCatwalkModel,
+			ModelCfg:   smallModelCfg,
+			FlatRate:   smallProviderCfg.FlatRate,
+		}, nil
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {

@@ -177,7 +177,11 @@ type sessionAgent struct {
 	smallModel         *csync.Value[Model]
 	systemPromptPrefix *csync.Value[string]
 	systemPrompt       *csync.Value[string]
-	tools              *csync.Slice[fantasy.AgentTool]
+	// dynamicContext is the per-request environment block (cwd, git state,
+	// date, .supercache) injected as an uncached user message ahead of the
+	// conversation. It mirrors the v5.3 two-layer prompt architecture.
+	dynamicContext *csync.Value[string]
+	tools          *csync.Slice[fantasy.AgentTool]
 
 	isSubAgent           bool
 	sessions             session.Service
@@ -280,6 +284,7 @@ func NewSessionAgent(
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
+		dynamicContext:       csync.NewValue[string](""),
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
@@ -918,6 +923,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 
+			// Inject the per-request environment block as the first user
+			// message after the system messages. It is never cached so the
+			// static prompt prefix stays stable across turns.
+			if dynamicCtx := a.dynamicContext.Get(); dynamicCtx != "" {
+				insertIdx := 0
+				for i, msg := range prepared.Messages {
+					if msg.Role != fantasy.MessageRoleSystem {
+						insertIdx = i
+						break
+					}
+				}
+				dynamicMsg := fantasy.NewUserMessage(dynamicCtx)
+				dynamicMsg.ProviderOptions = nil
+				prepared.Messages = append(prepared.Messages[:insertIdx], append([]fantasy.Message{dynamicMsg}, prepared.Messages[insertIdx:]...)...)
+			}
+
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
 			for i, msg := range prepared.Messages {
@@ -936,6 +957,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			if promptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
+			}
+
+			// Inject the protocol kernel as its own system message directly
+			// after the provider prefix and before the role template. The
+			// role template carries the cache breakpoint, so providers cache
+			// the whole static prefix (kernel + role) as one block.
+			{
+				kernelMsg := fantasy.NewSystemMessage(string(protocolKernelTmpl))
+				kernelMsg.ProviderOptions = nil
+				insertAt := 0
+				if promptPrefix != "" {
+					insertAt = 1
+				}
+				prepared.Messages = append(prepared.Messages[:insertAt], append([]fantasy.Message{kernelMsg}, prepared.Messages[insertAt:]...)...)
+				slog.Debug("Protocol kernel injected", "position", insertAt, "total_messages", len(prepared.Messages))
 			}
 
 			sessionLock.Lock()
@@ -2217,6 +2253,13 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 	a.systemPrompt.Set(systemPrompt)
+}
+
+// SetDynamicContext installs the per-request environment block. It is
+// injected as an uncached user message before the conversation so providers
+// can keep the static system prefix cached.
+func (a *sessionAgent) SetDynamicContext(dynamicContext string) {
+	a.dynamicContext.Set(dynamicContext)
 }
 
 func (a *sessionAgent) Model() Model {
