@@ -75,6 +75,14 @@ func init() {
 		loginCmd,
 		statsCmd,
 		sessionCmd,
+		aiCmd,
+		codebaseCmd,
+		doctorCmd,
+		execCmd,
+		fileCmd,
+		promptCmd,
+		scoreboardCmd,
+		resilienceCmd,
 	)
 }
 
@@ -193,6 +201,10 @@ func Execute() {
 	// fix is to remove slog calls from config.Load and have it return
 	// warnings/diagnostics instead of logging them as a side effect.
 	slog.SetDefault(slog.New(slog.DiscardHandler))
+
+	// Present as megafloyd when the executable or MEGAFLOYD_BINARY_NAME says
+	// so; every other name keeps the floyd identity.
+	applyCLIName(rootCmd, resolveCLIName(os.Args[0], binaryNameOverride))
 
 	// NOTE: very hacky: we create a colorprofile writer with STDOUT, then make
 	// it forward to a bytes.Buffer, write the colored heartbit to it, and then

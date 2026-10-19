@@ -28,6 +28,10 @@ func main() {
 	// chassis defaults.
 	megafloyd.ApplyFromExecutable()
 
+	// MEGAFLOYD_BINARY_NAME selects the megafloyd identity for executables
+	// that cannot carry that name themselves (a renamed copy or a shim).
+	cmd.SetBinaryNameOverride(os.Getenv("MEGAFLOYD_BINARY_NAME"))
+
 	if os.Getenv("FLOYD_PROFILE") != "" {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")

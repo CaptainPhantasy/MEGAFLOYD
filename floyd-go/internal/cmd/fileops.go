@@ -361,7 +361,6 @@ func init() {
 	fileFindCmd.Flags().Bool("dirs", false, "Include directories in results")
 
 	fileCmd.AddCommand(fileReadCmd, fileInfoCmd, fileListCmd, fileMkdirCmd, fileWriteCmd, fileAppendCmd, fileApplyCmd, fileCopyCmd, fileRenameCmd, fileTempCmd, fileFindCmd, fileDiffCmd, fileRemoveCmd)
-	rootCmd.AddCommand(fileCmd)
 }
 
 func fileOpsManager(cmd *cobra.Command) (*fileops.Manager, error) {

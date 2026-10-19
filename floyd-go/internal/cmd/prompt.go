@@ -62,7 +62,6 @@ func init() {
 	promptRenderCmd.Flags().Bool("system", true, "Include system prompt in output")
 
 	promptCmd.AddCommand(promptListCmd, promptRenderCmd)
-	rootCmd.AddCommand(promptCmd)
 }
 
 func parseVars(items []string) (map[string]any, error) {
