@@ -97,3 +97,70 @@ func TestCommandsDialogDispatchesSlashName(t *testing.T) {
 	require.True(t, ok, "typing /usage and pressing enter must dispatch /usage")
 	require.Equal(t, "usage", run.Name)
 }
+
+func TestCommandsDialogDispatchesTypedArguments(t *testing.T) {
+	t.Parallel()
+
+	st := styles.CharmtonePantera()
+	com := &common.Common{
+		Workspace: &commandsTestWorkspace{cfg: &config.Config{}},
+		Styles:    &st,
+	}
+
+	for _, tc := range []struct {
+		typed string
+		want  string
+	}{
+		{"/theme light", "/theme light"},
+		{"/plan status", "/plan status"},
+		{"/add-dir /tmp", "/add-dir /tmp"},
+		{"/experiments ghost_text off", "/experiments ghost_text off"},
+		// Opening the palette consumes the leading slash.
+		{"theme light", "/theme light"},
+		{"plan status", "/plan status"},
+	} {
+		d, err := NewCommands(com, "", false, false, false, nil, nil)
+		require.NoError(t, err)
+		for _, r := range tc.typed {
+			d.HandleMsg(tea.KeyPressMsg{Code: r, Text: string(r)})
+		}
+		action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+		typed, ok := action.(ActionSlashInput)
+		require.True(t, ok, "typing %q and pressing enter must dispatch raw slash input", tc.typed)
+		require.Equal(t, tc.want, typed.Input)
+	}
+
+	// Unknown slash names must reach the model so it can warn instead of
+	// silently filtering to nothing.
+	d, err := NewCommands(com, "", false, false, false, nil, nil)
+	require.NoError(t, err)
+	for _, r := range "/nope" {
+		d.HandleMsg(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	typed, ok := action.(ActionSlashInput)
+	require.True(t, ok, "unknown slash commands must dispatch for a warning")
+	require.Equal(t, "/nope", typed.Input)
+}
+
+func TestPaletteOffersToggleTerminal(t *testing.T) {
+	t.Parallel()
+
+	st := styles.CharmtonePantera()
+	com := &common.Common{
+		Workspace: &commandsTestWorkspace{cfg: &config.Config{}},
+		Styles:    &st,
+	}
+	d, err := NewCommands(com, "", false, false, false, nil, nil)
+	require.NoError(t, err)
+
+	for _, item := range d.list.FilteredItems() {
+		if ci, ok := item.(*CommandItem); ok && ci.ID() == "toggle_terminal" {
+			_, ok := ci.Action().(ActionToggleTerminal)
+			require.True(t, ok, "toggle_terminal must use ActionToggleTerminal")
+			require.Equal(t, "alt+t", ci.Shortcut())
+			return
+		}
+	}
+	t.Fatal("palette is missing the toggle_terminal entry")
+}

@@ -23,7 +23,7 @@ type Opts struct {
 	FieldColor   color.Color // diagonal lines
 	TitleColorA  color.Color // left gradient ramp point
 	TitleColorB  color.Color // right gradient ramp point
-	CharmColor   color.Color // Charm™ text color
+	CharmColor   color.Color // Product label text color
 	VersionColor color.Color // version text color
 	Width        int         // width of the rendered logo, used for truncation
 	Hyper        bool        // whether it is Floyd or Hyperfloyd
@@ -40,9 +40,9 @@ type Opts struct {
 // The compact argument determines whether it renders compact for the sidebar
 // or wider for the main pane.
 func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
-	charm := "Charm™"
+	label := "megafloyd"
 	if !o.Hyper {
-		charm = " " + charm
+		label = " " + label
 	}
 
 	fg := func(c color.Color, s string) string {
@@ -62,11 +62,11 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 		}
 	}
 	floydLetterforms := []letterform{
-		LetterC,
-		LetterR,
-		LetterU,
-		LetterSAlt,
-		LetterH,
+		LetterF,
+		LetterL,
+		LetterO,
+		LetterY,
+		LetterD,
 	}
 	if o.Hyper && !compact {
 		floydLetterforms = append(hyperLetterforms, floydLetterforms...)
@@ -91,15 +91,15 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	}
 	floyd = b.String()
 
-	// Charm and version.
+	// Product label and version.
 	metaRowGap := 1
-	maxVersionWidth := floydWidth - lipgloss.Width(charm) - metaRowGap
+	maxVersionWidth := floydWidth - lipgloss.Width(label) - metaRowGap
 	version = ansi.Truncate(version, maxVersionWidth, "…") // truncate version if too long.
 	if o.Hyper && compact {
 		version += " "
 	}
-	gap := max(0, floydWidth-lipgloss.Width(charm)-lipgloss.Width(version))
-	metaRow := fg(o.CharmColor, charm) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
+	gap := max(0, floydWidth-lipgloss.Width(label)-lipgloss.Width(version))
+	metaRow := fg(o.CharmColor, label) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
 
 	// Join the meta row and big Floyd title.
 	floyd = strings.TrimSpace(metaRow + "\n" + floyd)
@@ -149,13 +149,11 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 // SmallRender renders a smaller version of the Floyd logo, suitable for
 // smaller windows or sidebar usage.
 func SmallRender(t *styles.Styles, width int, o Opts) string {
-	name := "Floyd"
+	name := "megafloyd"
 	if o.Hyper {
 		name = "HYPERFLOYD"
 	}
-	charm := "Charm™"
-	title := t.Logo.SmallCharm.Render(charm)
-	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t.Logo.GradCanvas, name, t.Logo.SmallGradFromColor, t.Logo.SmallGradToColor))
+	title := t.Logo.SmallCharm.Render(name)
 	remainingWidth := width - lipgloss.Width(title) - 1 // 1 for the space after the name
 	if remainingWidth > 0 {
 		lines := strings.Repeat("╱", remainingWidth)

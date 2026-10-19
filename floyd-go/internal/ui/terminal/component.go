@@ -189,13 +189,16 @@ func (c *Component) Focused() bool {
 	return c.focused
 }
 
-// Close tears down the PTY session and VT emulator.
+// Close tears down the PTY session.
+//
+// The VT emulator is deliberately not closed: x/vt's Emulator.Close writes
+// its closed flag without synchronisation while drainVTInput blocks in
+// Emulator.Read, which the race detector reports. Closing the session stops
+// the shell; the emulator and its drain goroutine are reclaimed when the
+// process exits.
 func (c *Component) Close() {
 	if c.session != nil {
 		c.session.Close() //nolint:errcheck
-	}
-	if c.vt != nil {
-		c.vt.Close() //nolint:errcheck
 	}
 }
 
