@@ -216,3 +216,11 @@ on macOS returns exit 126 (`cannot execute binary file`).
 `bash -n .devcontainer/post-create.sh` 0; `shellcheck` 0;
 `python3 -m json.tool` and `jq empty` on `devcontainer.json` 0;
 `go build ./...` 0 (no Go changed).
+- 2026-10-19 ~03:45: AUDIT REMEDIATION WAVES 3-4 MERGED. Jobs system (7 tools live),
+  plan mode (tools, guard, /plan, reminders), /web + /remote-control, admin client
+  (routes verified from server /platform.js; auth model open), cloud devcontainer
+  stamped + installer executed in temp prefix, add-dir + theme + experiments shipped.
+  Full race suite green; binary rebuilt (a051e7b); smoke: 46 commands installed,
+  doctor/resilience/scoreboard/auth/admin helps exit 0.
+  OPEN: admin auth key verification (owner key needed); /desktop target decision;
+  Codespaces blocked on owner-authorized push; Linux installer paths need Docker/VM.
