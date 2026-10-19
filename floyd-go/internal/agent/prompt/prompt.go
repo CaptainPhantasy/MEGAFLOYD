@@ -12,9 +12,11 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/filepathext"
 	"github.com/legacy-ai/floyd/internal/home"
+	"github.com/legacy-ai/floyd/internal/plugins"
 	"github.com/legacy-ai/floyd/internal/shell"
 	"github.com/legacy-ai/floyd/internal/skills"
 )
@@ -41,9 +43,9 @@ type PromptDat struct {
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
 	// AvailMCPXML, AvailPluginXML and PluginInstrXML mirror the v5.3 prompt
-	// interface used by the superfloyd role templates. They stay empty until
-	// the chassis MCP/plugin registries expose prompt-XML helpers; the
-	// templates guard every use with {{if}} so the sections simply omit.
+	// interface used by the superfloyd role templates. They are populated
+	// from the live MCP registry and the configured plugin paths; the
+	// templates guard every use with {{if}} so empty sections omit.
 	AvailMCPXML    string
 	AvailPluginXML string
 	PluginInstrXML string
@@ -56,6 +58,9 @@ type ContextFile struct {
 }
 
 type Option func(*Prompt)
+
+// mcpPromptXML is a seam for tests; production renders the live registry.
+var mcpPromptXML = mcp.ToPromptXML
 
 func WithTimeFunc(fn func() time.Time) Option {
 	return func(p *Prompt) {
@@ -212,6 +217,21 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		availSkillXML = skills.ToPromptXML(allSkills)
 	}
 
+	// MCP tools and plugins are rendered into the static prompt so the model
+	// knows which extended capabilities exist before its first tool call.
+	availMCPXML := mcpPromptXML()
+
+	var availPluginXML, pluginInstrXML string
+	if len(cfg.Options.PluginsPaths) > 0 {
+		expandedPaths := make([]string, 0, len(cfg.Options.PluginsPaths))
+		for _, pth := range cfg.Options.PluginsPaths {
+			expandedPaths = append(expandedPaths, expandPath(pth, store))
+		}
+		discovered := plugins.Discover(expandedPaths)
+		availPluginXML = plugins.ToPromptXML(discovered)
+		pluginInstrXML = plugins.ToInstructionsXML(discovered)
+	}
+
 	isGit := isGitRepo(store.WorkingDir())
 	agentName := cmp.Or(
 		os.Getenv("FLOYD_IDENTITY"),
@@ -219,15 +239,18 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		"Floyd",
 	)
 	data := PromptDat{
-		Provider:      provider,
-		Model:         model,
-		Config:        *cfg,
-		WorkingDir:    filepath.ToSlash(workingDir),
-		IsGitRepo:     isGit,
-		Platform:      platform,
-		Date:          p.now().Format("1/2/2006"),
-		AvailSkillXML: availSkillXML,
-		AgentName:     agentName,
+		Provider:       provider,
+		Model:          model,
+		Config:         *cfg,
+		WorkingDir:     filepath.ToSlash(workingDir),
+		IsGitRepo:      isGit,
+		Platform:       platform,
+		Date:           p.now().Format("1/2/2006"),
+		AvailSkillXML:  availSkillXML,
+		AvailMCPXML:    availMCPXML,
+		AvailPluginXML: availPluginXML,
+		PluginInstrXML: pluginInstrXML,
+		AgentName:      agentName,
 	}
 	if isGit {
 		var err error
