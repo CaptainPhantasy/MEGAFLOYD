@@ -46,6 +46,8 @@ Thumbs.db
 .direnv/
 
 **/.floyd/**
+!**/.floyd/commands/
+!**/.floyd/commands/**
 
 /floyd
 /tmp/
