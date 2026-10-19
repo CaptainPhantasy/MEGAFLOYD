@@ -42,6 +42,7 @@ Requires macOS (arm64), Node >= 22, and the pinned base app in `vendor/`.
 ```sh
 make icon      # regenerate desktop/assets/icon.icns
 make build     # vendor base -> build/MEGAFLOYD.app -> MEGAFLOYD.app
+make test      # unit tests (redaction, meta handshake)
 make verify    # 14 structural checks
 make smoke     # headless: platform handoff, ready state as JSON
 make smoke-ui  # window + UI load, prints title, bridge and URL, exits

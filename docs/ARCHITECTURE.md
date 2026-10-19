@@ -48,10 +48,15 @@ idle ──start──▶ starting ──ready signal──▶ ready
 
 ## Token handling
 
-The engine writes `~/.megafloyd/web/server.token` (0600) on first boot. The main process
-keeps the token in the URL fragment only — fragments are not sent to servers in HTTP
-requests, so the token never appears in access logs or referrers. The window is bound to
-the engine origin; navigation elsewhere opens the system browser.
+The token is printed only in the handoff's ready line; the main process keeps it in the
+URL fragment — fragments are not sent to servers in HTTP requests, so the token never
+appears in access logs or referrers. The window is bound to the engine origin; navigation
+elsewhere opens the system browser.
+
+Engine stdout is copied to `desktop.log` only after `desktop/src/redact.mjs` masks
+`token=` values and the `Token:` banner. Renderer-bound state is sanitized the same way,
+so the "Copy diagnostics" action cannot copy the token. The raw line still drives
+readiness parsing; redaction applies only to what is written down.
 
 ## Renderer boundary
 
@@ -91,3 +96,5 @@ Native behaviour that the platform UI cannot reach from a browser:
 - No preload access to the filesystem. File operations belong to the engine and the web UI.
 - No auto-update. The Kimi feed is gone; a MEGAFLOYD feed does not exist yet.
 - No remote bind. `--host` is never passed; Tailscale handoff stays an engine feature.
+  The engine may advertise a non-loopback `Web UI:` URL; the desktop never navigates to
+  it and suppresses the URL in `desktop.log`.

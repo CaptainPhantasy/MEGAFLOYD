@@ -76,7 +76,14 @@ check('app.asar contents', () => {
   const asar = path.join(CONTENTS, 'Resources', 'app.asar');
   if (!fs.existsSync(asar)) throw new Error('app.asar missing');
   const listing = execFileSync('npx', ['--yes', '@electron/asar', 'list', asar], { encoding: 'utf8', cwd: ROOT });
-  const required = ['/src/main.mjs', '/src/engine.mjs', '/src/preload.cjs', '/src/home.html', '/package.json'];
+  const required = [
+    '/src/main.mjs',
+    '/src/engine.mjs',
+    '/src/redact.mjs',
+    '/src/preload.cjs',
+    '/src/home.html',
+    '/package.json',
+  ];
   for (const entry of required) {
     if (!listing.split(NL).includes(entry)) throw new Error(`missing ${entry}`);
   }

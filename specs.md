@@ -54,14 +54,21 @@ Rules for this document:
 
 - **MUST**: the token live in `$MEGAFLOYD_HOME/server.token` (mode 0600) and
   reach the renderer only through the URL fragment.
-- NOTE: the engine writes `$MEGAFLOYD_HOME/web/server.token` (its data dir is
-  `<home>/web`). Observed mode 0600 on 2026-10-19.
 - **MUST**: readiness be confirmable independently of the printed line via
   `GET /api/v1/meta` (token-authenticated where required).
 - **MUST NOT**: the desktop persist the token in `localStorage`, logs, crash
   reports, or the status page.
-- Evidence: `docs/ARCHITECTURE.md` "Token handling"; `engine.mjs:394`.
-- Status: MET.
+- NOTE (platform build `1d15945`): the engine keeps the token in memory and
+  prints it in the ready line; a fresh home contains no `server.token` while
+  the server runs. The desktop consumes the printed URL and does not depend on
+  the file. The platform-side token-file MUST remains unmet.
+- Evidence: `desktop/src/engine.mjs` (bufferLines), `desktop/src/redact.mjs`,
+  `desktop/test/redact.test.mjs`, `desktop/scripts/check-log-secrets.mjs`.
+- Verified 2026-10-19: after `make smoke`, `desktop.log` contains only
+  `#token=<redacted>` and `Web UI: <non-loopback URL suppressed>`; the scan
+  reports 3/3. Renderer state is sanitized before the bridge, so diagnostics
+  copy cannot carry the token.
+- Status: MET for the desktop; the token-file half is OPEN on the platform.
 - Acceptance: grep the app logs and state dir for the token string; zero
   hits.
 
@@ -222,7 +229,11 @@ Rules for this document:
   new windows go to the system browser.
 - **MUST NOT**: the desktop implement remote/Tailscale serving; that stays an
   engine feature (`--web` handoff).
-- Evidence: `docs/ARCHITECTURE.md`; README "Runtime guarantees".
+- NOTE: the engine may advertise a non-loopback (Tailscale) `Web UI:` URL in
+  the handoff output. That is an engine feature; the desktop never navigates to
+  it and suppresses the URL in `desktop.log` (`redact.mjs`).
+- Evidence: `docs/ARCHITECTURE.md`; README "Runtime guarantees";
+  `desktop/test/redact.test.mjs`.
 - Status: MET.
 - Acceptance: attempt off-origin navigation and `window.open`; system
   browser opens, app window unchanged.

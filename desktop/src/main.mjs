@@ -29,6 +29,7 @@ import {
 } from './config.mjs';
 import { Engine } from './engine.mjs';
 import { Log } from './log.mjs';
+import { sanitizeState } from './redact.mjs';
 import { buildMenu } from './menu.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -146,7 +147,7 @@ async function onReady() {
   }
 
   engine.on('state', (state) => {
-    broadcast('megafloyd:state', state);
+    broadcast('megafloyd:state', sanitizeState(state));
     refreshTray();
     if (state.status === 'ready' && state.url) {
       engineOrigin = new URL(state.url).origin;
@@ -632,7 +633,9 @@ ipcMain.handle('megafloyd:info', (event) => {
   };
 });
 
-ipcMain.handle('megafloyd:state', (event) => (trusted(event) ? engine.snapshot() : null));
+ipcMain.handle('megafloyd:state', (event) =>
+  trusted(event) ? sanitizeState(engine.snapshot()) : null,
+);
 
 ipcMain.handle('megafloyd:open-app', (event) => {
   if (!trusted(event)) return;

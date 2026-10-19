@@ -15,6 +15,7 @@ import {
   megafloydBinaryCandidates,
   nodeWrapperCandidates,
 } from './config.mjs';
+import { redactSecrets } from './redact.mjs';
 
 const URL_PATTERN = /(http:\/\/127\.0\.0\.1:(\d+)\/[^\s]*#token=[A-Za-z0-9_-]+)/;
 const MAX_AUTO_RESTARTS = 3;
@@ -199,7 +200,7 @@ export class Engine extends EventEmitter {
           const line = buffer.slice(0, index).trimEnd();
           buffer = buffer.slice(index + 1);
           if (line.length === 0) continue;
-          this.log.write(level, `engine: ${line}`);
+          this.log.write(level, `engine: ${redactSecrets(line)}`);
           const match = URL_PATTERN.exec(line);
           if (match) becomeReady(match[1]);
           if (line.startsWith('Log:')) {

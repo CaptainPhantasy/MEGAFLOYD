@@ -53,6 +53,27 @@ dangling workspace self-link; `build.mjs` now prunes dangling symlinks before si
 
 `source: "bundled"` proves discovery picked the embedded binary, not `PATH`.
 
+## Log redaction and remote-URL suppression
+
+```
+$ make test
+✔ 9/9 redaction and state-sanitisation tests pass
+
+$ make smoke
+...
+node desktop/scripts/check-log-secrets.mjs /tmp/megafloyd-smoke
+PASS  desktop log written  1 log file(s)
+PASS  no token values in desktop log  token values redacted
+PASS  no non-loopback Web UI URL in desktop log  remote handoff URLs suppressed
+
+3/3 checks passed
+```
+
+`desktop.log` after the run carries `Local: .../#token=<redacted>` and
+`Web UI: <non-loopback URL suppressed>`. The raw ready line is still parsed for
+readiness; only the persisted copy is redacted. Renderer-bound state is sanitized before
+the IPC bridge, so the diagnostics copy cannot carry the token either.
+
 ## Window + UI (`--smoke-ui`)
 
 ```
