@@ -98,8 +98,14 @@ var _ Dialog = (*Models)(nil)
 
 // NewModels creates a new Models dialog.
 func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
+	return NewModelsForType(com, isOnboarding, ModelTypeLarge)
+}
+
+// NewModelsForType creates a model dialog that starts on the given model
+// type tab. /secondary-model uses ModelTypeSmall.
+func NewModelsForType(com *common.Common, isOnboarding bool, modelType ModelType) (*Models, error) {
 	t := com.Styles
-	m := &Models{}
+	m := &Models{modelType: modelType}
 	m.com = com
 	m.isOnboarding = isOnboarding
 
