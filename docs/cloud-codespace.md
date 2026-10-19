@@ -196,7 +196,8 @@ Checked on 2026-10-19:
   ```
 
   `-dirty` is present because the script was run before this change was
-  committed; a clean checkout prints `megafloyd version b64a4fb`.
+  committed. A post-commit rerun on the clean tree exited 0 and printed
+  `megafloyd version b87b129`, the then-current `git describe` value.
 - A copy of `post-create.sh` run in a fake checkout with no `.git` (and a stub
   `go` that emits a binary printing `devel`) — exit 1 with
   `megafloyd: ERROR: binary reports 'devel'; version and commit ldflags were not applied`.

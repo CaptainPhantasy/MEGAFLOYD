@@ -143,6 +143,9 @@ megafloyd version b64a4fb-dirty
 POST_CREATE_EXIT=0
 ```
 
+Post-commit rerun on the clean tree: exit 0, and the version line was
+`megafloyd version b87b129` (the then-current short commit).
+
 Negative test: the same script in a fake checkout with no `.git` and a stub
 `go` that emits a binary printing `devel` exited 1 with
 `megafloyd: ERROR: binary reports 'devel'; version and commit ldflags were not applied`.
