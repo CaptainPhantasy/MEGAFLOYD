@@ -224,3 +224,58 @@ on macOS returns exit 126 (`cannot execute binary file`).
   doctor/resilience/scoreboard/auth/admin helps exit 0.
   OPEN: admin auth key verification (owner key needed); /desktop target decision;
   Codespaces blocked on owner-authorized push; Linux installer paths need Docker/VM.
+
+## 2026-10-19 — house lane checkpoint (fix/house)
+
+Base `1d15945`. Closed the house lane: seven job command files, SSOT wave
+status, this checkpoint, and review notes.
+
+### Rewritten command files
+
+`floyd-go/.floyd/commands/`: `contract.md`, `prove.md`, `drift.md`,
+`why.md`, `recover.md`, `handoff.md`, `replay.md`.
+
+They now describe the shipped tools instead of pre-tool templates:
+`contract` (create/list/show/complete), `prove` (record/show), `drift`,
+`why`, `recover`, `handoff`, and read-only `replay`. Removed the
+`.harness/contracts/` JSON template, `transcript_export`, session-fork, and
+PROVEN/REFUTED prose. Storage is `<data>/jobs/<job_id>/`; verdicts are
+`passed`/`failed`/`unchecked`.
+
+Tool names verified:
+
+```text
+$ grep -n 'ToolName = ' internal/agent/tools/jobs_*.go
+jobs_contract.go:15:const ContractToolName = "contract"
+jobs_drift.go:15:const DriftToolName = "drift"
+jobs_handoff.go:16:const HandoffToolName = "handoff"
+jobs_prove.go:15:const ProveToolName = "prove"
+jobs_recover.go:13:const RecoverToolName = "recover"
+jobs_replay.go:13:const ReplayToolName = "replay"
+jobs_why.go:14:const WhyToolName = "why"
+```
+
+Registration: `internal/agent/coordinator.go:818`; allowlist:
+`internal/config/config.go:956-962`.
+
+### Gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Build | `GOCACHE=/tmp/mfl-house-gocache go build ./...` | exit 0 |
+| Targeted race | `GOCACHE=/tmp/mfl-house-gocache go test -race ./internal/jobs/... ./internal/agent/tools/... ./internal/commands/... ./internal/megafloyd/skills/...` | exit 0; 5 packages ok |
+| Full race | `GOCACHE=/tmp/mfl-house-gocache go test -race ./...` | exit 0; 67 ok, 36 no test files, 0 FAIL |
+| Format | `/Users/floyd/go/bin/gofumpt -l .` | exit 0; no files listed |
+
+The default shared build cache was missing entries
+(`/Users/floyd/Library/Caches/go-build/...: no such file or directory`), so
+the gates ran with an isolated `GOCACHE`. No Go files changed.
+
+### Known follow-up
+
+`internal/megafloyd/skills/data/*.md` is the embedded copy installed at
+startup and still holds the old seven files; it is outside this lane.
+Starting the binary in this repo rewrites `.floyd/commands` from that embed
+(`internal/app/app.go:175`, `internal/megafloyd/skills/install.go:148`).
+The seven `skills.json` registry entries are stale too. See
+`docs/review-notes.md`.

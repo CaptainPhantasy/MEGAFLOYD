@@ -1,23 +1,22 @@
-# Why — Explain The Reasoning Behind A Decision
+# Why — Quote The Recorded Journal Entry
 
-Answer "why is it this way?" with evidence: trace the decision to the conversation, commit, or doc that made it, and separate recorded rationale from inference. The anti-hallucination rule applies fully to history.
+Answer "why did this happen?" from a job's append-only journal. The `why` tool quotes the entry with the exact action id and never invents a rationale.
 
 ## Usage
 ```
-/why <CODE-OR-DECISION-REFERENCE>
+/why <JOB-ID> <ACTION-ID>
 ```
 
+## Tool
+`why` — parameters: `job_id` and `action_id`, both required.
+
 ## Procedure
-1. Locate the artifact: file:line, config key, or decision name (`grep`, `symbol_index`).
-2. Trace its history: `git log --follow -p -- <path>` via `bash` to the introducing commit; read the commit message and the diff's intent.
-3. Trace the conversation: `transcript_export` the session(s) that touched it, and search the export for the decision moment; `query_floyd_archive` reaches prior sessions.
-4. Check the docs: the SSOT and plan files for a recorded decision ([OWNER-DIRECTIVE] outranks everything).
-5. Answer in three parts, labeled:
-   - RECORDED: quoted rationale from commit/doc/transcript, with source cited.
-   - INFERRED: what the code structure implies, clearly marked as inference.
-   - UNKNOWN: what no source answers.
-6. If the recorded reason no longer holds, say so and name what would decide a change (owner question, test, benchmark).
+1. Find a real action id with `replay` (full journal), `recover` (last three entries per unfinished job), or the recent-journal section of a `handoff` packet.
+2. Call `why` with the exact `job_id` and `action_id`.
+3. Quote what the tool returns: timestamp, tool, action, requirement, detail, artifact SHA-256, and result. The reply starts with `RECORDED` when the entry exists.
+4. If the reply starts with `UNKNOWN`, say so. Do not reconstruct a rationale from surrounding code, commits, or memory.
 
 ## Rules
-- Never present inference as recorded rationale — the labels are the point of this skill.
-- "It seems they wanted" is banned; quote or mark UNKNOWN.
+- Recorded history is the only evidence this tool accepts; inference is not an answer.
+- Journal entries record tool actions: `contract created`, `requirement added`, `evidence recorded`, `completion recorded`, `handoff exported`.
+- The journal is append-only; ids are stable and must be quoted exactly.

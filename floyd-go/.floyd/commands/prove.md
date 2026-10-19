@@ -1,19 +1,26 @@
-# Prove — Verification Proof For A Claim
+# Prove — Record Evidence For A Requirement
 
-Back a specific claim ("it works", "tests pass", "the fix landed") with captured evidence: named checks, real output, hashes, timestamps. What /contract is to a whole task, /prove is to one claim.
+Record the real check behind a contract requirement. Every receipt stores the command, exit code, output SHA-256, an output excerpt, the artifact SHA-256, and a timestamp. The tool name is `prove`.
 
 ## Usage
 ```
-/prove <CLAIM>
+/prove <JOB-ID> <REQUIREMENT-ID>
 ```
 
+## Tool
+`prove` — actions: `record`, `show`.
+
 ## Procedure
-1. Restate the claim as a checkable statement: name the artifact (file, command, behavior) and what "true" means for it.
-2. Choose checks that directly test the claim — build for "compiles", tests for "works", the reproduction (/reproduce) for "fixed", /invariants for "safe". Cite the artifact: exact path, and its SHA-256 (`shasum -a 256 <file>` via `bash`) so the proof is bound to bytes.
-3. Run the checks via `bash`; capture command, exit code, and the decisive output lines verbatim. Long suites run under /shadow.
-4. Write the proof record to `.harness/proofs/<slug>.md` with the `write` tool: claim, checks (commands), results (exit codes + output), artifact hashes, timestamp.
-5. Verdict, one of: PROVEN (every check passed, hashes match), REFUTED (a check failed — show it), UNPROVEN (a needed check could not run — name it). Partial passes are UNPROVEN, with the gap named.
+1. Run the actual check with `bash` and capture the exit status plus the decisive output lines.
+2. Call `prove` with `action=record`, `job_id`, `requirement` (the generated id, e.g. `tests-pass`), `command`, `exit_code`, and `output`.
+   - Exit code `0` records PASSED; any other exit code records FAILED.
+   - The artifact hash defaults to the contract's artifact. Pass `artifact` or `artifact_hash` only when the evidence must bind to a different file or a pre-computed hash; `artifact_version` adds an optional label.
+3. Call `prove` with `action=show`, `job_id`, and optionally `requirement`, to read the verdicts back.
+4. Re-record after any artifact change. A receipt bound to an older hash no longer counts.
 
 ## Rules
-- The verdict follows the evidence, never the reverse; a claim you cannot check is UNPROVEN, not PROVEN-with-caveats.
-- A proof older than the artifact's last change is void — re-run on change.
+- The latest receipt decides: a later failed receipt overrides an earlier pass.
+- `unchecked` means no evidence, or evidence recorded against a different artifact hash. It never means passed.
+- Output is written to an excerpt file and hashed, so quote the lines that decide the result.
+- A failed check is evidence too: record it with its nonzero exit code instead of hiding it.
+- Do not claim a result in prose that `prove show` does not report.

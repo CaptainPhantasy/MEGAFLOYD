@@ -1,19 +1,23 @@
-# Drift — Detect Plan-Reality Divergence
+# Drift — Compare Changes To Declared Scope
 
-Compare what the plan/SSOT says against what the code and state actually are, and list every place they disagree. Drift is detected, reported, and then either the state or the doc is corrected — never left ambiguous.
+Compare the files a job changed against the paths its contract declared. The `drift` tool reports work that escaped the plan; it never edits files.
 
 ## Usage
 ```
-/drift [doc-path]
+/drift <JOB-ID>
 ```
 
+## Tool
+`drift` — parameters: `job_id` (required), `paths` (optional).
+
 ## Procedure
-1. Load the reference: the SSOT.md section or plan file given (default: the active plan in `.harness/plans/` or the repo SSOT).
-2. Extract checkable claims: statuses ("done", "verified"), file lists, behavior statements, command names.
-3. Verify each against reality: `grep`/`glob` for files and symbols, `get_active_diff` and `git log` for claimed work, `bash` to run claimed-passing checks. Tag each claim VERIFIED or DRIFTED (SSOT P1 evidence tags).
-4. Report the drift table: claim | source line | reality | evidence. Group into: doc behind code (doc needs update), code behind doc (work missing), claims without evidence (need verification or removal).
-5. Propose the realignment per row; apply doc-side fixes immediately with the `edit` tool (code-side fixes are tasks, not edits here — /plan them).
+1. Call `drift` with `job_id`. By default it reads changed paths from `git status --porcelain --untracked-files=all` in the working directory.
+2. Pass `paths` only to review an explicit list; this is required outside a git repository.
+3. Read the report: declared scope, changed-path count, and each violation with its reason.
+4. For every violation, either revert the change or accept it by declaring a new contract with the corrected scope. `drift` does not modify the contract.
 
 ## Rules
-- Every DRIFTED row cites both sides: the doc line and the reality check that contradicts it.
-- Drift runs read-only against code; it never "fixes" reality by editing the doc to match broken behavior — that is a decision for the caller.
+- Scope matching is prefix-based: `internal/jobs` covers `internal/jobs/jobs.go`.
+- An empty scope declares nothing in scope, so every changed path is a violation.
+- Violation reasons are exact: `outside declared scope` or `no scope declared in contract`.
+- A violation is a finding, not an automatic failure. Report it before claiming completion.

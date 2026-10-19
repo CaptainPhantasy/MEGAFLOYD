@@ -194,6 +194,23 @@ chassis markdown-command + skills + MCP-prompt loaders.
   Known cosmetic churn: gofumpt reformatted 137 pre-existing chassis files.
   WAVE 3 dispatched (UI dialogs, slash layer, ghost-text, CLI commands);
   pre-merge check against approved P6 list required.
+- 2026-10-19: WAVE 3 MERGED — audit remediation lanes: f52b254 (job-record
+  system: `contract`, `prove`, `drift`, `why`, `recover`, `handoff`,
+  `replay`; registered via `JobsTools` at
+  `internal/agent/coordinator.go:818` and allowlisted at
+  `internal/config/config.go:956-962`), dfc34fa (web wiring), c0aa0c5
+  (admin client; routes read from `server /platform.js`, auth key open),
+  d9ebe14 (cloud devcontainer and installer; temp-prefix run on macOS),
+  5a2f153 (plan mode and job-tools activation), a051e7b (add-dir, theme,
+  experiments). [VERIFIED: tool names by grep; commits by `git log`]
+- 2026-10-19: WAVE 4 MERGED WITH OPEN ITEMS — integration checkpoint
+  1d15945. Build exit 0 and targeted `-race` tests green on `fix/house` for
+  jobs, agent/tools, commands, and megafloyd/skills; full `go test -race
+  ./...` exit 0 (67 ok, 36 no test files, 0 FAIL); `gofumpt -l .` clean.
+  OPEN: admin auth key verification (owner key), `/desktop` target,
+  Codespaces push (owner authorization), Linux installer paths
+  (Docker/VM), live provider session, cassette re-record. [VERIFIED for the
+  gates; open items tracked in progress.md]
 - 2026-10-19: Owner approved P1-P6; process rules promoted into §5.4.
 
 ### E. Full skill mandate [OWNER-DIRECTIVE 2026-10-19]
