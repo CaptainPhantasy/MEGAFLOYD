@@ -75,6 +75,14 @@ func init() {
 		loginCmd,
 		statsCmd,
 		sessionCmd,
+		aiCmd,
+		codebaseCmd,
+		doctorCmd,
+		execCmd,
+		fileCmd,
+		promptCmd,
+		scoreboardCmd,
+		resilienceCmd,
 	)
 }
 

@@ -173,7 +173,6 @@ func init() {
 	codebaseSearchCmd.Flags().StringSlice("ignore", nil, "Ignore pattern (repeatable)")
 
 	codebaseCmd.AddCommand(codebaseAnalyzeCmd, codebaseDepsCmd, codebaseSearchCmd)
-	rootCmd.AddCommand(codebaseCmd)
 }
 
 func getArgOrCwd(args []string) string {

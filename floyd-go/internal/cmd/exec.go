@@ -74,6 +74,4 @@ func init() {
 	execCmd.PersistentFlags().StringArray("deny-regex", nil, "Denied command regex (repeatable)")
 	execCmd.PersistentFlags().StringArray("env", nil, "Environment variable override, e.g. --env KEY=value")
 	execCmd.PersistentFlags().String("cwd", "", "Working directory")
-
-	rootCmd.AddCommand(execCmd)
 }

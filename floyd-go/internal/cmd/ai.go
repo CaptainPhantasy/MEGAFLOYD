@@ -140,5 +140,4 @@ func init() {
 	aiDryRunCmd.Flags().Bool("pretty", true, "Pretty print JSON output")
 
 	aiCmd.AddCommand(aiDryRunCmd)
-	rootCmd.AddCommand(aiCmd)
 }
