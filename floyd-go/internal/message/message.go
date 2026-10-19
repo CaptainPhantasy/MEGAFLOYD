@@ -54,6 +54,11 @@ type Service interface {
 	GetLastAssistantMessage(ctx context.Context, sessionID string) (Message, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
+	// SearchTechnicalArchive queries stored messages with a technical
+	// filter: matches must be assistant tool-call turns, tool results,
+	// or messages containing code blocks. It backs the archive_query
+	// tool; it requires a raw DB connection (see WithDB).
+	SearchTechnicalArchive(ctx context.Context, projectPath, query string, limit int) ([]ArchiveResult, error)
 
 	// Flush synchronously drains any pending debounced state for the
 	// given message ID, performs the SQL write, and publishes the
@@ -104,6 +109,7 @@ type pendingState struct {
 type service struct {
 	*pubsub.Broker[Message]
 	q        db.Querier
+	db       *sql.DB
 	debounce time.Duration
 
 	mu      sync.Mutex
@@ -112,6 +118,16 @@ type service struct {
 
 // ServiceOption configures a [Service] at construction.
 type ServiceOption func(*service)
+
+// WithDB attaches a raw database connection for queries that cannot be
+// expressed through the generated sqlc queries (currently the
+// SearchTechnicalArchive LIKE search). Optional: without it,
+// SearchTechnicalArchive returns an error.
+func WithDB(conn *sql.DB) ServiceOption {
+	return func(s *service) {
+		s.db = conn
+	}
+}
 
 // WithDebounce overrides the debounce window for [Service.Update]. A
 // zero or negative value disables debouncing entirely (every update

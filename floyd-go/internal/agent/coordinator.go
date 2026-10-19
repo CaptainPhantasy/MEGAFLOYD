@@ -40,6 +40,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/question"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/skills"
+	"github.com/legacy-ai/floyd/internal/workflow"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -721,9 +722,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	// Get the model name for the agent
 	modelID := ""
+	contextWindow := int64(0)
 	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
 		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
 			modelID = model.ID
+			contextWindow = int64(model.ContextWindow)
 		}
 	}
 
@@ -758,6 +761,32 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewTodosTool(c.sessions),
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+	)
+
+	// v5.3 agent tool set: parallel execution, context intelligence,
+	// self-correction support, and lab/workflow tooling.
+	allTools = append(
+		allTools,
+		tools.NewParallelBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
+		tools.NewContextStatusTool(c.sessions, contextWindow),
+		tools.NewComplexityEstimatorTool(),
+		tools.NewRefactorBlueprintTool(),
+		tools.NewFailureModeEnumeratorTool(),
+		tools.NewTranscriptExportTool(c.sessions, c.messages, contextWindow, c.cfg.WorkingDir()),
+		tools.NewArchiveQueryTool(c.messages, c.cfg.WorkingDir()),
+		tools.NewSymbolIndexTool(c.cfg.WorkingDir()),
+		tools.NewVisionTool(c.permissions, c.cfg.WorkingDir()),
+		tools.NewWorkflowTool(workflow.NewEngine(c.cfg.WorkingDir())),
+		tools.NewMCPTaskStatusTool(),
+		tools.NewProjectMapTool(c.cfg.WorkingDir()),
+		tools.NewManageScratchpadTool(c.cfg.WorkingDir()),
+		tools.NewListSymbolsTool(c.cfg.WorkingDir()),
+		tools.NewApplyPatchTool(c.cfg.WorkingDir()),
+		tools.NewSmartReplaceTool(c.cfg.WorkingDir()),
+		tools.NewGetActiveDiffTool(c.cfg.WorkingDir()),
+		tools.NewSpawnLabTool(c.cfg.WorkingDir()),
+		tools.NewExecuteLabTool(),
+		tools.NewTeardownLabTool(),
 	)
 
 	// Question tool is interactive-only and not available to sub-agents.
