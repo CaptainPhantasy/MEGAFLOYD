@@ -5,7 +5,21 @@ This file supersedes all prior planning documents in this repo
 (`task_plan.md`, `PLAN.md`, `HANDOFF.md`, `progress.md`, `findings.md` are
 historical, non-binding, and kept only as reference).
 
-## 1. Product definition (owner's words, binding)
+## 0. Provenance and law-making (OWNER-DIRECTIVE 2026-10-19)
+
+Every rule in this file carries a tag:
+- **[OWNER-DIRECTIVE]** — the owner said it, in conversation, and it was
+  written down as law. Nothing becomes this tag silently; if there is any
+  chance of drift, the agent ASKS before writing it, regardless of any
+  "don't ask questions" instruction. This overrides all other rules.
+- **[AGENT-PROPOSAL]** — the agent's engineering or process choice. Never
+  constrains the product. The owner may strike or change any of these at
+  any time without notice; the agent adapts.
+Passing conversation does NOT become law. If the agent is unsure whether
+something the owner said is a directive or a remark, it asks. Clear
+separation between owner intent and agent implementation is mandatory.
+
+## 1. Product definition ([OWNER-DIRECTIVE] — owner's words, binding)
 
 - One new entity, launched as **`megafloyd`**. Its own command, its own home
   dir (`~/.megafloyd`), its own package. Replaces nothing — `floyd-v6`,
@@ -121,28 +135,37 @@ chassis markdown-command + skills + MCP-prompt loaders.
 
 ## 4. Build waves (each: own worktree, build+test+lint gates, semantic commits)
 
-- Wave 1 — leaf/utility packages (19 files): RUNNING
-- Wave 2 — agent layer: ralph, 21 tools, workflow, plugins, extensibility
+- Wave 1 — leaf/utility packages (19 files): DONE, merged to main
+- Wave 2 — agent layer: ralph, 21 tools, workflow, plugins, extensibility:
+  RUNNING (worktree port/wave2-agent)
 - Wave 3 — UI dialogs + cmd commands
 - Wave 4 — integration wiring + megafloyd packaging + cloud path
 - Gate between waves: `go build ./...`, `go test -race ./internal/...`,
   `gofumpt`, commit per package cluster. No wave starts before the prior
   wave merges to main.
 
-## 5. Operating rules (binding on every agent on this project)
+## 5. Operating rules
 
-0. Tools are agent-autonomous by default: every ported tool registers in the
-   agent tool registry with its description file, so the model decides when
-   to use it. Slash commands are manual overrides for the owner — never the
-   primary interface. (Owner-ratified 2026-10-19.)
+0. [OWNER-DIRECTIVE 2026-10-19] Tools are agent-autonomous by default: every
+   ported tool registers in the agent tool registry with its description
+   file, so the model decides when to use it. Slash commands are manual
+   overrides for the owner — never the primary interface.
 
-1. Evidence tags: VERIFIED (ran it) / HYPOTHESIS / LEAD. Never assert state
-   without the command and its output.
-2. Donor repos are read-only. All work lands in this repo.
-3. Never weaken permission checks. Never commit secrets or credentials.
-4. Three-strike rule: three failed attempts on one defect = stop and report.
-5. Memory: update this SSOT + progress notes at every wave boundary.
-6. Owner gate: waves 2-4 do not start until the owner ratifies §3.
+1. [AGENT-PROPOSAL, pending owner endorsement] Evidence tags: VERIFIED
+   (ran it) / HYPOTHESIS / LEAD. Never assert state without the command and
+   its output.
+2. [OWNER-DIRECTIVE — safety] Donor repos are read-only. Never weaken
+   permission checks. Never commit secrets or credentials.
+3. [OWNER-DIRECTIVE] No upstream connection: never fetch, pull, or push any
+   charmbracelet remote; never redistribute.
+4. [AGENT-PROPOSAL, pending owner endorsement] Three-strike rule: three
+   failed attempts on one defect = stop and report.
+5. [AGENT-PROPOSAL, pending owner endorsement] Memory: update this SSOT +
+   progress notes at every wave boundary.
+6. [AGENT-PROPOSAL, superseded by §0] Process rules the agent adopts (wave
+   gates, worktrees, commit conventions) are proposals, not law. The owner
+   may redirect at any time. When alignment is in doubt, ask — do not guess,
+   do not enshrine.
 
 ## 6. Status log
 
