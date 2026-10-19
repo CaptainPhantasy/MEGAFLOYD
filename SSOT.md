@@ -195,3 +195,19 @@ chassis markdown-command + skills + MCP-prompt loaders.
   WAVE 3 dispatched (UI dialogs, slash layer, ghost-text, CLI commands);
   pre-merge check against approved P6 list required.
 - 2026-10-19: Owner approved P1-P6; process rules promoted into §5.4.
+
+### E. Full skill mandate [OWNER-DIRECTIVE 2026-10-19]
+
+Every named command from the owner's 2026-10-19 harness-research document
+becomes a real skill in megafloyd, triggered by its name:
+
+/btw /compact /context /rewind /branch /fork /plan /loop /remote-control
+/effort /fast /mcp /doctor /bisect /handoff /arena /race /invariants
+/redteam /shadow /blast-radius /freeze /thaw /checkpoint /restore
+/spec-sync /route /retro /contract /prove /recover /budget /drift
+/reproduce /replay /why /compare /promote /learn /test /lint
+/security-review /debug
+
+Combining rule: when two skills' work overlaps 90%+, build ONE skill that
+answers to both names (e.g. /branch + /fork). No skill may be replaced by
+"something roughly equivalent" — the named trigger must do the named job.
