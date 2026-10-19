@@ -735,6 +735,25 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update terminal capabilities
 	m.caps.Update(msg)
 	switch msg := msg.(type) {
+	case builtinResultMsg:
+		if msg.Err != nil {
+			cmds = append(cmds, util.ReportError(msg.Err))
+		}
+		if msg.Info != "" {
+			cmds = append(cmds, util.ReportInfo(msg.Info))
+		}
+		if msg.Clipboard != "" {
+			cmds = append(cmds, tea.SetClipboard(msg.Clipboard))
+		}
+		if msg.ReloadTUI {
+			m.reapplyTUI()
+		}
+		if msg.Title != "" {
+			cmds = append(cmds, m.showInfo(msg.Title, msg.Body))
+		}
+		if msg.Send != "" {
+			cmds = append(cmds, m.sendMessage(msg.Send))
+		}
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
 		if !m.sendProgressBar {
@@ -1968,6 +1987,18 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, msg.Cmd)
 		}
 
+	case dialog.ActionRunBuiltin:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd := m.runBuiltin(msg.Name, msg.Args, msg.FromPalette); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
+	case dialog.ActionSetPermissionMode:
+		m.dialog.CloseDialog(dialog.PermissionModeID)
+		if cmd := m.setSkipRequests(msg.SkipRequests); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
 	// Session dialog messages.
 	case dialog.ActionSelectSession:
 		m.dialog.CloseDialog(dialog.SessionsID)
@@ -2712,6 +2743,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 
 				value = strings.TrimSpace(value)
+				if cmd, handled := m.dispatchSlashInput(value); handled {
+					m.randomizePlaceholders()
+					m.historyReset()
+					return cmd
+				}
 				if value == "exit" || value == "quit" {
 					return m.openQuitDialog()
 				}
