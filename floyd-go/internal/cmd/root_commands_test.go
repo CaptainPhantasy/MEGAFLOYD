@@ -7,8 +7,8 @@ import (
 )
 
 func TestRootCommandRegistersPortedSubcommands(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: cobra.Command.Commands sorts the shared root command
+	// slice in place, which races with parallel Find callers.
 	required := []string{
 		"ai",
 		"codebase",
