@@ -92,20 +92,20 @@ separation between owner intent and agent implementation is mandatory.
     ask for a repeat.
 
 ### C. Packaging & delivery (wave 4)
-27. `megafloyd` launcher binary + own home dir; MEGAFLOYD_* env namespace;
+28. `megafloyd` launcher binary + own home dir; MEGAFLOYD_* env namespace;
     zero collision with existing floyd commands
-28. Local builds: macOS arm64 (+ amd64), linux amd64/arm64
-29. Cloud install: one-command script + devcontainer for Codespace/VM
-30. Phone-reachable surface served from the cloud instance (web front over
+29. Local builds: macOS arm64 (+ amd64), linux amd64/arm64
+30. Cloud install: one-command script + devcontainer for Codespace/VM
+31. Phone-reachable surface served from the cloud instance (web front over
     serve mode; exact surface chosen by code evidence in wave 4)
-31. MCP room endpoint in config: public URL when cloud, tailnet URL at home
+32. MCP room endpoint in config: public URL when cloud, tailnet URL at home
     (public endpoint published by owner under floydslabs.com)
-32. FLOYD.md identity + workethic loaded at startup; memory checkpoint files
-33. Auth-server identity: megafloyd authenticates against the owner's auth
+33. FLOYD.md identity + workethic loaded at startup; memory checkpoint files
+34. Auth-server identity: megafloyd authenticates against the owner's auth
     server (the f7 model, inference-hosted OAuth) — not raw local API keys
-34. Admin plane: invite + accept new users, grant/revoke access to company
+35. Admin plane: invite + accept new users, grant/revoke access to company
     tools and models (owner-attested; verify console in wave 4)
-35. Company tools + models access control inherited by cloud and phone
+36. Company tools + models access control inherited by cloud and phone
     sessions — sign in from a Codespace exactly like at home
 
 ### D. Command surface (owner-ratified 2026-10-19)
