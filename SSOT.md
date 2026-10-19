@@ -99,7 +99,10 @@ registry:
    /reload /reload-tui /compact /init /fork /title /usage /status /undo
    /editor /theme /login /logout /export-md /export-debug-zip /copy /exit
    /version /swarm /goal /btw /web /remote-control /desktop /feedback
-2. Superfloyd intelligence shortcuts: /ralph /ralph-status /ralph-cancel
+2. Superfloyd intelligence shortcuts — NOTE: every item below is FIRST a
+   built-in agent tool registered in the tool registry with its description
+   file (model-invoked, autonomous — SSOT rule 0). The slash is only an
+   optional manual alias for the owner: /ralph /ralph-status /ralph-cancel
    /selfheal /parallel-bash /workflow /project-map /symbol-index
    /transcript-export /archive-query /scratchpad /context-status /budget
    /scoreboard /doctor /prompt /ai /stash /ghost /vision /lab /resilience
