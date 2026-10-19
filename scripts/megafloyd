@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# megafloyd launcher.
+#
+# Exports the MEGAFLOYD_* namespace, mirrors the FLOYD_* variables the chassis
+# reads, creates the home layout, and execs the binary. See
+# docs/megafloyd-namespace.md.
+#
+# Override the binary with MEGAFLOYD_BIN=/path/to/megafloyd.
+set -euo pipefail
+
+APP=megafloyd
+
+# shellcheck disable=SC1007 # CDPATH= is an env assignment, not an empty value.
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+
+MEGAFLOYD_HOME=${MEGAFLOYD_HOME:-"$HOME/.megafloyd"}
+
+# Directory precedence matches internal/megafloyd: an explicit MEGAFLOYD_*
+# value wins, then an inherited FLOYD_* value, then the home subdirectory.
+if [ -n "${MEGAFLOYD_CONFIG_DIR:-}" ]; then
+	:
+elif [ -n "${FLOYD_GLOBAL_CONFIG:-}" ]; then
+	MEGAFLOYD_CONFIG_DIR=$FLOYD_GLOBAL_CONFIG
+else
+	MEGAFLOYD_CONFIG_DIR=$MEGAFLOYD_HOME/config
+fi
+
+if [ -n "${MEGAFLOYD_DATA_DIR:-}" ]; then
+	:
+elif [ -n "${FLOYD_GLOBAL_DATA:-}" ]; then
+	MEGAFLOYD_DATA_DIR=$FLOYD_GLOBAL_DATA
+else
+	MEGAFLOYD_DATA_DIR=$MEGAFLOYD_HOME/data
+fi
+
+if [ -n "${MEGAFLOYD_CACHE_DIR:-}" ]; then
+	:
+elif [ -n "${FLOYD_CACHE_DIR:-}" ]; then
+	MEGAFLOYD_CACHE_DIR=$FLOYD_CACHE_DIR
+else
+	MEGAFLOYD_CACHE_DIR=$MEGAFLOYD_HOME/cache
+fi
+
+mkdir -p "$MEGAFLOYD_HOME" \
+	"$MEGAFLOYD_CONFIG_DIR" \
+	"$MEGAFLOYD_DATA_DIR" \
+	"$MEGAFLOYD_CACHE_DIR" \
+	"$MEGAFLOYD_HOME/state" \
+	"$MEGAFLOYD_HOME/logs"
+
+export MEGAFLOYD_HOME MEGAFLOYD_CONFIG_DIR MEGAFLOYD_DATA_DIR MEGAFLOYD_CACHE_DIR
+export MEGAFLOYD_ACTIVE=1
+
+# Compatibility mirrors, derived from the resolved values above.
+export FLOYD_GLOBAL_CONFIG=$MEGAFLOYD_CONFIG_DIR
+export FLOYD_GLOBAL_DATA=$MEGAFLOYD_DATA_DIR
+export FLOYD_CACHE_DIR=$MEGAFLOYD_CACHE_DIR
+
+if [ -n "${MEGAFLOYD_IDENTITY:-}" ]; then
+	export FLOYD_IDENTITY=${FLOYD_IDENTITY:-"$MEGAFLOYD_IDENTITY"}
+fi
+if [ -n "${MEGAFLOYD_PROFILE:-}" ]; then
+	export FLOYD_PROFILE=${FLOYD_PROFILE:-"$MEGAFLOYD_PROFILE"}
+fi
+if [ -n "${MEGAFLOYD_SKILLS_DIR:-}" ]; then
+	export FLOYD_SKILLS_DIR=${FLOYD_SKILLS_DIR:-"$MEGAFLOYD_SKILLS_DIR"}
+fi
+
+# Resolve the binary. MEGAFLOYD_BIN wins; otherwise look beside the script
+# (repo checkout), in the user install location, then on PATH. A candidate
+# that is this script itself is skipped so exec cannot loop.
+REAL=""
+consider() {
+	if [ -n "$1" ] && [ -x "$1" ] && ! [ "$1" -ef "$0" ]; then
+		REAL=$1
+		return 0
+	fi
+	return 1
+}
+
+if [ -n "${MEGAFLOYD_BIN:-}" ]; then
+	consider "$MEGAFLOYD_BIN" || {
+		printf '%s: MEGAFLOYD_BIN is not executable: %s\n' "$APP" "$MEGAFLOYD_BIN" >&2
+		exit 127
+	}
+fi
+
+if [ -z "$REAL" ]; then
+	consider "$SELF_DIR/../dist/$APP" || true
+fi
+if [ -z "$REAL" ]; then
+	consider "$SELF_DIR/$APP" || true
+fi
+if [ -z "$REAL" ]; then
+	consider "$HOME/.local/bin/$APP" || true
+fi
+if [ -z "$REAL" ]; then
+	PATH_BIN=$(command -v "$APP" 2>/dev/null || true)
+	consider "$PATH_BIN" || true
+fi
+
+if [ -z "$REAL" ]; then
+	cat >&2 <<EOF
+$APP: cannot find the $APP binary.
+
+Build it first:
+  cd floyd-go && go build -o ../dist/$APP .
+
+Or point at an existing build:
+  MEGAFLOYD_BIN=/path/to/$APP $APP
+
+Home: $MEGAFLOYD_HOME
+EOF
+	exit 127
+fi
+
+# Pass --data-dir unless the caller already chose one.
+has_data_dir=0
+for argument in "$@"; do
+	case "$argument" in
+	-D|-D=*|--data-dir|--data-dir=*) has_data_dir=1 ;;
+	esac
+done
+
+if [ "$has_data_dir" -eq 1 ]; then
+	exec -a "$APP" "$REAL" "$@"
+fi
+exec -a "$APP" "$REAL" --data-dir "$MEGAFLOYD_DATA_DIR" "$@"
