@@ -781,7 +781,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	)
 
 	// v5.3 agent tool set: parallel execution, context intelligence,
-	// self-correction support, and lab/workflow tooling.
+	// self-correction support, and lab/workflow tooling. This block
+	// registers 20 tools. The donor directory also contains
+	// selfheal.go (the edit/write build check), progress.go (the tool
+	// progress broker), and registry.go (MCP registry reporting); none
+	// of those are agent tools.
 	allTools = append(
 		allTools,
 		tools.NewParallelBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
@@ -952,16 +956,16 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	}
 
 	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
-		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
-		}, nil
+		Model:      largeModel,
+		CatwalkCfg: *largeCatwalkModel,
+		ModelCfg:   largeModelCfg,
+		FlatRate:   largeProviderCfg.FlatRate,
+	}, Model{
+		Model:      smallModel,
+		CatwalkCfg: *smallCatwalkModel,
+		ModelCfg:   smallModelCfg,
+		FlatRate:   smallProviderCfg.FlatRate,
+	}, nil
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
