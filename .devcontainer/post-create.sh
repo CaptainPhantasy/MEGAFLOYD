@@ -5,6 +5,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GO_DIR="$REPO_ROOT/floyd-go"
+MODULE_PATH="github.com/legacy-ai/floyd"
 
 MEGAFLOYD_HOME="${MEGAFLOYD_HOME:-$HOME/.megafloyd}"
 MEGAFLOYD_DATA_DIR="${MEGAFLOYD_DATA_DIR:-$MEGAFLOYD_HOME/data}"
@@ -58,16 +59,36 @@ echo "megafloyd: $(go version)"
 echo "megafloyd: downloading Go modules"
 go mod download
 
-VERSION="$(git -C "$REPO_ROOT" describe --tags --long --dirty 2>/dev/null || true)"
+# Match scripts/build-megafloyd.sh: `--always` falls back to the short commit
+# when the clone has no tags, so a plain checkout never reports "devel".
+VERSION="$(git -C "$REPO_ROOT" describe --tags --always --dirty 2>/dev/null || true)"
 VERSION="${VERSION:-devel}"
+COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
-echo "megafloyd: building version $VERSION"
-CGO_ENABLED=0 GOEXPERIMENT=greenteagc go build -trimpath \
-  -ldflags "-s -w -X github.com/legacy-ai/floyd/internal/version.Version=${VERSION}" \
+LDFLAGS="-s -w"
+LDFLAGS+=" -X ${MODULE_PATH}/internal/version.Version=${VERSION}"
+LDFLAGS+=" -X ${MODULE_PATH}/internal/version.Commit=${COMMIT}"
+
+echo "megafloyd: building version $VERSION (commit $COMMIT)"
+CGO_ENABLED=0 GOEXPERIMENT=greenteagc go build -trimpath -buildvcs=false \
+  -ldflags "$LDFLAGS" \
   -o "$MEGAFLOYD_HOME/bin/megafloyd" .
 
 mkdir -p "$HOME/.local/bin"
 ln -sfn "$MEGAFLOYD_HOME/bin/megafloyd" "$HOME/.local/bin/megafloyd"
 
 echo "megafloyd: built $MEGAFLOYD_HOME/bin/megafloyd"
-"$MEGAFLOYD_HOME/bin/megafloyd" --version
+reported="$("$MEGAFLOYD_HOME/bin/megafloyd" --version 2>&1)" || {
+  echo "megafloyd: ERROR: built binary failed to report its version" >&2
+  exit 1
+}
+printf '%s\n' "$reported"
+
+if [[ $reported == *devel* ]]; then
+  echo "megafloyd: ERROR: binary reports 'devel'; version and commit ldflags were not applied" >&2
+  exit 1
+fi
+if [[ $reported != *"$VERSION"* ]]; then
+  echo "megafloyd: ERROR: binary reports '$reported', expected version '$VERSION'" >&2
+  exit 1
+fi
