@@ -7,7 +7,10 @@ import (
 	"slices"
 	"testing"
 
+	"charm.land/fantasy"
+	"github.com/legacy-ai/floyd/internal/agent/tools"
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/jobs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -192,4 +195,43 @@ func TestPortedAgentToolCount(t *testing.T) {
 	assert.NotContains(t, portedAgentToolNames, "registry")
 	assert.NotContains(t, portedAgentToolNames, "selfheal")
 	assert.NotContains(t, portedAgentToolNames, "progress")
+}
+
+// TestBuildToolsWrapsWritesWithActiveJobScope proves the scope guard is
+// actually installed by buildTools, not merely tested in isolation. The
+// denied path must never reach the real write tool.
+func TestBuildToolsWrapsWritesWithActiveJobScope(t *testing.T) {
+	coord := newToolSetTestCoordinator(t)
+	dataDir := coord.cfg.Config().Options.DataDirectory
+
+	job, err := jobs.Create(dataDir, jobs.CreateOptions{
+		Objective:    "enforce scope at coordinator wiring",
+		Requirements: []string{"writes outside scope are vetoed"},
+		Scope:        []string{"internal/agent"},
+	})
+	require.NoError(t, err)
+
+	agentCfg := coord.cfg.Config().Agents[config.AgentCoder]
+	built, err := coord.buildTools(context.Background(), agentCfg, false)
+	require.NoError(t, err)
+
+	var writeTool fantasy.AgentTool
+	for _, tool := range built {
+		if tool.Info().Name == tools.WriteToolName {
+			writeTool = tool
+			break
+		}
+	}
+	require.NotNil(t, writeTool, "buildTools did not register write")
+
+	ctx := context.WithValue(context.Background(), tools.SessionIDContextKey, "session-1")
+	resp, err := writeTool.Run(ctx, fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  tools.WriteToolName,
+		Input: `{"file_path":"outside-scope.go","content":"package main"}`,
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "write outside active job scope was not vetoed")
+	require.Contains(t, resp.Content, job.ID)
+	require.Contains(t, resp.Content, "outside that scope")
 }
