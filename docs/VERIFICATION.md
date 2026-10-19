@@ -101,6 +101,22 @@ features, a 401, and a non-zero envelope. `platformCommit` is `null` because the
 engine does not report it; the status page shows the build provenance commit with a
 `(bundled)` marker.
 
+## Session ownership (spec C6)
+
+Against a live engine and a real chassis SQLite database:
+
+```
+{"label":"engine-owned session","engine":"found","chassis":"missing","owner":"engine","action":"load engine UI"}
+{"label":"chassis-owned session","engine":"missing","chassis":"found","owner":"chassis","action":"status page: session-store-mismatch",
+ "resume":"megafloyd -s 33333333-3333-4333-8333-333333333333"}
+{"label":"session in neither store","engine":"missing","chassis":"missing","owner":"none","action":"status page: session-not-found"}
+{"bareUuidToEngine":{"status":"found","matchedId":"session_f4bbd523-..."}}
+{"prefixedIdToChassis":{"status":"found","matchedId":"55555555-..."}}
+```
+
+Unit tests cover every ownership combination, a real `sqlite3` lookup, the platform
+`40401` missing-session code, and a 401 treated as unknown (refuse, never open empty).
+
 ## Live launch and shutdown
 
 - `MEGAFLOYD_HOME=/tmp/mf-live ./MEGAFLOYD.app/Contents/MacOS/MEGAFLOYD` → listener on

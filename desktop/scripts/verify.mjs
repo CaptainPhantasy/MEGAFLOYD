@@ -81,6 +81,7 @@ check('app.asar contents', () => {
     '/src/engine.mjs',
     '/src/meta.mjs',
     '/src/redact.mjs',
+    '/src/session-store.mjs',
     '/src/preload.cjs',
     '/src/home.html',
     '/package.json',

@@ -123,9 +123,19 @@ Rules for this document:
   empty transcript for a session that exists in the other store.
 - **SHOULD**: the desktop show which engine owns the session and offer the
   matching surface.
-- Evidence: platform audit (web lane), `docs/web-live-handoff.md` in the
-  platform repo.
-- Status: OPEN (product-gap, documented).
+- Evidence: `desktop/src/session-store.mjs`;
+  `desktop/src/main.mjs` (`routeSession`); `desktop/test/session-store.test.mjs`.
+  A deep link is resolved against both stores before navigation; `session_<uuid>`
+  and `<uuid>` are tried as mirrors. Chassis-only, not-found, and unverifiable
+  sessions open the status page with a notice naming the store and a
+  `megafloyd -s <id>` resume hint.
+- Verified 2026-10-19 against the live engine: an engine session resolved to
+  `owner: engine` / load UI; a row in a real `floyd.db` resolved to
+  `owner: chassis` / `session-store-mismatch`; an id in neither resolved to
+  `owner: none` / `session-not-found`. A bare UUID matched `session_<uuid>`,
+  and a prefixed id matched the chassis UUID.
+- Status: PARTIAL — the desktop MUST/SHOULD are MET; one authoritative store
+  (or documented mirror) remains OPEN platform work.
 - Acceptance: create a session in each surface; list both; resume each from
   the desktop; assert the transcript is present or an explicit error names
   the store mismatch.
@@ -332,6 +342,6 @@ Rules for this document:
 |---|---|---|
 | 2026-10-19 | Initial draft from the desktop shell as built | `1d15945` |
 
-Open items, in contract order: C6, C16 (bundle), C17 (update channel),
-C18 (signing), C20 cross-CI. Partials: C4 (platform fields), C5, C7, C8, C10,
-C11, C12, C19.
+Open items, in contract order: C6 (unified store), C16 (bundle), C17 (update
+channel), C18 (signing), C20 cross-CI. Partials: C4 (platform fields), C5, C6
+(desktop resolution), C7, C8, C10, C11, C12, C19.

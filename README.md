@@ -119,7 +119,8 @@ Not yet:
 - Developer ID signing and notarization — ad-hoc only (owner deferred).
 - Auto-update — deliberately removed; needs a MEGAFLOYD-owned feed.
 - Windows/Linux packaging — the base app is arm64 macOS.
-- Session store reconciliation between the Go chassis and the web engine (spec C6).
+- A unified session store between the Go chassis and the web engine (spec C6). The
+  desktop resolves deep links against both stores and refuses empty resumes.
 - Diagnostics bundle (spec C16).
 - The web UI does not yet consume the desktop badge/notification calls.
 

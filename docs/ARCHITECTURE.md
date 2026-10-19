@@ -60,6 +60,18 @@ Engine stdout is copied to `desktop.log` only after `desktop/src/redact.mjs` mas
 so the "Copy diagnostics" action cannot copy the token. The raw line still drives
 readiness parsing; redaction applies only to what is written down.
 
+## Session ownership (C6)
+
+The Go chassis stores sessions in `<workspace>/.floyd/floyd.db`; the web engine stores
+them under `$MEGAFLOYD_HOME/sessions/<id>` and exposes `GET /api/v1/sessions/{id}`.
+Neither store reads the other.
+
+A `megafloyd://session/<id>` deep link is resolved against both before the window
+navigates. `session_<uuid>` and `<uuid>` are tried as mirrors. Engine-owned sessions
+load normally. Chassis-only, not-found, or unverifiable ownership opens the status page
+with a notice naming the store and, for chassis sessions, a `megafloyd -s <id>` resume
+hint. The desktop never navigates to a transcript it cannot prove the engine owns.
+
 ## Renderer boundary
 
 | Control | Value |
@@ -89,7 +101,7 @@ Native behaviour that the platform UI cannot reach from a browser:
 - `Cmd+Shift+Space` toggles the window (`globalShortcut`, registration verified).
 - `megafloyd://session/<id>`, `megafloyd://workspace?path=<abs>`; unknown routes fall
   back to the status page. A session link that arrives before the engine is ready is
-  queued, not dropped.
+  queued, not dropped, and is checked against both session stores first.
 - `open-file` (Finder "Open With", drag to Dock) points the engine at the file's directory.
 - `setBadge` and `notify` bridge calls, sender-validated, for UI-initiated signals.
 

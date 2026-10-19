@@ -66,6 +66,7 @@ export class Engine extends EventEmitter {
       platformCommit: null,
       capabilities: null,
       metaWarnings: [],
+      notice: null,
     };
   }
 
@@ -76,6 +77,14 @@ export class Engine extends EventEmitter {
   setState(patch) {
     this.state = { ...this.state, ...patch };
     this.emit('state', this.snapshot());
+  }
+
+  setNotice(notice) {
+    this.setState({ notice: notice ?? null });
+  }
+
+  clearNotice() {
+    if (this.state.notice) this.setState({ notice: null });
   }
 
   resolveBinary() {
@@ -158,6 +167,7 @@ export class Engine extends EventEmitter {
       platformCommit: null,
       capabilities: null,
       metaWarnings: [],
+      notice: null,
     });
     this.handshakePending = false;
     this.log.info('engine starting', { binary: binary.file, source: binary.source, port, node });

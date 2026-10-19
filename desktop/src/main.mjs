@@ -29,8 +29,17 @@ import {
 } from './config.mjs';
 import { Engine } from './engine.mjs';
 import { Log } from './log.mjs';
-import { sanitizeState } from './redact.mjs';
 import { buildMenu } from './menu.mjs';
+import { tokenFromUrl } from './meta.mjs';
+import { sanitizeState } from './redact.mjs';
+import {
+  buildSessionNotice,
+  chassisDbCandidates,
+  findChassisDb,
+  lookupChassisSession,
+  lookupEngineSession,
+  resolveSessionOwnership,
+} from './session-store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOME_PAGE = app.isPackaged
@@ -325,6 +334,7 @@ function installWindowPolicy(win) {
 function loadApp(win) {
   const state = engine.snapshot();
   if (state.status !== 'ready' || !state.url) return;
+  engine.clearNotice();
   win.__megafloydMode = 'app';
   win.loadURL(state.url);
 }
@@ -433,7 +443,7 @@ function routeURL(rawUrl) {
   const rest = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
 
   if (kind === 'session' && rest) {
-    routeSession(rest.split('/')[0], 0);
+    void routeSession(rest.split('/')[0], 0);
     return;
   }
   if (kind === 'workspace') {
@@ -447,7 +457,7 @@ function routeURL(rawUrl) {
   openHome(win);
 }
 
-function routeSession(id, attempt) {
+async function routeSession(id, attempt) {
   const state = engine.snapshot();
   if (state.status !== 'ready' || !state.url) {
     if (attempt < 1) {
@@ -461,9 +471,39 @@ function routeSession(id, attempt) {
   const win = showWindow();
   const target = new URL(state.url);
   target.pathname = `/sessions/${encodeURIComponent(id)}`;
-  win.__megafloydMode = 'app';
-  log.info('deep link session', { session: id });
-  void win.loadURL(target.toString());
+
+  // Spec C6: resolve against both stores before navigating. A session the
+  // web engine does not own must not open as an empty transcript.
+  const dbPath = findChassisDb(
+    chassisDbCandidates({ workspace: engine.workspace, home: HOME_DIR }),
+  );
+  const [engineLookup, chassisLookup] = await Promise.all([
+    lookupEngineSession({ port: state.port, token: tokenFromUrl(state.url), id }),
+    Promise.resolve(lookupChassisSession({ dbPath, id })),
+  ]);
+  const owner = resolveSessionOwnership({
+    engine: engineLookup.status,
+    chassis: chassisLookup.status,
+  });
+
+  if (owner === 'engine' || owner === 'both') {
+    engine.clearNotice();
+    win.__megafloydMode = 'app';
+    log.info('deep link session', { session: id, owner });
+    void win.loadURL(target.toString());
+    return;
+  }
+
+  engine.setNotice(
+    buildSessionNotice({ id, owner, engine: engineLookup, chassis: chassisLookup, dbPath }),
+  );
+  log.warn('deep link session refused', {
+    session: id,
+    owner,
+    engine: engineLookup.status,
+    chassis: chassisLookup.status,
+  });
+  openHome(win);
 }
 
 function routeWorkspace(win, dir) {
