@@ -30,6 +30,13 @@ not touched because it belongs to the skills-install lane. Copy the seven
 files there before release and re-run
 `go test ./internal/megafloyd/skills`.
 
+The loader names project files `project:<file>`
+(`internal/commands/commands.go:221`). The seven files are selected from the
+palette; typing `/contract` is not a builtin and falls through as a normal
+prompt (`internal/ui/model/builtin.go:223`). Their usage lines keep the
+approved `/contract` naming; registering the seven as typed triggers is
+outside this lane.
+
 ## 3. skills.json registry is stale
 
 In `.floyd/commands/skills.json`, the entries for `handoff`, `contract`,
