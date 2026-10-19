@@ -1384,6 +1384,43 @@ func GlobalAgentsDirs() []string {
 	return paths
 }
 
+// PromptQuota returns the prompt quota configuration with defaults applied.
+func (c *Config) PromptQuota() PromptQuotaConfig {
+	if c.Options == nil || c.Options.TUI == nil || c.Options.TUI.PromptQuota == nil {
+		return DefaultPromptQuotaConfig()
+	}
+	cfg := *c.Options.TUI.PromptQuota
+	def := DefaultPromptQuotaConfig()
+	if cfg.Enabled == nil {
+		cfg.Enabled = def.Enabled
+	}
+	if cfg.Limit5h == 0 {
+		cfg.Limit5h = def.Limit5h
+	}
+	if cfg.Limit7d == 0 {
+		cfg.Limit7d = def.Limit7d
+	}
+	if cfg.WarnPercent == 0 {
+		cfg.WarnPercent = def.WarnPercent
+	}
+	if cfg.DangerPercent == 0 {
+		cfg.DangerPercent = def.DangerPercent
+	}
+	return cfg
+}
+
+// DefaultPromptQuotaConfig returns the default prompt quota configuration.
+func DefaultPromptQuotaConfig() PromptQuotaConfig {
+	enabled := true
+	return PromptQuotaConfig{
+		Enabled:       &enabled,
+		Limit5h:       1600,
+		Limit7d:       8000,
+		WarnPercent:   75,
+		DangerPercent: 90,
+	}
+}
+
 // GlobalSkillsDirs returns the default directories for Agent Skills.
 // Skills in these directories are auto-discovered and their files can be read
 // without permission prompts.

@@ -275,10 +275,20 @@ type TUIOptions struct {
 	// Here we can add themes later or any TUI related options
 	//
 
-	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
-	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
-	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Floyd,enum=default,enum=compact,enum=none,default=default"`
+	Completions Completions        `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool              `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	Scrollbar   string             `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	ExitBanner  ExitBanner         `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Floyd,enum=default,enum=compact,enum=none,default=default"`
+	PromptQuota *PromptQuotaConfig `json:"prompt_quota,omitempty" jsonschema:"description=Prompt usage quota display settings"`
+}
+
+// PromptQuotaConfig controls prompt usage tracking and display.
+type PromptQuotaConfig struct {
+	Enabled       *bool `json:"enabled,omitempty" jsonschema:"description=Show prompt quota in sidebar,default=true"`
+	Limit5h       int   `json:"limit_5h,omitempty" jsonschema:"description=5-hour prompt limit for warnings,default=1600"`
+	Limit7d       int   `json:"limit_7d,omitempty" jsonschema:"description=7-day prompt limit for warnings,default=8000"`
+	WarnPercent   int   `json:"warn_percent,omitempty" jsonschema:"description=Percentage at which to show warning color (yellow),default=75"`
+	DangerPercent int   `json:"danger_percent,omitempty" jsonschema:"description=Percentage at which to show danger color (red),default=90"`
 }
 
 // IsTransparent reports whether the TUI draws a transparent background. The

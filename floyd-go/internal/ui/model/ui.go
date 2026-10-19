@@ -156,6 +156,15 @@ type (
 	// closeDialogMsg is sent to close the current dialog.
 	closeDialogMsg struct{}
 
+	// promptUsageLoadedMsg is sent when local prompt usage has been loaded.
+	promptUsageLoadedMsg struct {
+		userMessages map[string]int64
+	}
+
+	// promptUsageRefreshTickMsg is sent periodically to refresh prompt
+	// usage.
+	promptUsageRefreshTickMsg struct{}
+
 	// hyperRefreshDoneMsg is sent after a silent Hyper OAuth refresh
 	// finishes. It carries the original model-selection action so the
 	// selection can be resumed.
@@ -270,6 +279,16 @@ type UI struct {
 	completionsStartIndex    int
 	completionsQuery         string
 	completionsPositionStart image.Point // x,y where user typed '@'
+
+	// commandSuggestion holds the inline ghost-text suggestion shown after
+	// the caret in the editor (history-based; see suggestion.go).
+	commandSuggestion string
+	// stashedPrompt holds text shelved with the stash key (alt+s) so an
+	// interrupted draft can be recalled after sending something else.
+	stashedPrompt string
+	// localUserMessages tracks local user-message timestamps keyed by
+	// message ID for the prompt-quota panel (see prompt_usage.go).
+	localUserMessages map[string]int64
 
 	// Chat components
 	chat *Chat
@@ -462,6 +481,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		todoSpinner:         todoSpinner,
 		lspStates:           make(map[string]workspace.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
+		localUserMessages:   make(map[string]int64),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
 		initialSessionID:    initialSessionID,
@@ -534,6 +554,9 @@ func (m *UI) Init() tea.Cmd {
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
+	// load prompt usage and start its refresh ticker
+	cmds = append(cmds, m.loadPromptUsage())
+	cmds = append(cmds, m.startPromptUsageRefreshTicker())
 	// Prime the memoized LSP state off-thread.
 	if cmd := m.requestLSPRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -670,6 +693,10 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 	m.focus = focus
 	// Changing the state may change layout, so update it.
 	m.updateLayoutAndSize()
+	// Update command suggestion when focus changes to editor.
+	if focus == uiFocusEditor {
+		m.updateCommandSuggestion()
+	}
 }
 
 // loadCustomCommands loads the custom commands asynchronously.
@@ -855,6 +882,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.promptHistory.messages = msg.messages
 		m.promptHistory.index = -1
 		m.promptHistory.draft = ""
+		m.updateCommandSuggestion()
+
+	case promptUsageLoadedMsg:
+		m.localUserMessages = msg.userMessages
+
+	case promptUsageRefreshTickMsg:
+		// Reload prompt usage and schedule the next refresh.
+		cmds = append(cmds, m.loadPromptUsage())
+		cmds = append(cmds, m.startPromptUsageRefreshTicker())
 
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
@@ -891,6 +927,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autoExpandPillsIfReasonable()
 		}
 	case pubsub.Event[message.Message]:
+		// Track local user-message counts for the prompt-quota panel.
+		if msg.Payload.Role == message.User {
+			switch msg.Type {
+			case pubsub.CreatedEvent, pubsub.UpdatedEvent:
+				if m.localUserMessages == nil {
+					m.localUserMessages = make(map[string]int64)
+				}
+				m.localUserMessages[msg.Payload.ID] = msg.Payload.CreatedAt
+			case pubsub.DeletedEvent:
+				delete(m.localUserMessages, msg.Payload.ID)
+			}
+		}
 		// Check if this is a child session message for an agent tool.
 		if m.session == nil {
 			break
@@ -2733,6 +2781,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case key.Matches(msg, m.keyMap.Editor.AcceptSuggestion):
+				m.acceptCommandSuggestion()
+			case key.Matches(msg, m.keyMap.Editor.StashPrompt):
+				if cmd := m.stashRecallPrompt(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Editor.Escape):
 				cmd := m.handleHistoryEscape(msg)
 				if cmd != nil {
@@ -2781,6 +2835,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				prevHeight := m.textarea.Height()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+				m.updateCommandSuggestion()
 
 				// Bang mode: enter when "!" is typed at the start of the
 				// prompt, optionally preceded by whitespace (either on an
@@ -4153,7 +4208,7 @@ func (m *UI) renderEditorView(width int) string {
 	}
 	return strings.Join([]string{
 		attachmentsView,
-		m.textarea.View(),
+		m.renderEditorSuggestion(m.textarea.View()),
 		"", // margin at bottom of editor
 	}, "\n")
 }

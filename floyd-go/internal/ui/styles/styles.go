@@ -148,6 +148,10 @@ type Styles struct {
 		PromptQuestionIconFocused lipgloss.Style
 		PromptQuestionIconBlurred lipgloss.Style
 
+		// GhostSuggestion renders inline ghost-text suggestions after the
+		// caret in the editor.
+		GhostSuggestion lipgloss.Style
+
 		// Question choice styling.
 		QuestionSelected   lipgloss.Style // Active choice text (Dolly).
 		QuestionUnselected lipgloss.Style // Inactive header text (Sash).
@@ -228,6 +232,13 @@ type Styles struct {
 	Sidebar struct {
 		SessionTitle lipgloss.Style // Current session title at top of sidebar
 		WorkingDir   lipgloss.Style // Working directory path (PrettyPath)
+
+		// Quota styles the prompt-quota panel (local usage vs plan limits).
+		QuotaTitle  lipgloss.Style // Panel heading
+		QuotaOk     lipgloss.Style // Usage line under the warn threshold
+		QuotaWarn   lipgloss.Style // Usage line over the warn threshold
+		QuotaDanger lipgloss.Style // Usage line over the danger threshold
+		QuotaNote   lipgloss.Style // Footnote under the usage lines
 	}
 
 	// ModelInfo (model name, provider, reasoning, token/cost summary)
