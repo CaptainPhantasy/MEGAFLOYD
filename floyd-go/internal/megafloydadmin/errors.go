@@ -12,8 +12,8 @@ var (
 	// ErrNotConfigured means the client has no usable base URL, path,
 	// token source, or request value.
 	ErrNotConfigured = errors.New("megafloydadmin: not configured")
-	// ErrUnauthorized means the admin plane rejected the Bearer token
-	// with 401 or 403.
+	// ErrUnauthorized means the admin plane rejected the credential
+	// (Bearer token or administrator key) with 401 or 403.
 	ErrUnauthorized = errors.New("megafloydadmin: admin request unauthorized")
 	// ErrEndpointNotFound means the admin plane returned 404 for a
 	// configured route.

@@ -22,11 +22,23 @@ type adminRuntime struct {
 var adminRuntimeFactory = buildAdminRuntime
 
 func buildAdminRuntime() (*adminRuntime, error) {
+	cfg := megafloydadmin.FromEnv(nil)
+	mode, err := cfg.ResolvedAuthMode()
+	if err != nil {
+		return nil, err
+	}
+	if mode == megafloydadmin.AuthModeSession {
+		client, err := megafloydadmin.New(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return &adminRuntime{Client: client}, nil
+	}
+
 	auth, err := authRuntimeFactory()
 	if err != nil {
 		return nil, err
 	}
-	cfg := megafloydadmin.FromEnv(nil)
 	if strings.TrimSpace(cfg.BaseURL) == "" {
 		cfg.BaseURL = auth.Host
 	}
@@ -44,8 +56,15 @@ func newAdminCommand() *cobra.Command {
 		Short: "Manage company accounts and access",
 		Long: `Manage company accounts and access on the megafloyd admin plane.
 
-The client authenticates with the stored megafloyd access token as a
-Bearer credential. Run "megafloyd auth login" first.
+The default session mode mirrors the admin web app: it signs in with an
+administrator key, keeps the session cookie, and sends the CSRF token on
+writes. Set MEGAFLOYD_ADMIN_KEY (or MEGAFLOYD_ADMIN_PASSWORD) to use it.
+An unset MEGAFLOYD_ADMIN_AUTH_MODE selects session mode when a key is
+present.
+
+Bearer mode remains the fallback: it uses the stored megafloyd access
+token from "megafloyd auth login". Force it with
+MEGAFLOYD_ADMIN_AUTH_MODE=bearer.
 
 Only routes observed on the live admin plane are used. Per-user tool and
 model grants have no observed route and fail closed unless the operator
@@ -296,8 +315,9 @@ func wrapAdminError(cmd *cobra.Command, err error) error {
 		)
 	case errors.Is(err, megafloydadmin.ErrUnauthorized):
 		return fmt.Errorf(
-			"%w; the admin plane may require an administrator session key",
-			err,
+			"%w; set MEGAFLOYD_ADMIN_KEY for session auth, or run `%s` "+
+				"for Bearer auth",
+			err, adminAuthHint(cmd),
 		)
 	default:
 		return err

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -386,4 +387,373 @@ func TestUnverifiedErrorsDoNotLeakToken(t *testing.T) {
 	require.False(t, errors.Is(err, ErrUnauthorized))
 	require.NotContains(t, err.Error(), testToken)
 	require.True(t, strings.Contains(err.Error(), "unverified endpoint"))
+}
+
+const (
+	testAdminKey      = "fixture-admin-key-do-not-print"
+	testLoginCSRF     = "login-csrf-fixture"
+	testOverviewCSRF  = "overview-csrf-fixture"
+	testSessionCookie = "fixture-session-cookie"
+)
+
+func newSessionClient(
+	t *testing.T, server *httptest.Server, mutate func(*Config),
+) *Client {
+	t.Helper()
+	cfg := Config{
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		AuthMode:   AuthModeSession,
+		AdminKey:   testAdminKey,
+	}
+	if mutate != nil {
+		mutate(&cfg)
+	}
+	client, err := New(cfg)
+	require.NoError(t, err)
+	return client
+}
+
+func TestSessionLoginOverviewCSRFAndCookieReuse(t *testing.T) {
+	t.Parallel()
+
+	var logins, overviews atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Empty(
+			t, r.Header.Get("Authorization"),
+			"session mode must not send a Bearer header",
+		)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/admin/api/login":
+			logins.Add(1)
+			require.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"key":"`+testAdminKey+`"}`, string(body))
+			http.SetCookie(w, &http.Cookie{
+				Name:     "floyd_admin",
+				Value:    testSessionCookie,
+				Path:     "/",
+				HttpOnly: true,
+			})
+			_, _ = io.WriteString(w, `{"csrf":"`+testLoginCSRF+`"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/admin/api/overview":
+			overviews.Add(1)
+			require.Equal(
+				t, "floyd_admin="+testSessionCookie, r.Header.Get("Cookie"),
+			)
+			_, _ = io.WriteString(w,
+				`{"csrf":"`+testOverviewCSRF+`","accounts":{"enabled":1}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/admin/api/invites":
+			require.Equal(
+				t, "floyd_admin="+testSessionCookie, r.Header.Get("Cookie"),
+			)
+			require.Equal(t, testOverviewCSRF, r.Header.Get("X-CSRF-Token"))
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.JSONEq(
+				t, `{"username":"person@example.test"}`, string(body),
+			)
+			_, _ = io.WriteString(
+				w, `{"url":"https://example.test/join#token"}`,
+			)
+		case r.Method == http.MethodGet && r.URL.Path == "/admin/api/users":
+			require.Equal(
+				t, "floyd_admin="+testSessionCookie, r.Header.Get("Cookie"),
+			)
+			_, _ = io.WriteString(w, `{"users":[
+				{"id":"u1","username":"alice@example.test","enabled":true}
+			]}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := newSessionClient(t, server, nil)
+	invite, err := client.Invite(context.Background(), "person@example.test")
+	require.NoError(t, err)
+	require.Equal(t, "https://example.test/join#token", invite.URL)
+
+	users, err := client.ListUsers(context.Background())
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	require.Equal(t, "alice@example.test", users[0].Username)
+
+	require.EqualValues(t, 1, logins.Load(), "login must happen once")
+	require.EqualValues(t, 1, overviews.Load(), "overview must happen once")
+}
+
+func TestSessionUsesOverviewCSRFOverLoginCSRF(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/admin/api/login":
+			http.SetCookie(w, &http.Cookie{
+				Name: "floyd_admin", Value: testSessionCookie, Path: "/",
+			})
+			_, _ = io.WriteString(w, `{"csrf":"`+testLoginCSRF+`"}`)
+		case "/admin/api/overview":
+			_, _ = io.WriteString(w, `{"csrf":"`+testOverviewCSRF+`"}`)
+		case "/admin/api/invites":
+			require.Equal(t, testOverviewCSRF, r.Header.Get("X-CSRF-Token"))
+			_, _ = io.WriteString(w, `{"url":"https://example.test/join"}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := newSessionClient(t, server, nil)
+	_, err := client.Invite(context.Background(), "person@example.test")
+	require.NoError(t, err)
+}
+
+func TestSessionLoginRejectsKeyWithoutLeakingIt(t *testing.T) {
+	t.Parallel()
+
+	var overviews atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/admin/api/overview" {
+			overviews.Add(1)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(
+			w,
+			`{"error":"unauthorized","error_description":"rejected `+
+				testAdminKey+`"}`,
+		)
+	}))
+	defer server.Close()
+
+	client := newSessionClient(t, server, nil)
+	_, err := client.ListUsers(context.Background())
+	require.ErrorIs(t, err, ErrUnauthorized)
+	require.NotContains(t, err.Error(), testAdminKey)
+	require.Contains(t, err.Error(), "[redacted]")
+	require.Zero(t, overviews.Load(), "a failed login must not load overview")
+}
+
+func TestSessionLoginRequiresSessionCookie(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"csrf":"`+testLoginCSRF+`"}`)
+	}))
+	defer server.Close()
+
+	client := newSessionClient(t, server, nil)
+	_, err := client.ListUsers(context.Background())
+	require.ErrorIs(t, err, ErrInvalidResponse)
+	require.Contains(t, err.Error(), "no session cookie")
+}
+
+func TestSessionOverviewFailureFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	var users atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/admin/api/login":
+			http.SetCookie(w, &http.Cookie{
+				Name: "floyd_admin", Value: testSessionCookie, Path: "/",
+			})
+			_, _ = io.WriteString(w, `{"csrf":"`+testLoginCSRF+`"}`)
+		case "/admin/api/overview":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":"not_found"}`)
+		default:
+			users.Add(1)
+			_, _ = io.WriteString(w, `{"users":[]}`)
+		}
+	}))
+	defer server.Close()
+
+	client := newSessionClient(t, server, nil)
+	_, err := client.ListUsers(context.Background())
+	require.ErrorIs(t, err, ErrEndpointNotFound)
+	require.Zero(t, users.Load(), "the overview failure must stop the request")
+}
+
+func TestSessionGrantAndRevokeRemainFailClosed(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		calls.Add(1)
+	}))
+	defer server.Close()
+
+	client := newSessionClient(t, server, nil)
+	_, err := client.Grant(context.Background(), GrantRequest{
+		Email: "person@example.test",
+		Kind:  "tool",
+		Name:  "search",
+	})
+	require.ErrorIs(t, err, ErrUnverifiedEndpoint)
+	require.Contains(t, err.Error(), "MEGAFLOYD_ADMIN_GRANT_PATH")
+
+	_, err = client.RevokeGrant(context.Background(), GrantRequest{
+		Email: "person@example.test",
+		Kind:  "model",
+		Name:  "gpt-5",
+	})
+	require.ErrorIs(t, err, ErrUnverifiedEndpoint)
+	require.Contains(t, err.Error(), "MEGAFLOYD_ADMIN_REVOKE_PATH")
+	require.Zero(t, calls.Load(), "fail-closed grants must not log in")
+}
+
+func TestSessionRenewsExpiredReadOnce(t *testing.T) {
+	t.Parallel()
+
+	var logins, overviews, users atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/admin/api/login":
+			attempt := logins.Add(1)
+			http.SetCookie(w, &http.Cookie{
+				Name:  "floyd_admin",
+				Value: "session-" + strconv.FormatInt(attempt, 10),
+				Path:  "/",
+			})
+			_, _ = io.WriteString(w, `{"csrf":"login-csrf"}`)
+		case "/admin/api/overview":
+			attempt := overviews.Add(1)
+			_, _ = io.WriteString(
+				w,
+				`{"csrf":"overview-csrf-`+strconv.FormatInt(attempt, 10)+`"}`,
+			)
+		case "/admin/api/users":
+			users.Add(1)
+			if r.Header.Get("Cookie") == "floyd_admin=session-1" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = io.WriteString(w, `{"error":"unauthorized"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"users":[
+				{"id":"u1","username":"alice","enabled":true}
+			]}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := newSessionClient(t, server, nil)
+	usersResult, err := client.ListUsers(context.Background())
+	require.NoError(t, err)
+	require.Len(t, usersResult, 1)
+	require.EqualValues(t, 2, logins.Load())
+	require.EqualValues(t, 2, overviews.Load())
+	require.EqualValues(t, 2, users.Load())
+}
+
+func TestSessionDoesNotRetryRejectedWrite(t *testing.T) {
+	t.Parallel()
+
+	var logins, invites atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/admin/api/login":
+			logins.Add(1)
+			http.SetCookie(w, &http.Cookie{
+				Name: "floyd_admin", Value: testSessionCookie, Path: "/",
+			})
+			_, _ = io.WriteString(w, `{"csrf":"`+testLoginCSRF+`"}`)
+		case "/admin/api/overview":
+			_, _ = io.WriteString(w, `{"csrf":"`+testOverviewCSRF+`"}`)
+		case "/admin/api/invites":
+			invites.Add(1)
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"error":"unauthorized"}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := newSessionClient(t, server, nil)
+	_, err := client.Invite(context.Background(), "person@example.test")
+	require.ErrorIs(t, err, ErrUnauthorized)
+	require.EqualValues(t, 1, logins.Load())
+	require.EqualValues(t, 1, invites.Load(), "a write must never be retried")
+}
+
+func TestSessionModeRequiresAdminKey(t *testing.T) {
+	t.Parallel()
+
+	_, err := New(Config{
+		BaseURL:  "https://admin.example.test",
+		AuthMode: AuthModeSession,
+	})
+	require.ErrorIs(t, err, ErrNotConfigured)
+	require.Contains(t, err.Error(), "MEGAFLOYD_ADMIN_KEY")
+	require.NotContains(t, err.Error(), testAdminKey)
+}
+
+func TestBearerModeStaysAvailableWhenKeyIsSet(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertRequest(t, r, http.MethodGet, "/admin/api/users")
+		_, _ = io.WriteString(w, `{"users":[]}`)
+	}))
+	defer server.Close()
+
+	client := newClientForServer(t, server, func(cfg *Config) {
+		cfg.AuthMode = AuthModeBearer
+		cfg.AdminKey = testAdminKey
+	})
+	users, err := client.ListUsers(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, users)
+}
+
+func TestResolvedAuthModeAndSessionEnv(t *testing.T) {
+	t.Setenv("MEGAFLOYD_ADMIN_AUTH_MODE", "admin")
+	t.Setenv("MEGAFLOYD_ADMIN_KEY", "env-admin-key")
+	t.Setenv("MEGAFLOYD_ADMIN_PASSWORD", "")
+	t.Setenv("MEGAFLOYD_ADMIN_LOGIN_PATH", "/custom/login")
+	t.Setenv("MEGAFLOYD_ADMIN_OVERVIEW_PATH", "/custom/overview")
+
+	cfg := FromEnv(nil)
+	mode, err := cfg.ResolvedAuthMode()
+	require.NoError(t, err)
+	require.Equal(t, AuthModeSession, mode)
+	require.Equal(t, "env-admin-key", cfg.AdminKey)
+	require.Equal(t, "/custom/login", cfg.LoginPath)
+	require.Equal(t, "/custom/overview", cfg.OverviewPath)
+
+	t.Setenv("MEGAFLOYD_ADMIN_AUTH_MODE", "")
+	t.Setenv("MEGAFLOYD_ADMIN_KEY", "")
+	t.Setenv("MEGAFLOYD_ADMIN_PASSWORD", "env-password")
+	cfg = FromEnv(nil)
+	mode, err = cfg.ResolvedAuthMode()
+	require.NoError(t, err)
+	require.Equal(t, AuthModeSession, mode)
+	require.Equal(t, "env-password", cfg.AdminKey)
+
+	t.Setenv("MEGAFLOYD_ADMIN_PASSWORD", "")
+	cfg = FromEnv(nil)
+	mode, err = cfg.ResolvedAuthMode()
+	require.NoError(t, err)
+	require.Equal(t, AuthModeBearer, mode)
+
+	cfg = Config{AdminKey: "only-key"}
+	mode, err = cfg.ResolvedAuthMode()
+	require.NoError(t, err)
+	require.Equal(t, AuthModeSession, mode)
+
+	cfg = Config{AuthMode: "token"}
+	mode, err = cfg.ResolvedAuthMode()
+	require.NoError(t, err)
+	require.Equal(t, AuthModeBearer, mode)
+
+	_, err = Config{AuthMode: "bogus"}.ResolvedAuthMode()
+	require.ErrorIs(t, err, ErrNotConfigured)
 }

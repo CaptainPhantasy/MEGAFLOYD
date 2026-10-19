@@ -235,3 +235,89 @@ func TestRootRegistersAdminCommand(t *testing.T) {
 	require.Equal(t, "list", command.Name())
 	require.Contains(t, command.CommandPath(), "admin users list")
 }
+
+func TestBuildAdminRuntimeSessionMode(t *testing.T) {
+	const (
+		fixtureKey    = "fixture-admin-key"
+		fixtureCookie = "fixture-session"
+		overviewCSRF  = "overview-csrf"
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/admin/api/login":
+			require.Equal(t, http.MethodPost, r.Method)
+			require.Empty(t, r.Header.Get("Authorization"))
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"key":"`+fixtureKey+`"}`, string(body))
+			http.SetCookie(w, &http.Cookie{
+				Name: "floyd_admin", Value: fixtureCookie, Path: "/",
+			})
+			_, _ = io.WriteString(w, `{"csrf":"login-csrf"}`)
+		case "/admin/api/overview":
+			require.Equal(t, "floyd_admin="+fixtureCookie, r.Header.Get("Cookie"))
+			_, _ = io.WriteString(w, `{"csrf":"`+overviewCSRF+`"}`)
+		case "/admin/api/users":
+			require.Equal(t, "floyd_admin="+fixtureCookie, r.Header.Get("Cookie"))
+			_, _ = io.WriteString(w, `{"users":[
+				{"id":"u1","username":"alice@example.test","enabled":true}
+			]}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("MEGAFLOYD_ADMIN_BASE_URL", server.URL)
+	t.Setenv("MEGAFLOYD_ADMIN_AUTH_MODE", "session")
+	t.Setenv("MEGAFLOYD_ADMIN_KEY", fixtureKey)
+	t.Setenv("MEGAFLOYD_ADMIN_PASSWORD", "")
+
+	previousAuth := authRuntimeFactory
+	authRuntimeFactory = func() (*authRuntime, error) {
+		t.Error("session mode must not read the stored access token")
+		return nil, megafloydauth.ErrNotLoggedIn
+	}
+	t.Cleanup(func() { authRuntimeFactory = previousAuth })
+
+	previousAdmin := adminRuntimeFactory
+	adminRuntimeFactory = buildAdminRuntime
+	t.Cleanup(func() { adminRuntimeFactory = previousAdmin })
+
+	output, err := executeAdmin(t, "users", "list")
+	require.NoError(t, err)
+	require.Contains(t, output, "alice@example.test")
+}
+
+func TestBuildAdminRuntimeDefaultsToBearer(t *testing.T) {
+	for _, name := range []string{
+		"MEGAFLOYD_ADMIN_BASE_URL",
+		"MEGAFLOYD_AUTH_BASE_URL",
+		"FLOYD_CODE_BASE_URL",
+		"MEGAFLOYD_AUTH_HOST",
+		"FLOYD_CODE_OAUTH_HOST",
+		"FLOYD_OAUTH_HOST",
+		"MEGAFLOYD_ADMIN_AUTH_MODE",
+		"MEGAFLOYD_ADMIN_KEY",
+		"MEGAFLOYD_ADMIN_PASSWORD",
+	} {
+		t.Setenv(name, "")
+	}
+
+	var called atomic.Bool
+	previous := authRuntimeFactory
+	authRuntimeFactory = func() (*authRuntime, error) {
+		called.Store(true)
+		return &authRuntime{
+			Host:    "https://auth.example.test",
+			Manager: &megafloydauth.Manager{},
+		}, nil
+	}
+	t.Cleanup(func() { authRuntimeFactory = previous })
+
+	runtime, err := buildAdminRuntime()
+	require.NoError(t, err)
+	require.NotNil(t, runtime.Client)
+	require.True(t, called.Load(), "Bearer mode must use the token manager")
+}
