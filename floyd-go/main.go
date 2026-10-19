@@ -19,9 +19,15 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/legacy-ai/floyd/internal/cmd"
 	_ "github.com/legacy-ai/floyd/internal/dns"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 )
 
 func main() {
+	// When the binary is named megafloyd, default its home to ~/.megafloyd by
+	// exporting the FLOYD_* variables the chassis reads. Other names keep the
+	// chassis defaults.
+	megafloyd.ApplyFromExecutable()
+
 	if os.Getenv("FLOYD_PROFILE") != "" {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")
