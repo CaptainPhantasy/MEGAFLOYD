@@ -2,10 +2,13 @@ SHELL := /bin/bash
 APP := MEGAFLOYD.app
 BIN := $(APP)/Contents/MacOS/MEGAFLOYD
 
-.PHONY: icon build test verify smoke smoke-ui run clean distclean
+.PHONY: icon build test verify smoke smoke-ui run clean distclean upstream
 
 icon:
 	python3 desktop/scripts/make-icon.py
+
+upstream:
+	node desktop/scripts/check-upstream.mjs
 
 build:
 	node desktop/scripts/build.mjs
