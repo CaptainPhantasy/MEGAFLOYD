@@ -139,6 +139,38 @@ LOG_TAIL_BEGIN
 LOG_TAIL_END
 ```
 
+### 4.1 CLI binary proof
+
+The built binary was also run through its real `run --web` path. `tailscale`
+was removed from `PATH` on purpose, so the engine could not change the
+machine's tailnet Serve configuration; it only recorded a warning.
+
+```
+$ go build -o /tmp/megafloyd-x-web-bin .
+$ env -i PATH="$TMPBIN:/usr/bin:/bin" HOME="$HOME_DIR" \
+    MEGAFLOYD_HOME="$HOME_DIR/.megafloyd" FLOYD_CODE_HOME="$HOME_DIR/web" \
+    MEGAFLOYD_WEB_PORT=58733 \
+    MEGAFLOYD_WEB_SCRIPT=.../dist/main.mjs \
+    MEGAFLOYD_WEB_BUNDLE=.../dist-web \
+    /tmp/megafloyd-x-web-bin run --web
+Web UI: http://127.0.0.1:58733/sessions/#token=...
+Server: started on 127.0.0.1:58733 (loopback)
+Log:    $HOME_DIR/.megafloyd/logs/web-server.log
+Warning: tailscale is not available: ... executable file not found in $PATH
+cli exit=0
+
+$ curl -sS -w 'http=%{http_code}\n' http://127.0.0.1:58733/api/v1/healthz
+http=200
+{"code":0,"msg":"success","data":{"ok":true},...}
+
+$ curl -sS -w 'http=%{http_code} bytes=%{size_download}\n' http://127.0.0.1:58733/
+http=200 bytes=1189
+<title>Floyd Code Web</title>
+```
+
+The server log contained the ready banner and token. The listener was
+stopped afterwards; the port was empty.
+
 The same probe ran against the worktree before this one and produced the
 same health, page, asset, and session results.
 
