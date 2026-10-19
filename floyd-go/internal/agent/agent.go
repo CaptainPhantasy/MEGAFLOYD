@@ -892,6 +892,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if a.planService != nil {
 		planReminder = a.planService.Reminder(call.SessionID)
 	}
+	retryBudget := newRunRetryBudget(defaultRunMaxAttempts, defaultRunCircuitBreakerHit)
+	maxRetries := retryBudget.maxRetries()
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
@@ -904,6 +906,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		PresencePenalty:  call.PresencePenalty,
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
+		MaxRetries:       &maxRetries,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
@@ -1076,7 +1079,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// even if the request is canceled mid-stream
 			return a.messages.Update(ctx, *currentAssistant)
 		},
-		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
+		OnRetry: runRetryHandler(retryBudget, cancel, func(err *fantasy.ProviderError, delay time.Duration) {
 			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
 			// Reset streamed content so the retried response doesn't
 			// concatenate with partial content from the failed attempt.
@@ -1086,7 +1089,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if updateErr := a.messages.Update(genCtx, *currentAssistant); updateErr != nil {
 				slog.Error("Failed to reset message on retry", "error", updateErr)
 			}
-		},
+		}),
 		OnAuthRefresh: call.OnAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
 			m := a.largeModel.Get()
@@ -1209,6 +1212,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			},
 		},
 	})
+
+	if budgetErr := retryBudgetError(err, retryBudget); budgetErr != nil {
+		err = budgetErr
+	}
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
