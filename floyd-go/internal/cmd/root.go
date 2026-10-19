@@ -72,6 +72,9 @@ func init() {
 		logsCmd,
 		logoutCmd,
 		schemaCmd,
+		// authCmd must precede loginCmd: loginCmd has the legacy "auth"
+		// alias, and cobra resolves the first registered name or alias.
+		authCmd,
 		loginCmd,
 		statsCmd,
 		sessionCmd,

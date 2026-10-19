@@ -1,15 +1,19 @@
-// Package megafloydauth holds the verified, non-network parts of the
-// floyd-auth identity layer for megafloyd.
+// Package megafloydauth implements the floyd-auth identity layer for
+// megafloyd: the RFC 8628 device-code login, token persistence, and lazy
+// refresh used against the owner's inference server.
 //
-// The f7 harness (floyd7 / floyd-code TypeScript) authenticates against the
-// owner's inference host with an RFC 8628 device-code flow. This package
-// reproduces the pieces that could be verified from source and from the live
-// home directory: environment resolution, credential slot naming, the
-// on-disk token format, and the device identity headers.
+// The wire shape (three POST endpoints, form encoding, snake_case token
+// bundle) is taken from the donor f7 client in packages/oauth/src/oauth.ts
+// and is documented in docs/auth-integration.md. The /api/oauth/* routes
+// have not been called live from this package; every test uses httptest.
+// Treat the live flow as unverified until it is exercised against the
+// server.
 //
-// Status: design skeleton. Network calls are declared as interfaces and are
-// deliberately not implemented. The endpoints are evidenced by the donor
-// client and by method-404 responses from the live server, but no login has
-// been exercised from Go. Callers must treat the flow as unimplemented until
-// the evidence in docs/auth-integration.md is upgraded.
+// Tokens live under the megafloyd home (MEGAFLOYD_HOME, default
+// ~/.megafloyd), never under f7's ~/.floyd7, so two harnesses cannot share
+// one refresh token. Files are 0600 inside a 0700 directory and are written
+// atomically.
+//
+// Manager.Token and Manager.AccessToken are the helper for future provider
+// wiring. Nothing in the chassis consumes them yet.
 package megafloydauth
