@@ -1,25 +1,28 @@
-# Handoff — Cross-Session Continuation Package
+# Handoff — Portable Job Packet
 
-Package the current session's state so a fresh session (or a fresh agent tomorrow) can continue exactly where this one stopped, without rediscovering anything.
+Package one job so a fresh session can continue without rediscovering state. The `handoff` tool writes the packet and returns it in full.
 
 ## Usage
 ```
-/handoff
+/handoff <JOB-ID>
 ```
 
+## Tool
+`handoff` — parameter: `job_id` (required). Writes `jobs/<job_id>/handoff.md` under the data directory.
+
 ## Procedure
-1. Export the full conversation with `transcript_export` — the raw record the next session can grep.
-2. Fork the session at the latest message (session fork mechanism, internal/session/fork.go) so the successor can resume with full context loaded.
-3. Write `continue.md` in the working directory (or the active worktree root) with the `write` tool:
-   - Objective: the task in one sentence.
-   - Done: verified completions, each with its evidence (command run + result).
-   - Not done: remaining work, exact next action first.
-   - Locked values: names, paths, ids, amounts that must not change.
-   - Landmines: known blockers, concurrent-agent boundaries, files not to touch.
-   - Continuation point: the forked session id and the transcript path.
-4. Pull open items from the `todos` tool into the Not done list.
-5. Reply with three paths: continue.md, transcript, forked session id.
+1. Call `handoff` with the job id.
+2. Read the returned packet before any other tool call:
+   - objective, status, artifact path, and current and created SHA-256;
+   - declared scope;
+   - per-requirement verdicts, reasons, and latest evidence;
+   - the exact next action;
+   - the last ten journal entries;
+   - continuation paths relative to the job directory.
+3. Hand the packet path to the successor. It is self-contained; excerpt paths are relative to the job directory.
 
 ## Rules
-- Evidence over adjectives: "tests pass" is not handoff content; "go test ./internal/config exit 0" is.
-- The successor reads continue.md before any tool call — write it for a cold reader.
+- The tool owns the packet. Do not hand-write `continue.md` or a second summary that can drift from the job record.
+- Evidence over adjectives: the packet quotes exit codes and hashes, not "tests pass".
+- Write a handoff before a long pause or context reset, not after the context is gone.
+- A handoff does not re-run checks; the next action still needs fresh `prove` evidence when the artifact has changed.

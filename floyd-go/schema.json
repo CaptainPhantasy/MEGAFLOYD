@@ -132,6 +132,54 @@
           },
           "type": "object",
           "description": "Environment variables to set on startup"
+        },
+        "experimental": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "type": "object",
+          "description": "Experimental feature overrides keyed by flag id"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "ExecutionOptions": {
+      "properties": {
+        "command_timeout_seconds": {
+          "type": "integer",
+          "description": "Maximum wall-clock seconds for one command; 0 means no hard cap",
+          "default": 0,
+          "examples": [
+            300
+          ]
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "description": "Maximum captured command output in bytes; 0 uses the built-in 30000 limit",
+          "default": 30000,
+          "examples": [
+            30000
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "FileOpsOptions": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Allow tools to create, modify, or delete files",
+          "default": true
+        },
+        "max_read_size_bytes": {
+          "type": "integer",
+          "description": "Maximum bytes a single file read may return; 0 uses the built-in 10 MiB limit",
+          "default": 10485760,
+          "examples": [
+            10485760
+          ]
         }
       },
       "additionalProperties": false,
@@ -532,6 +580,17 @@
           "type": "array",
           "description": "Paths to directories containing Agent Skills (folders with SKILL.md files)"
         },
+        "plugins_paths": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "~/.config/floyd/plugins",
+              "./plugins"
+            ]
+          },
+          "type": "array",
+          "description": "Paths to directories containing Floyd plugins (folders with PLUGIN.md files)"
+        },
         "agent_name": {
           "type": "string",
           "description": "Identity name injected into prompt templates (overridden by FLOYD_IDENTITY env)",
@@ -640,6 +699,33 @@
         "budget": {
           "$ref": "#/$defs/BudgetConfig",
           "description": "Token budget settings for cost control"
+        },
+        "additional_dirs": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "/Users/me/src/shared"
+            ]
+          },
+          "type": "array",
+          "description": "Extra directories outside the working directory that file tools may access"
+        },
+        "execution": {
+          "$ref": "#/$defs/ExecutionOptions",
+          "description": "Command execution limits for agent tools"
+        },
+        "file_ops": {
+          "$ref": "#/$defs/FileOpsOptions",
+          "description": "Mutating file operation settings"
+        },
+        "runtime_profile": {
+          "type": "string",
+          "enum": [
+            "floyd",
+            "superfloyd"
+          ],
+          "description": "Runtime profile used when FLOYD_RUNTIME_PROFILE and the executable name are both silent",
+          "default": "floyd"
         }
       },
       "additionalProperties": false,
@@ -891,6 +977,16 @@
             "split"
           ],
           "description": "Diff mode for the TUI interface"
+        },
+        "theme": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "dark",
+            "light"
+          ],
+          "description": "TUI color theme",
+          "default": "dark"
         },
         "completions": {
           "$ref": "#/$defs/Completions",
