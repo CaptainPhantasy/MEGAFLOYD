@@ -74,11 +74,11 @@ separation between owner intent and agent implementation is mandatory.
 20. Agent library loader; skills runtime
 21. Session fork; permission profiles; file write tracker
 22. Paranoia (prompt-injection defenses); validation; error formatter
-23. 21 tools: apply_unified_diff, archive_query, complexity_estimator,
+23. 20 agent tools (corrected 2026-10-19; registry.go, selfheal.go, progress.go are helper files, not tools; vision was already registered): apply_patch, query_floyd_archive, complexity_estimator,
     context_status, failure_mode_enumerator, get_active_diff, lab,
     list_symbols, manage_scratchpad, mcp_task_status, parallel_bash,
-    progress, project_map, refactor_blueprint, registry, selfheal,
-    smart_replace, symbol_index, transcript_export, vision, workflow
+    project_map, refactor_blueprint, smart_replace, symbol_index,
+    transcript_export, vision, workflow
 24. Superfloyd resilience + scoreboard commands; doctor; ai/prompt commands;
     codebase analysis CLI
 25. UI extras: config audit dialog, MCP dialog, rename session, diffview
@@ -212,3 +212,10 @@ Combining rule: when two skills' work overlaps 90%+, build ONE skill that
 answers to both names (e.g. /branch + /fork). No skill may be replaced by
 "something roughly equivalent" — the named trigger must do the named job.
 
+
+- 2026-10-19 wave-1 fixes merged and runtime-verified: skills install at
+  startup (46 files in a fresh data dir: 41 + 2 aliases + 3 ralph); CLI
+  subcommands registered (doctor/resilience/scoreboard help exit 0);
+  binary presents as megafloyd (version d077441); output-style engine
+  injected into the kernel (tests green); tool set locked at 20 with
+  duplicate/description assertions; full race suite green on main.
