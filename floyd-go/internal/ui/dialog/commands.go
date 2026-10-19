@@ -231,7 +231,9 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			c.input, cmd = c.input.Update(msg)
 			value := c.input.Value()
 			if value != prevValue {
-				c.list.SetFilter(value)
+				// A leading slash is optional in the filter so a pasted
+				// "/usage" matches the "/usage" entry.
+				c.list.SetFilter(strings.TrimPrefix(value, "/"))
 				c.list.ScrollToTop()
 				c.list.SetSelected(0)
 			}
