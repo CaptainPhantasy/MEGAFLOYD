@@ -47,6 +47,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/hooks"
 	"github.com/legacy-ai/floyd/internal/megafloyd/style"
 	"github.com/legacy-ai/floyd/internal/message"
+	"github.com/legacy-ai/floyd/internal/plan"
 	"github.com/legacy-ai/floyd/internal/pubsub"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/stringext"
@@ -202,6 +203,10 @@ type sessionAgent struct {
 	// nil-checks it before consulting the loop state.
 	ralphLoop *ralph.Loop
 
+	// planService supplies the per-turn plan-mode reminder. Nil disables
+	// reminder injection.
+	planService *plan.Service
+
 	// budgetCfg is the configured budget template; nil disables budget
 	// enforcement.
 	budgetCfg *BudgetConfig
@@ -270,6 +275,8 @@ type SessionAgentOptions struct {
 	// DataDirectory is the .floyd directory path used to persist ralph
 	// loop state. Empty disables the loop for this agent.
 	DataDirectory string
+	// PlanService supplies plan-mode reminders. Nil disables them.
+	PlanService *plan.Service
 	// Budget configures the per-session token spend cap. Nil disables
 	// budget enforcement for this agent.
 	Budget *BudgetConfig
@@ -296,6 +303,7 @@ func NewSessionAgent(
 		runComplete:          opts.RunComplete,
 		sessionStartRunner:   opts.SessionStartRunner,
 		stopRunner:           opts.StopRunner,
+		planService:          opts.PlanService,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
@@ -877,6 +885,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if call.MaxOutputTokens > 0 {
 		maxOutputTokens = &call.MaxOutputTokens
 	}
+	// Compute the plan reminder once per run. PrepareStep runs for every
+	// model step, so computing it there would inject duplicate reminders
+	// within a single tool loop.
+	planReminder := ""
+	if a.planService != nil {
+		planReminder = a.planService.Reminder(call.SessionID)
+	}
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
@@ -931,9 +946,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 
 			// Inject the per-request environment block as the first user
-			// message after the system messages. It is never cached so the
-			// static prompt prefix stays stable across turns.
-			if dynamicCtx := a.dynamicContext.Get(); dynamicCtx != "" {
+			// message after the system messages. The plan-mode reminder
+			// rides along so it is refreshed every turn without touching
+			// the cacheable system prefix.
+			dynamicCtx := a.dynamicContext.Get()
+			if planReminder != "" {
+				if strings.TrimSpace(dynamicCtx) == "" {
+					dynamicCtx = planReminder
+				} else {
+					dynamicCtx = strings.TrimRight(dynamicCtx, "\n") + "\n\n" + planReminder
+				}
+			}
+			if dynamicCtx != "" {
 				insertIdx := 0
 				for i, msg := range prepared.Messages {
 					if msg.Role != fantasy.MessageRoleSystem {
@@ -1606,6 +1630,11 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	_, err = a.sessions.Save(genCtx, currentSession)
 	if err != nil {
 		return err
+	}
+	// The conversation was replaced by the summary. The next turn should
+	// carry the plan reentry reminder rather than a sparse one.
+	if a.planService != nil {
+		a.planService.MarkContextReset(sessionID)
 	}
 
 	// Release the active request before processing queued messages so that

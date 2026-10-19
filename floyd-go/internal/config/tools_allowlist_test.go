@@ -54,6 +54,15 @@ func TestAllToolNamesCoversPortedTools(t *testing.T) {
 	}
 }
 
+// TestAllToolNamesCoversPlanTools keeps both plan-mode tools in the
+// default coder allowlist.
+func TestAllToolNamesCoversPlanTools(t *testing.T) {
+	names := allToolNames()
+	for _, want := range []string{"enter_plan_mode", "exit_plan_mode"} {
+		assert.True(t, slices.Contains(names, want), "allToolNames missing %q", want)
+	}
+}
+
 // TestSetupAgentsAllowsPortedTools checks the default coder agent and
 // keeps the task agent on its read-only subset.
 func TestSetupAgentsAllowsPortedTools(t *testing.T) {

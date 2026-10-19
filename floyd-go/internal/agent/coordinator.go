@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -36,6 +37,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/oauth"
 	"github.com/legacy-ai/floyd/internal/oauth/copilot"
 	"github.com/legacy-ai/floyd/internal/permission"
+	"github.com/legacy-ai/floyd/internal/plan"
 	"github.com/legacy-ai/floyd/internal/pubsub"
 	"github.com/legacy-ai/floyd/internal/question"
 	"github.com/legacy-ai/floyd/internal/session"
@@ -125,6 +127,12 @@ type coordinator struct {
 	runComplete pubsub.Publisher[notify.RunComplete]
 	interactive bool
 
+	// plans is the per-session plan-mode store shared by the tools, the
+	// guard, and the reminder injection. plansOnce guards lazy creation
+	// for coordinators built directly in tests.
+	plans     *plan.Service
+	plansOnce sync.Once
+
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
@@ -179,6 +187,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		lspManager:   opts.LSPManager,
 		notify:       opts.Notify,
 		runComplete:  opts.RunComplete,
+		plans:        plan.NewService(opts.Config.Config().Options.DataDirectory),
 		agents:       make(map[string]SessionAgent),
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
@@ -675,6 +684,7 @@ func (c *coordinator) buildAgent(ctx context.Context, promptTemplate *prompt.Pro
 		SessionStartRunner:   c.eventHookRunner(hooks.EventSessionStart, isSubAgent),
 		StopRunner:           c.eventHookRunner(hooks.EventStop, isSubAgent),
 		DataDirectory:        dataDir,
+		PlanService:          c.planService(),
 		Budget:               budget,
 	})
 
@@ -719,7 +729,19 @@ func (c *coordinator) buildAgent(ctx context.Context, promptTemplate *prompt.Pro
 	return result, nil
 }
 
+// planService returns the coordinator's plan store, creating it lazily for
+// coordinators assembled directly in tests.
+func (c *coordinator) planService() *plan.Service {
+	c.plansOnce.Do(func() {
+		if c.plans == nil {
+			c.plans = plan.NewService(c.cfg.Config().Options.DataDirectory)
+		}
+	})
+	return c.plans
+}
+
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
+	plans := c.planService()
 	var allTools []fantasy.AgentTool
 	if slices.Contains(agent.AllowedTools, AgentToolName) {
 		agentTool, err := c.agentTool(ctx)
@@ -778,7 +800,16 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewTodosTool(c.sessions),
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewEnterPlanModeTool(plans),
+		tools.NewExitPlanModeTool(plans, c.permissions),
 	)
+
+	// Job-record tools. They are appended before the allowlist filter so
+	// the seven names already present in config.allToolNames become
+	// active and flow through the plan guard and hook wrappers.
+	allTools = append(allTools, tools.JobsTools(
+		c.cfg.Config().Options.DataDirectory, c.permissions, c.cfg.WorkingDir(),
+	)...)
 
 	// v5.3 agent tool set: parallel execution, context intelligence,
 	// self-correction support, and lab/workflow tooling. This block
@@ -878,6 +909,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, postToolHookRunner, isSubAgent)
+
+	// Plan mode enforcement runs outside the hook wrapper so a plan
+	// denial is decided before user hooks and tool permissions.
+	filteredTools = wrapToolsWithPlanGuard(filteredTools, plans, c.permissions, c.cfg.WorkingDir())
 
 	return filteredTools, nil
 }

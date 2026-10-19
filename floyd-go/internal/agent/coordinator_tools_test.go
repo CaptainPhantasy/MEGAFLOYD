@@ -115,6 +115,8 @@ func TestBuildToolsRegistersCompleteToolSet(t *testing.T) {
 		"bash",
 		"download",
 		"edit",
+		"enter_plan_mode",
+		"exit_plan_mode",
 		"fetch",
 		"floyd_info",
 		"floyd_logs",
@@ -128,6 +130,14 @@ func TestBuildToolsRegistersCompleteToolSet(t *testing.T) {
 		"todos",
 		"view",
 		"write",
+		// Job-record tools appended before the allowlist filter.
+		"contract",
+		"prove",
+		"drift",
+		"why",
+		"recover",
+		"handoff",
+		"replay",
 	}
 	expected = append(expected, portedAgentToolNames...)
 	slices.Sort(expected)
@@ -136,6 +146,29 @@ func TestBuildToolsRegistersCompleteToolSet(t *testing.T) {
 	slices.Sort(actual)
 
 	assert.Equal(t, expected, actual)
+}
+
+// TestBuildToolsRegistersPlanAndJobTools verifies the two plan tools and
+// the seven job-record tools are active after registration. The job tools
+// were previously defined but never appended, so their allowlist entries
+// silently hid them.
+func TestBuildToolsRegistersPlanAndJobTools(t *testing.T) {
+	coord := newToolSetTestCoordinator(t)
+	names := buildToolNames(t, coord)
+
+	for _, want := range []string{
+		"enter_plan_mode",
+		"exit_plan_mode",
+		"contract",
+		"prove",
+		"drift",
+		"why",
+		"recover",
+		"handoff",
+		"replay",
+	} {
+		assert.Contains(t, names, want, "buildTools missing %q", want)
+	}
 }
 
 // TestBuildToolsHasNoDuplicateNames guards the sorted palette against a
