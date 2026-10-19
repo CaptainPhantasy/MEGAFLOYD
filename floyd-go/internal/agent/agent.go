@@ -45,6 +45,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/hooks"
+	"github.com/legacy-ai/floyd/internal/megafloyd/style"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/pubsub"
 	"github.com/legacy-ai/floyd/internal/session"
@@ -609,6 +610,12 @@ func ValidateCall(call SessionAgentCall) error {
 	return nil
 }
 
+// protocolKernelPrompt returns the protocol kernel with the owner-mandated
+// output-style directive applied. See internal/megafloyd/style.
+func protocolKernelPrompt() string {
+	return style.Apply(string(protocolKernelTmpl))
+}
+
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
@@ -964,7 +971,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// role template carries the cache breakpoint, so providers cache
 			// the whole static prefix (kernel + role) as one block.
 			{
-				kernelMsg := fantasy.NewSystemMessage(string(protocolKernelTmpl))
+				kernelMsg := fantasy.NewSystemMessage(protocolKernelPrompt())
 				kernelMsg.ProviderOptions = nil
 				insertAt := 0
 				if promptPrefix != "" {
