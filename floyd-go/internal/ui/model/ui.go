@@ -214,6 +214,9 @@ type UI struct {
 	// skip the expensive style rebuild when switching to a provider that
 	// resolves to the same theme.
 	themeKey string
+	// themeName is the explicitly selected theme (auto/dark/light). An
+	// empty value means the provider-derived default applies.
+	themeName string
 
 	focus uiFocusState
 	state uiState
@@ -409,6 +412,18 @@ type UI struct {
 
 // New creates a new instance of the [UI] model.
 func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
+	// An explicitly configured theme replaces the provider-derived
+	// default before any subcomponent captures style values.
+	themeName := ""
+	if cfg := com.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+		if name := cfg.Options.TUI.Theme; name != "" {
+			if s, err := styles.ThemeByName(name); err == nil {
+				*com.Styles = s
+				themeName = name
+			}
+		}
+	}
+
 	// Editor components
 	ta := textarea.New()
 	ta.SetStyles(com.Styles.Editor.Textarea)
@@ -471,6 +486,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	ui := &UI{
 		com:                 com,
+		themeName:           themeName,
 		dialog:              dialog.NewOverlay(),
 		keyMap:              keyMap,
 		textarea:            ta,
@@ -2171,6 +2187,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionSelectTheme:
+		m.dialog.CloseDialog(dialog.ThemeID)
+		if cmd := m.themeCommand(msg.Name); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
@@ -4275,6 +4296,9 @@ func (m *UI) cacheSidebarLogo(width int) {
 // invalidating the markdown renderer cache and re-rendering the entire
 // transcript for no visible change.
 func (m *UI) applyThemeForProvider(providerID string) {
+	if m.themeName != "" {
+		return
+	}
 	key := styles.ThemeKeyForProvider(providerID)
 	if key == m.themeKey {
 		return
@@ -4296,23 +4320,33 @@ func (m *UI) applyTheme(s styles.Styles) {
 // that copies or pre-renders style-dependent values at construction time.
 func (m *UI) refreshStyles() {
 	t := m.com.Styles
-	m.header.refresh()
+	if m.header != nil {
+		m.header.refresh()
+	}
 	if m.layout.sidebar.Dx() > 0 {
 		m.cacheSidebarLogo(m.layout.sidebar.Dx())
 	}
 	m.textarea.SetStyles(t.Editor.Textarea)
-	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
-	m.attachments.Renderer().SetStyles(
-		t.Attachments.Normal,
-		t.Attachments.Deleting,
-		t.Attachments.Image,
-		t.Attachments.Text,
-		t.Attachments.Skill,
-		t.Attachments.Remove,
-	)
+	if m.completions != nil {
+		m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
+	}
+	if m.attachments != nil {
+		m.attachments.Renderer().SetStyles(
+			t.Attachments.Normal,
+			t.Attachments.Deleting,
+			t.Attachments.Image,
+			t.Attachments.Text,
+			t.Attachments.Skill,
+			t.Attachments.Remove,
+		)
+	}
 	m.todoSpinner.Style = t.Pills.TodoSpinner
-	m.status.help.Styles = t.Help
-	m.chat.InvalidateRenderCaches()
+	if m.status != nil {
+		m.status.help.Styles = t.Help
+	}
+	if m.chat != nil {
+		m.chat.InvalidateRenderCaches()
+	}
 }
 
 // attachSkill reads a skill's content by ID and returns it as a markdown

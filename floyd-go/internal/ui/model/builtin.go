@@ -20,12 +20,14 @@ import (
 	"github.com/legacy-ai/floyd/internal/clipboard"
 	"github.com/legacy-ai/floyd/internal/commands"
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/experiments"
 	"github.com/legacy-ai/floyd/internal/megafloydweb"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/plan"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/shell"
 	"github.com/legacy-ai/floyd/internal/ui/dialog"
+	"github.com/legacy-ai/floyd/internal/ui/styles"
 	"github.com/legacy-ai/floyd/internal/ui/util"
 	"github.com/legacy-ai/floyd/internal/version"
 	"github.com/legacy-ai/floyd/internal/workspace"
@@ -58,6 +60,9 @@ const (
 	handlerMCP
 	handlerPlugins
 	handlerCompact
+	handlerAddDir
+	handlerExperiments
+	handlerTheme
 	handlerGoal
 	handlerInit
 	handlerFork
@@ -115,6 +120,12 @@ func builtinHandlerFor(name string) builtinHandlerID {
 		return handlerMCP
 	case "plugins":
 		return handlerPlugins
+	case "add-dir":
+		return handlerAddDir
+	case "experiments":
+		return handlerExperiments
+	case "theme":
+		return handlerTheme
 	case "compact":
 		return handlerCompact
 	case "goal":
@@ -297,6 +308,15 @@ func (m *UI) runBuiltin(name, args string, fromPalette bool) tea.Cmd {
 
 	case handlerPlugins:
 		return m.openDialog(dialog.PluginsLibraryID)
+
+	case handlerAddDir:
+		return m.addDirCommand(args)
+
+	case handlerExperiments:
+		return m.experimentsCommand(args)
+
+	case handlerTheme:
+		return m.themeCommand(args)
 
 	case handlerCompact:
 		if m.isAgentBusy() {
@@ -1255,6 +1275,212 @@ func (m *UI) logoutProvider(args string) tea.Cmd {
 	}
 }
 
+// addDirCommand adds a directory to the file-tool allowlist or lists the
+// current set. The persisted set lives at workspace scope, so it follows
+// the project rather than the machine.
+func (m *UI) addDirCommand(args string) tea.Cmd {
+	input := strings.TrimSpace(args)
+	if input == "" || strings.EqualFold(input, "list") {
+		return m.showInfo("Workspace directories", m.additionalDirsReport())
+	}
+	ws := m.com.Workspace
+	if ws == nil {
+		return util.ReportWarn("No workspace is available.")
+	}
+	return func() tea.Msg {
+		dirs, err := ws.AddAdditionalDir(context.Background(), input)
+		if err != nil {
+			return builtinResultMsg{Err: err}
+		}
+		return builtinResultMsg{Info: "Added workspace directory:\n  " + input + "\n\n" + formatAdditionalDirs(ws.WorkingDir(), dirs)}
+	}
+}
+
+func (m *UI) additionalDirsReport() string {
+	if m.com.Workspace == nil {
+		return "No workspace is available."
+	}
+	return formatAdditionalDirs(m.com.Workspace.WorkingDir(), m.com.Workspace.AdditionalDirs())
+}
+
+func formatAdditionalDirs(workingDir string, dirs []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Working directory:\n  %s\n\nAdditional directories:\n", workingDir)
+	if len(dirs) == 0 {
+		b.WriteString("  (none)\n")
+	} else {
+		for _, dir := range dirs {
+			fmt.Fprintf(&b, "  %s\n", dir)
+		}
+	}
+	b.WriteString("\nUse /add-dir <path> to add one; file tools accept paths inside these directories.")
+	return b.String()
+}
+
+type experimentsAction uint8
+
+const (
+	experimentsList experimentsAction = iota
+	experimentsToggle
+	experimentsSet
+	experimentsUnknown
+)
+
+// themeCommand switches the TUI palette, applies it immediately, and
+// persists the choice globally.
+func (m *UI) themeCommand(args string) tea.Cmd {
+	input := strings.TrimSpace(args)
+	if input == "" {
+		if m.dialog.ContainsDialog(dialog.ThemeID) {
+			m.dialog.BringToFront(dialog.ThemeID)
+			return nil
+		}
+		current := m.themeName
+		if current == "" {
+			current = styles.ThemeDark
+		}
+		m.dialog.OpenDialog(dialog.NewTheme(m.com, current))
+		return nil
+	}
+	if strings.EqualFold(input, "list") || strings.EqualFold(input, "status") {
+		return m.showInfo("Theme", m.themesReport())
+	}
+	name, err := styles.NormalizeThemeName(input)
+	if err != nil {
+		return util.ReportWarn(err.Error())
+	}
+	theme, err := styles.ThemeByName(name)
+	if err != nil {
+		return util.ReportWarn(err.Error())
+	}
+	m.themeName = name
+	m.themeKey = "theme:" + name
+	m.applyTheme(theme)
+
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		if ws == nil {
+			return builtinResultMsg{Info: "Theme set to " + name + "."}
+		}
+		if err := ws.SetConfigField(config.ScopeGlobal, "options.tui.theme", name); err != nil {
+			return builtinResultMsg{Err: fmt.Errorf("theme applied, but saving it failed: %w", err)}
+		}
+		return builtinResultMsg{Info: "Theme set to " + name + "."}
+	}
+}
+
+func (m *UI) themesReport() string {
+	current := m.themeName
+	if current == "" {
+		current = styles.ThemeDark
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Current theme: %s\n\n", current)
+	for _, info := range styles.ThemeNames() {
+		marker := "  "
+		if info.Name == current {
+			marker = "* "
+		}
+		fmt.Fprintf(&b, "%s%-6s %s\n", marker, info.Name, info.Description)
+	}
+	b.WriteString("\nUse /theme <name> to switch.")
+	return b.String()
+}
+
+// experimentsCommand lists, toggles, or sets a registered experimental
+// flag. The override is persisted under the top-level [experimental]
+// config section.
+func (m *UI) experimentsCommand(args string) tea.Cmd {
+	id, enabled, action, err := parseExperimentsArgs(args)
+	if err != nil {
+		return util.ReportWarn(err.Error())
+	}
+	switch action {
+	case experimentsList:
+		return m.showInfo("Experiments", m.experimentsReport())
+	case experimentsUnknown:
+		return util.ReportWarn(fmt.Sprintf("Unknown experiment %q. Known flags: %s", id, experimentIDs()))
+	}
+	if action == experimentsToggle {
+		enabled = !m.experimentEnabled(id)
+	}
+
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		if ws == nil {
+			return builtinResultMsg{Err: fmt.Errorf("no workspace is available")}
+		}
+		if err := ws.SetConfigField(config.ScopeGlobal, "experimental."+id, enabled); err != nil {
+			return builtinResultMsg{Err: fmt.Errorf("failed to save experiment %s: %w", id, err)}
+		}
+		state := "off"
+		if enabled {
+			state = "on"
+		}
+		return builtinResultMsg{Info: "Experiment " + id + " is " + state + "."}
+	}
+}
+
+func parseExperimentsArgs(args string) (id string, enabled bool, action experimentsAction, err error) {
+	fields := strings.Fields(strings.TrimSpace(args))
+	if len(fields) == 0 || strings.EqualFold(fields[0], "list") || strings.EqualFold(fields[0], "status") {
+		return "", false, experimentsList, nil
+	}
+	id = strings.ToLower(fields[0])
+	if _, ok := experiments.Lookup(id); !ok {
+		return id, false, experimentsUnknown, nil
+	}
+	if len(fields) == 1 {
+		return id, false, experimentsToggle, nil
+	}
+	switch strings.ToLower(fields[1]) {
+	case "on", "true", "enable", "enabled":
+		return id, true, experimentsSet, nil
+	case "off", "false", "disable", "disabled":
+		return id, false, experimentsSet, nil
+	default:
+		return id, false, experimentsUnknown, fmt.Errorf("usage: /experiments <id> [on|off]")
+	}
+}
+
+func (m *UI) experimentsReport() string {
+	var b strings.Builder
+	b.WriteString("Experimental features:\n\n")
+	for _, state := range experiments.List(m.experimentalConfig()) {
+		status := "off"
+		if state.Enabled {
+			status = "on"
+		}
+		fmt.Fprintf(&b, "[%s] %-14s %s\n      %s (source: %s)\n", status, state.ID, state.Title, state.Description, state.Source)
+	}
+	b.WriteString("\nUse /experiments <id> to toggle or /experiments <id> on|off.")
+	return b.String()
+}
+
+func (m *UI) experimentalConfig() map[string]bool {
+	if m.com == nil || m.com.Workspace == nil {
+		return nil
+	}
+	cfg := m.com.Config()
+	if cfg == nil {
+		return nil
+	}
+	return cfg.Experimental
+}
+
+func (m *UI) experimentEnabled(id string) bool {
+	return experiments.Enabled(m.experimentalConfig(), id)
+}
+
+func experimentIDs() string {
+	flags := experiments.Flags()
+	ids := make([]string, 0, len(flags))
+	for _, flag := range flags {
+		ids = append(ids, flag.ID)
+	}
+	return strings.Join(ids, ", ")
+}
+
 func (m *UI) reloadConfig() tea.Cmd {
 	storeWS, ok := m.com.Workspace.(storeWorkspace)
 	if !ok {
@@ -1283,7 +1509,16 @@ func (m *UI) reapplyTUI() {
 	}
 	providerID := cfg.Models[config.SelectedModelTypeLarge].Provider
 	m.themeKey = ""
-	m.applyThemeForProvider(providerID)
+	if cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.Theme != "" {
+		if s, err := styles.ThemeByName(cfg.Options.TUI.Theme); err == nil {
+			m.themeName = cfg.Options.TUI.Theme
+			m.themeKey = "theme:" + m.themeName
+			m.applyTheme(s)
+		}
+	} else {
+		m.themeName = ""
+		m.applyThemeForProvider(providerID)
+	}
 	m.notifyBackend = selectNotificationBackend(m.caps, cfg)
 	m.isTransparent = cfg.Options != nil && cfg.Options.TUI.IsTransparent()
 	m.updateLayoutAndSize()

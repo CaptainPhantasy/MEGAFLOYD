@@ -35,6 +35,9 @@ var builtinCommands = []BuiltinCommand{
 	{Name: "tasks", Aliases: []string{"task"}, Description: "List background tasks"},
 	{Name: "mcp", Description: "Show MCP servers and their status"},
 	{Name: "plugins", Description: "Open the plugins library"},
+	{Name: "add-dir", Description: "Add or list an extra workspace directory", ArgumentHint: "[list]|<path>"},
+	{Name: "experiments", Aliases: []string{"experimental"}, Description: "List or toggle experimental features", ArgumentHint: "[<id> [on|off]]"},
+	{Name: "theme", Description: "Select the terminal UI theme", ArgumentHint: "auto|dark|light"},
 	{Name: "compact", Description: "Compact the conversation context", ArgumentHint: "[instruction]"},
 	{Name: "goal", Description: "Start or manage an autonomous Ralph goal", ArgumentHint: "status|cancel|<objective>"},
 	{Name: "init", Description: "Analyze the project and generate AGENTS.md"},
@@ -64,10 +67,7 @@ var builtinCommands = []BuiltinCommand{
 // real trigger because the chassis has no mechanism for it. The value is
 // the evidence-based reason.
 var BlockedBuiltin = map[string]string{
-	"add-dir":     "no additional workspace directory concept exists in config or the workspace interface; every file tool resolves against the single WorkingDir",
-	"experiments": "no experimental feature flag system exists; the only 'experimental' reference is an MCP capability key",
-	"theme":       "only one effective theme exists (HyperfloydObsidiana returns CharmtonePantera); there is no theme picker or persisted theme setting",
-	"desktop":     "no desktop or install URL is documented for this private fork; the reference URL belongs to the upstream product",
+	"desktop": "f7 resolves /desktop to floydCodeOfficialInstallUrl(), which falls back to FLOYD_CODE_REPOSITORY_URL = https://github.com/CaptainPhantasy/f7, or to `${siteBase}/code` when a region profile defines one (apps/floyd-code/src/tui/commands/desktop.ts; src/constant/app.ts:79,148). That is the f7 harness repository, not a desktop product page for MEGAFLOYD, and this fork ships no desktop app to link to.",
 }
 
 // ExcludedBuiltin would list commands owned by another lane. The remote

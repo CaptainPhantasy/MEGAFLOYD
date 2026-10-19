@@ -5,6 +5,7 @@ import (
 
 	"charm.land/bubbletea/v2"
 	"github.com/legacy-ai/floyd/internal/clipboard"
+	"github.com/legacy-ai/floyd/internal/experiments"
 	"github.com/legacy-ai/floyd/internal/ui/util"
 )
 
@@ -18,6 +19,10 @@ import (
 // focused, no completion popup is open, and the editor content is a
 // prefix of the candidate (or empty).
 func (m *UI) updateCommandSuggestion() {
+	if !m.experimentEnabled(experiments.GhostText) {
+		m.commandSuggestion = ""
+		return
+	}
 	if m.focus != uiFocusEditor || !m.textarea.Focused() {
 		m.commandSuggestion = ""
 		return

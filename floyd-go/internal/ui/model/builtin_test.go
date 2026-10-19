@@ -1,8 +1,10 @@
 package model
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -198,9 +200,11 @@ func testConfigWithModel(contextWindow int) *config.Config {
 // handlers touch; the embedded nil interface covers the rest.
 type builtinTestWorkspace struct {
 	workspace.Workspace
-	cfg     *config.Config
-	workDir string
-	skip    bool
+	cfg       *config.Config
+	workDir   string
+	skip      bool
+	dirs      []string
+	setFields map[string]any
 }
 
 func (w *builtinTestWorkspace) Config() *config.Config       { return w.cfg }
@@ -211,6 +215,43 @@ func (w *builtinTestWorkspace) PermissionSetSkipRequests(v bool) {
 }
 func (w *builtinTestWorkspace) AgentIsReady() bool         { return true }
 func (w *builtinTestWorkspace) Store() *config.ConfigStore { return nil }
+
+func (w *builtinTestWorkspace) AdditionalDirs() []string { return w.dirs }
+
+func (w *builtinTestWorkspace) AddAdditionalDir(_ context.Context, path string) ([]string, error) {
+	dir, err := workspace.NormalizeAdditionalDir(w.workDir, path)
+	if err != nil {
+		return nil, err
+	}
+	for _, existing := range w.dirs {
+		if existing == dir {
+			return w.dirs, nil
+		}
+	}
+	w.dirs = append(w.dirs, dir)
+	return w.dirs, nil
+}
+
+func (w *builtinTestWorkspace) SetConfigField(_ config.Scope, key string, value any) error {
+	if w.setFields == nil {
+		w.setFields = map[string]any{}
+	}
+	w.setFields[key] = value
+	if id, ok := strings.CutPrefix(key, "experimental."); ok {
+		if enabled, ok := value.(bool); ok {
+			if w.cfg.Experimental == nil {
+				w.cfg.Experimental = map[string]bool{}
+			}
+			w.cfg.Experimental[id] = enabled
+		}
+	}
+	if key == "options.tui.theme" {
+		if name, ok := value.(string); ok && w.cfg.Options != nil && w.cfg.Options.TUI != nil {
+			w.cfg.Options.TUI.Theme = name
+		}
+	}
+	return nil
+}
 
 func newBuiltinTestUI(cfg *config.Config) (*UI, *dialog.Overlay) {
 	st := styles.CharmtonePantera()

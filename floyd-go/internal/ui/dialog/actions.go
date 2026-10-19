@@ -67,6 +67,10 @@ type (
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
+	// ActionSelectTheme reports the palette chosen in the theme picker.
+	ActionSelectTheme struct {
+		Name string
+	}
 	// ActionRenameSession is a message to open the rename session dialog.
 	ActionRenameSession struct {
 		SessionID string
