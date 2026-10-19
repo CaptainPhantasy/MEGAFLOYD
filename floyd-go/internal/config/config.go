@@ -379,6 +379,7 @@ type Options struct {
 	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=FLOYD.md"`
 	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/floyd/FLOYD.md,default=~/.config/AGENTS.md"`
 	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/floyd/skills,example=./skills"`
+	PluginsPaths         []string    `json:"plugins_paths,omitempty" jsonschema:"description=Paths to directories containing Floyd plugins (folders with PLUGIN.md files),example=~/.config/floyd/plugins,example=./plugins"`
 	AgentName            string      `json:"agent_name,omitempty" jsonschema:"description=Identity name injected into prompt templates (overridden by FLOYD_IDENTITY env),default=Floyd"`
 	TUI                  *TUIOptions `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
 	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
@@ -938,6 +939,13 @@ func allToolNames() []string {
 		"floyd_logs",
 		"job_output",
 		"job_kill",
+		"contract",
+		"prove",
+		"drift",
+		"why",
+		"recover",
+		"handoff",
+		"replay",
 		"download",
 		"edit",
 		"multiedit",
