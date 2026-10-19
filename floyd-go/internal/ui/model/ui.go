@@ -2035,7 +2035,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	switch msg := action.(type) {
 	// Generic dialog messages
 	case dialog.ActionClose:
-		if isOnboarding && m.dialog.ContainsDialog(dialog.ModelsID) {
+		// During onboarding the model picker must stay open — but only when
+		// it is the front dialog. A palette opened on top of it must still
+		// close on esc.
+		if isOnboarding && m.dialog.ContainsDialog(dialog.ModelsID) && m.dialog.FrontID() == dialog.ModelsID {
 			break
 		}
 
@@ -2738,9 +2741,26 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
+	// The command palette is global: ctrl+p opens it even when a dialog is
+	// already on screen. Onboarding opens the model picker as a dialog and
+	// advertises ctrl+p, so dialog routing must not swallow it.
+	if key.Matches(msg, m.keyMap.Commands) {
+		if cmd := m.openCommandsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return tea.Batch(cmds...)
+	}
+
 	// Route all messages to dialog if one is open.
 	if m.dialog.HasDialogs() {
 		return m.handleDialogMsg(msg)
+	}
+
+	// Global keybindings (commands, models, sessions, help, suspend, yolo)
+	// work in every state. Onboarding and initialize advertise ctrl+p, so
+	// gating these behind the chat state made the documented key dead there.
+	if handleGlobalKeys(msg) {
+		return tea.Batch(cmds...)
 	}
 
 	// Tab always toggles focus between editor and chat, even when

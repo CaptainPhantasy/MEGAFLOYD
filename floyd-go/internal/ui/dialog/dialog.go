@@ -100,6 +100,16 @@ func (d *Overlay) ContainsDialog(dialogID string) bool {
 	return false
 }
 
+// FrontID returns the ID of the front-most dialog, or an empty string when
+// no dialog is open. Callers use it to distinguish "the guarded dialog is
+// on top" from "the guarded dialog is buried under another one".
+func (d *Overlay) FrontID() string {
+	if len(d.dialogs) == 0 {
+		return ""
+	}
+	return d.dialogs[len(d.dialogs)-1].ID()
+}
+
 // OpenDialog opens a new dialog to the stack.
 func (d *Overlay) OpenDialog(dialog Dialog) {
 	d.dialogs = append(d.dialogs, dialog)
