@@ -108,3 +108,5 @@ it; no config was changed. After install the same build exits 0.
 - `FLOYD.md` at the project root: identity, operating rules, and the order of work, so a
   session opening in this folder does not need telling what the project is. This is also the
   file phase B3 will read.
+
+- 2026-10-19 ~01:20: checkpoint written (process fix). Wave 3 still running. Web/backend correction recorded: exists, ships as-is, nothing rebuilt.
