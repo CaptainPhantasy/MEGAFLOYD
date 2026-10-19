@@ -637,12 +637,19 @@ func (c *coordinator) eventHookRunner(event string, isSubAgent bool) *hooks.Runn
 	return hooks.NewRunner(eventHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {	large, small, err := c.buildAgentModels(ctx, isSubAgent)
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
+	large, small, err := c.buildAgentModels(ctx, isSubAgent)
 	if err != nil {
 		return nil, err
 	}
 
 	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	// The ralph loop is a top-level, user-driven feature; sub-agents never
+	// get a loop of their own.
+	dataDir := ""
+	if !isSubAgent {
+		dataDir = c.cfg.Config().Options.DataDirectory
+	}
 	result := NewSessionAgent(SessionAgentOptions{
 		LargeModel:           large,
 		SmallModel:           small,
@@ -658,6 +665,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		RunComplete:          c.runComplete,
 		SessionStartRunner:   c.eventHookRunner(hooks.EventSessionStart, isSubAgent),
 		StopRunner:           c.eventHookRunner(hooks.EventStop, isSubAgent),
+		DataDirectory:        dataDir,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the

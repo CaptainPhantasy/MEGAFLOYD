@@ -19,6 +19,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/legacy-ai/floyd/internal/agent"
 	"github.com/legacy-ai/floyd/internal/agent/notify"
+	"github.com/legacy-ai/floyd/internal/agent/ralph"
 	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/clipboard"
 	"github.com/legacy-ai/floyd/internal/config"
@@ -161,6 +162,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		func(context.Context) error { return db.Release(dataDir) },
 		func(ctx context.Context) error { return mcp.Close(ctx) },
 	)
+
+	// Install ralph loop slash commands into .floyd/commands/
+	if err := ralph.InstallCommands(cfg.Options.DataDirectory); err != nil {
+		slog.Warn("Failed to install ralph commands", "error", err)
+	}
 
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {
