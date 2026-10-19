@@ -18,11 +18,13 @@ const DefaultStatusTTL = 5 * time.Second
 
 // Status is the status bar and help model.
 type Status struct {
-	com      *common.Common
-	hideHelp bool
-	help     help.Model
-	helpKm   help.KeyMap
-	msg      util.InfoMsg
+	com        *common.Common
+	hideHelp   bool
+	help       help.Model
+	helpKm     help.KeyMap
+	msg        util.InfoMsg
+	width      int
+	planActive bool
 }
 
 // NewStatus creates a new status bar and help model.
@@ -47,9 +49,48 @@ func (s *Status) ClearInfoMsg() {
 
 // SetWidth sets the width of the status bar and help view.
 func (s *Status) SetWidth(width int) {
+	s.width = width
+	s.applyHelpWidth()
+}
+
+// SetPlanActive shows or hides the plan-mode pill and narrows the help
+// view so the two do not overlap.
+func (s *Status) SetPlanActive(active bool) {
+	if s.planActive == active {
+		return
+	}
+	s.planActive = active
+	s.applyHelpWidth()
+}
+
+func (s *Status) applyHelpWidth() {
 	helpStyle := s.com.Styles.Status.Help
 	horizontalPadding := helpStyle.GetPaddingLeft() + helpStyle.GetPaddingRight()
-	s.help.SetWidth(width - horizontalPadding)
+	width := s.width - horizontalPadding
+	if s.planActive {
+		width -= lipgloss.Width(s.planPill()) + 1
+	}
+	s.help.SetWidth(max(width, 0))
+}
+
+func (s *Status) planPill() string {
+	// Pills.Focused carries a rounded border, which is three rows tall.
+	// The status bar is one row, so use the borderless base pill.
+	return s.com.Styles.Pills.Base.Render("plan")
+}
+
+func (s *Status) drawPlanPill(scr uv.Screen, area uv.Rectangle) {
+	if !s.planActive {
+		return
+	}
+	pill := s.planPill()
+	width := lipgloss.Width(pill)
+	if width == 0 || width >= area.Dx() {
+		return
+	}
+	pillArea := area
+	pillArea.Min.X = area.Max.X - width
+	uv.NewStyledString(pill).Draw(scr, pillArea)
 }
 
 // ShowingAll returns whether the full help view is shown.
@@ -76,6 +117,7 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 
 	// Render notifications
 	if s.msg.IsEmpty() {
+		s.drawPlanPill(scr, area)
 		return
 	}
 
@@ -112,6 +154,10 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 
 	// Draw the info message over the help view
 	uv.NewStyledString(ind+info).Draw(scr, area)
+
+	// The plan pill is drawn last so transient notifications never hide
+	// the active mode.
+	s.drawPlanPill(scr, area)
 }
 
 // clearInfoMsgCmd returns a command that clears the info message after the

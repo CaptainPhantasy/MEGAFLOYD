@@ -935,6 +935,8 @@ func allToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
+		"enter_plan_mode",
+		"exit_plan_mode",
 		"floyd_info",
 		"floyd_logs",
 		"job_output",

@@ -10,6 +10,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/message"
+	"github.com/legacy-ai/floyd/internal/plan"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/dialog"
@@ -215,9 +216,11 @@ func newBuiltinTestUI(cfg *config.Config) (*UI, *dialog.Overlay) {
 	st := styles.CharmtonePantera()
 	ws := &builtinTestWorkspace{cfg: cfg, workDir: "/tmp/work"}
 	overlay := dialog.NewOverlay()
+	com := &common.Common{Workspace: ws, Styles: &st}
 	return &UI{
-		com:    &common.Common{Workspace: ws, Styles: &st},
+		com:    com,
 		dialog: overlay,
+		status: NewStatus(com, nil),
 		session: &session.Session{
 			ID:               "sess-1",
 			Title:            "Work",
@@ -332,4 +335,49 @@ func TestSlashAndPaletteKeyBindings(t *testing.T) {
 	km := DefaultKeyMap()
 	require.Contains(t, km.Editor.Commands.Keys(), "/")
 	require.Contains(t, km.Commands.Keys(), "ctrl+p")
+}
+
+func TestPlanCommandSubcommands(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfigWithModel(1000)
+	cfg.Options.DataDirectory = t.TempDir()
+	ui, overlay := newBuiltinTestUI(cfg)
+	svc := plan.NewService(cfg.Options.DataDirectory)
+
+	cmd := ui.runBuiltin("plan", "", false)
+	require.NotNil(t, cmd)
+	require.True(t, ui.status.planActive, "/plan must show the plan pill")
+
+	status, err := svc.Status("sess-1")
+	require.NoError(t, err)
+	require.True(t, status.Active)
+	require.Empty(t, status.Content)
+
+	require.NoError(t, os.WriteFile(status.Path, []byte("# Plan\n\n1. Do it."), 0o644))
+
+	ui.runBuiltin("plan", "status", false)
+	info, ok := overlay.Dialog(dialog.InfoID).(*dialog.Info)
+	require.True(t, ok, "/plan status must open the info panel")
+	require.Contains(t, info.Body(), status.Path)
+	require.Contains(t, info.Body(), "# Plan")
+	require.Contains(t, info.Body(), "1. Do it.")
+	require.True(t, ui.status.planActive)
+
+	ui.runBuiltin("plan", "clear", false)
+	content, err := os.ReadFile(status.Path)
+	require.NoError(t, err)
+	require.Empty(t, content)
+	status, err = svc.Status("sess-1")
+	require.NoError(t, err)
+	require.True(t, status.Active, "clear must keep plan mode active")
+	require.True(t, ui.status.planActive)
+
+	ui.runBuiltin("plan", "cancel", false)
+	status, err = svc.Status("sess-1")
+	require.NoError(t, err)
+	require.False(t, status.Active)
+	require.False(t, ui.status.planActive, "cancel must hide the plan pill")
+
+	require.NotNil(t, ui.runBuiltin("plan", "bogus", false), "unknown subcommand must warn")
 }

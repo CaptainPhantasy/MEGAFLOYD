@@ -30,6 +30,7 @@ var builtinCommands = []BuiltinCommand{
 	{Name: "provider", Aliases: []string{"providers"}, Description: "Browse configured providers and models"},
 	{Name: "help", Aliases: []string{"h", "?"}, Description: "Toggle the keyboard help"},
 	{Name: "new", Aliases: []string{"clear"}, Description: "Start a new session"},
+	{Name: "plan", Description: "Enter or manage plan mode", ArgumentHint: "status|clear|cancel"},
 	{Name: "sessions", Aliases: []string{"resume"}, Description: "Browse and resume sessions"},
 	{Name: "tasks", Aliases: []string{"task"}, Description: "List background tasks"},
 	{Name: "mcp", Description: "Show MCP servers and their status"},
@@ -63,7 +64,6 @@ var builtinCommands = []BuiltinCommand{
 // real trigger because the chassis has no mechanism for it. The value is
 // the evidence-based reason.
 var BlockedBuiltin = map[string]string{
-	"plan":        "no plan mode, plan storage, or plan file support exists; the chassis only has the agent-driven todos tool, which neither gates tools nor persists a plan",
 	"add-dir":     "no additional workspace directory concept exists in config or the workspace interface; every file tool resolves against the single WorkingDir",
 	"experiments": "no experimental feature flag system exists; the only 'experimental' reference is an MCP capability key",
 	"theme":       "only one effective theme exists (HyperfloydObsidiana returns CharmtonePantera); there is no theme picker or persisted theme setting",
