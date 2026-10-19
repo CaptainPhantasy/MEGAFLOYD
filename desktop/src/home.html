@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;" />
+    <title>MEGAFLOYD</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0b0d;
+        --panel: #121216;
+        --line: #24242c;
+        --text: #f2f2f5;
+        --muted: #8b8b98;
+        --accent: #b7f54a;
+        --danger: #ff6b6b;
+        --warn: #ffcc66;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: radial-gradient(1200px 700px at 50% -10%, #191a20 0%, var(--bg) 60%);
+        color: var(--text);
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      main { width: min(720px, 88vw); padding: 48px 0; }
+      .wordmark {
+        font-size: 44px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        margin: 0;
+      }
+      .wordmark span { color: var(--accent); }
+      .sub { margin: 6px 0 40px; color: var(--muted); letter-spacing: 0.22em; text-transform: uppercase; font-size: 11px; }
+      .status { display: flex; align-items: center; gap: 12px; font-size: 16px; }
+      .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 4px rgba(255,255,255,0.04); }
+      .dot.ready { background: var(--accent); }
+      .dot.starting { background: var(--warn); animation: pulse 1.4s ease-in-out infinite; }
+      .dot.failed, .dot.crashed, .dot.missing { background: var(--danger); }
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+      .detail { color: var(--muted); margin: 10px 0 0; min-height: 20px; }
+      .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 28px 0 0; }
+      button {
+        appearance: none;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 10px 16px;
+        font: inherit;
+        cursor: pointer;
+        transition: border-color .15s ease, transform .15s ease;
+      }
+      button:hover { border-color: #3a3a46; }
+      button:active { transform: translateY(1px); }
+      button.primary { background: var(--accent); color: #0b0b0d; border-color: var(--accent); font-weight: 600; }
+      button:disabled { opacity: .4; cursor: default; }
+      .meta { margin-top: 36px; border-top: 1px solid var(--line); padding-top: 18px; color: var(--muted); font-size: 12px; }
+      .meta dl { display: grid; grid-template-columns: 120px 1fr; gap: 4px 16px; margin: 0; }
+      .meta dt { color: #6a6a76; }
+      .meta dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; word-break: break-all; user-select: text; }
+      .error { margin-top: 18px; padding: 12px 14px; border: 1px solid #4a2323; background: #1a1113; color: #ffb4b4; border-radius: 10px; font-size: 13px; display: none; white-space: pre-wrap; }
+      .hint { margin-top: 22px; color: var(--muted); font-size: 12px; display: none; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #17171c; padding: 2px 5px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 class="wordmark">MEGA<span>FLOYD</span></h1>
+      <p class="sub">Desktop</p>
+
+      <div class="status">
+        <span id="dot" class="dot"></span>
+        <span id="status">Connecting to the engine…</span>
+      </div>
+      <p id="detail" class="detail"></p>
+      <div id="error" class="error"></div>
+
+      <div class="actions">
+        <button id="open" class="primary" disabled>Open MEGAFLOYD</button>
+        <button id="restart">Restart engine</button>
+        <button id="logs">Open logs</button>
+        <button id="copy">Copy diagnostics</button>
+      </div>
+
+      <p id="hint" class="hint">
+        No engine found. Build or install one, then point MEGAFLOYD at it:<br />
+        <code>MEGAFLOYD_ENGINE=/path/to/floyd-code/dist/main.mjs</code>
+      </p>
+
+      <div class="meta">
+        <dl>
+          <dt>Version</dt><dd id="m-version">—</dd>
+          <dt>Engine</dt><dd id="m-engine">—</dd>
+          <dt>Source</dt><dd id="m-source">—</dd>
+          <dt>Port</dt><dd id="m-port">—</dd>
+          <dt>Home</dt><dd id="m-home">—</dd>
+          <dt>Workspace</dt><dd id="m-workspace">—</dd>
+        </dl>
+      </div>
+    </main>
+    <script>
+      const api = window.megafloyd;
+      const $ = (id) => document.getElementById(id);
+      let info = null;
+      let state = null;
+
+      const labels = {
+        idle: 'Engine idle',
+        starting: 'Starting engine…',
+        ready: 'Engine ready',
+        crashed: 'Engine stopped',
+        failed: 'Engine failed',
+        missing: 'Engine not found',
+        stopped: 'Engine stopped',
+      };
+
+      function render(next) {
+        state = next;
+        $('status').textContent = labels[next.status] || next.status;
+        $('dot').className = 'dot ' + next.status;
+        $('detail').textContent = next.detail || '';
+        $('open').disabled = next.status !== 'ready';
+        $('hint').style.display = next.status === 'missing' ? 'block' : 'none';
+        $('m-engine').textContent = next.entry || '—';
+        $('m-source').textContent = next.source || '—';
+        $('m-port').textContent = next.port ? String(next.port) : '—';
+        $('m-workspace').textContent = next.workspace || '—';
+        const error = next.error || (next.status === 'ready' ? '' : '');
+        $('error').textContent = error;
+        $('error').style.display = error ? 'block' : 'none';
+      }
+
+      function diagnostics() {
+        return JSON.stringify({ app: info, engine: state }, null, 2);
+      }
+
+      $('open').addEventListener('click', () => api.openApp());
+      $('restart').addEventListener('click', () => api.restart());
+      $('logs').addEventListener('click', () => api.openLogs());
+      $('copy').addEventListener('click', async () => {
+        await api.copy(diagnostics());
+        $('copy').textContent = 'Copied';
+        setTimeout(() => ($('copy').textContent = 'Copy diagnostics'), 1200);
+      });
+
+      (async () => {
+        if (!api) {
+          $('status').textContent = 'Preload bridge unavailable';
+          $('dot').className = 'dot failed';
+          return;
+        }
+        info = await api.info();
+        if (info) {
+          $('m-version').textContent = `${info.name} ${info.version} · Electron ${info.electron}`;
+          $('m-home').textContent = info.home;
+        }
+        const initial = await api.getState();
+        if (initial) render(initial);
+        api.onState(render);
+      })();
+    </script>
+  </body>
+</html>
