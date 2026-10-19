@@ -143,7 +143,7 @@ waves 2–3 and gets registered in the command registry. Group 3 uses the
 chassis markdown-command + skills + MCP-prompt loaders.
 
 
-## 4. Build waves (each: own worktree, build+test+lint gates, semantic commits)
+## 4. Build waves (agent process — changeable, not law)
 
 - Wave 1 — leaf/utility packages (19 files): DONE, merged to main
 - Wave 2 — agent layer: ralph, 21 tools, workflow, plugins, extensibility:
