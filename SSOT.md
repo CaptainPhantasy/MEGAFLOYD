@@ -82,6 +82,34 @@ historical, non-binding, and kept only as reference).
     (public endpoint published by owner under floydslabs.com)
 32. FLOYD.md identity + workethic loaded at startup; memory checkpoint files
 
+### D. Command surface (owner-ratified 2026-10-19)
+
+Slash commands (typed "/" in session input) — three groups, all in one
+registry:
+
+1. Modern core (modeled on the floyd7 harness, TS v2.0.2 — the ideal):
+   /yolo /auto /permission /settings /plan /model /secondary-model /effort
+   /provider /help /new /sessions /tasks /mcp /plugins /add-dir /experiments
+   /reload /reload-tui /compact /init /fork /title /usage /status /undo
+   /editor /theme /login /logout /export-md /export-debug-zip /copy /exit
+   /version /swarm /goal /btw /web /remote-control /desktop /feedback
+2. Superfloyd intelligence shortcuts: /ralph /ralph-status /ralph-cancel
+   /selfheal /parallel-bash /workflow /project-map /symbol-index
+   /transcript-export /archive-query /scratchpad /context-status /budget
+   /scoreboard /doctor /prompt /ai /stash /ghost /vision /lab /resilience
+3. Extensible: /skill:<name>, /<plugin>:<command>, user markdown commands,
+   MCP prompts.
+
+CLI subcommands: run (default TUI), serve, login, logout, models, projects,
+schema, stats, logs, session, update-providers, ai, codebase, doctor, exec,
+fileops, prompt, scoreboard, resilience.
+
+Implementation notes: group 1 names register as true slash commands in the Go
+chassis (many already exist as palette actions; /goal /tower-class /btw /web
+/remote-control need new server-side work in wave 4). Group 2 arrives with
+waves 2–3 and gets registered in the command registry. Group 3 uses the
+chassis markdown-command + skills + MCP-prompt loaders.
+
 ## 4. Build waves (each: own worktree, build+test+lint gates, semantic commits)
 
 - Wave 1 — leaf/utility packages (19 files): RUNNING
