@@ -37,7 +37,7 @@ func TestResumeWithoutWebIsRejected(t *testing.T) {
 	err := cmd.Execute()
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "--resume requires --web")
+	require.Contains(t, err.Error(), "requires --web")
 }
 
 func TestInstallWebHandoffPreservesExistingRun(t *testing.T) {

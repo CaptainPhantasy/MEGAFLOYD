@@ -248,7 +248,7 @@ func runWebHandoffIfRequested(cmd *cobra.Command) (bool, error) {
 	resume, _ := cmd.Flags().GetString(resumeFlag)
 	if !web {
 		if resume != "" {
-			return true, errors.New("--resume requires --web; use -s/--session to resume in the terminal")
+			return true, errors.New("the --resume flag requires --web; use -s/--session to resume in the terminal")
 		}
 		return false, nil
 	}
