@@ -121,3 +121,95 @@ it; no config was changed. After install the same build exits 0.
   Gates: build 0; agent suite -race green; render + selection + kernel tests PASS.
   Binary rebuilt: dist/darwin-arm64/megafloyd, version c3d2f6f, smoke OK.
   UNVERIFIED: live provider session (no credentials exercised), real API-call kernel position.
+
+## 2026-10-19 — B6 cloud verification (fix/cloud)
+
+### Devcontainer version stamp
+
+`.devcontainer/post-create.sh` now computes the version with
+`git describe --tags --always --dirty` (the same command as
+`scripts/build-megafloyd.sh`), stamps `internal/version.Commit` as well as
+`Version`, and passes `-buildvcs=false`. It exits non-zero if the built binary
+prints `devel` or a version other than the computed one.
+
+Real run with an isolated `HOME` and the shared Go module cache:
+
+```text
+$ GOMODCACHE=/Users/floyd/go/pkg/mod GOCACHE=/Users/floyd/Library/Caches/go-build \
+    HOME=/tmp/mfl-pc2-home.1ABa6Y bash .devcontainer/post-create.sh
+megafloyd: building version b64a4fb-dirty (commit b64a4fb)
+megafloyd: built /tmp/mfl-pc2-home.1ABa6Y/.megafloyd/bin/megafloyd
+megafloyd version b64a4fb-dirty
+POST_CREATE_EXIT=0
+```
+
+Negative test: the same script in a fake checkout with no `.git` and a stub
+`go` that emits a binary printing `devel` exited 1 with
+`megafloyd: ERROR: binary reports 'devel'; version and commit ldflags were not applied`.
+
+### VM installer, executed for real
+
+Docker: the CLI is installed, but `docker info` failed because no daemon was
+reachable at `~/.orbstack/run/docker.sock`, and no OrbStack app was present
+in `/Applications`. Lima is installed but had no VM image. Per the lane rule,
+the installer was run with a temporary prefix instead. Nothing under
+`/usr/local` was touched.
+
+```text
+$ bash scripts/install-megafloyd.sh --unsupported-os --no-service-user \
+    --prefix /tmp/mfl-install-prefix.2sgXoO --source-dir "$PWD"
+[megafloyd-install] platform: Darwin/arm64
+[megafloyd-install] required Go version: 1.26.6
+[megafloyd-install] WARNING: existing Go 1.25.7 is older than 1.26.6
+[megafloyd-install] installing Go 1.26.6 (darwin-arm64) into .../libexec/megafloyd/toolchain
+[megafloyd-install] building megafloyd b64a4fb-dirty for Darwin/arm64
+[megafloyd-install] installed binary: .../libexec/megafloyd/megafloyd
+[megafloyd-install] installed launcher: .../bin/megafloyd
+[megafloyd-install] service user creation skipped (--no-service-user)
+[megafloyd-install] verified: megafloyd version b64a4fb-dirty
+INSTALL_EXIT=0
+```
+
+Launcher checks, all exit 0:
+
+```text
+$ .../bin/megafloyd --version
+megafloyd version b64a4fb-dirty
+$ .../bin/megafloyd --help          # prints USAGE, EXAMPLES, command list
+$ .../bin/megafloyd dirs
+/tmp/mfl-install-home.msxq57/.megafloyd/config
+/tmp/mfl-install-home.msxq57/.megafloyd/data
+/etc/floyd
+```
+
+A second run into the same prefix exited 0 and exercised the upgrade path:
+it moved the old files to
+`libexec/megafloyd/backup/binary.20261019032314` and
+`libexec/megafloyd/backup/launcher.20261019032314`, then reinstalled and
+re-verified.
+
+Steps not executed on this host, because the run was not on Linux and not in
+a container: `apt-get` prerequisite installation, `groupadd`/`useradd`
+service-user creation (disabled by `--no-service-user`), the Linux Go tarball
+download (the Darwin tarball was used), and installation of a Linux binary
+into a Linux prefix. The build, install, backup, launcher, and verification
+logic all ran for real.
+
+The installer's final message points at `docs/cloud-vm.md`. That file is not
+on `fix/cloud`; it exists on the `work/cloud-vm` worktree (branch
+`work/cloud-vm`, commit `d8d602c`) and was read there for context.
+
+### Linux binaries
+
+`bash scripts/build-megafloyd.sh -t linux/amd64 -t linux/arm64` exited 0:
+`dist/linux-amd64/megafloyd` (95,735,970 bytes) and
+`dist/linux-arm64/megafloyd` (91,357,346 bytes), both statically linked ELF.
+They were not executed: Homebrew has qemu 11.1.1, but the user-mode binaries
+`qemu-x86_64` and `qemu-aarch64` are not present, and running them directly
+on macOS returns exit 126 (`cannot execute binary file`).
+
+### Gates
+
+`bash -n .devcontainer/post-create.sh` 0; `shellcheck` 0;
+`python3 -m json.tool` and `jq empty` on `devcontainer.json` 0;
+`go build ./...` 0 (no Go changed).

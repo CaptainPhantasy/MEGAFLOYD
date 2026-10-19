@@ -10,40 +10,58 @@ network.
 | Path | Purpose |
 | --- | --- |
 | `.devcontainer/devcontainer.json` | Go 1.26 image, `MEGAFLOYD_*` paths, forwarded port 8080, post-create hook |
-| `.devcontainer/post-create.sh` | Creates the megafloyd home, writes `env.sh`, builds `megafloyd`, links it on `PATH`, prints its version |
+| `.devcontainer/post-create.sh` | Creates the megafloyd home, writes `env.sh`, builds `megafloyd` with the same version and commit ldflags as `scripts/build-megafloyd.sh`, links it on `PATH`, and fails if the binary reports `devel` |
 | `docs/cloud-codespace.md` | This document |
 
 No Dockerfile is needed. `mcr.microsoft.com/devcontainers/go:1.26-bookworm`
 exists on the Microsoft container registry; its tag list included
 `1.26-bookworm` on 2026-10-19.
 
+## Prerequisite: the branch must exist on GitHub
+
+This worktree has never been pushed. A Codespace is built from a remote
+branch, so step 1 fails with "branch not found" until the owner authorizes a
+push. The exact command, run from this worktree by the owner, is:
+
+```bash
+git push -u origin fix/cloud
+```
+
+Do not run it from an agent session. After the push, select `fix/cloud` in
+step 2. `main` becomes usable after this branch is merged and pushed.
+
 ## 1. Create the Codespace
 
 1. Open `https://github.com/CaptainPhantasy/MEGAFLOYD` in a browser.
-2. Select the branch that contains this lane: `work/cloud-devcontainer`
-   while it is under review, or `main` after it is merged. The branch must
-   already exist on GitHub; a Codespace is built from a remote branch, not
-   from a local commit.
-3. Choose **Code -> Codespaces -> Create codespace on
-   work/cloud-devcontainer**.
+2. Select the branch that contains this lane: `fix/cloud` while it is under
+   review, or `main` after it is merged. The branch must already exist on
+   GitHub; a Codespace is built from a remote branch, not from a local commit.
+3. Choose **Code -> Codespaces -> Create codespace on `fix/cloud`**.
 4. Leave the defaults. GitHub builds the container and runs
    `.devcontainer/post-create.sh`.
 
-The first creation takes a few minutes. The log ends with lines like:
+The first creation takes a few minutes. The log ends with lines like these
+(values from this checkout on 2026-10-19; a tagged clone shows a tag instead):
 
 ```
 megafloyd: go version go1.26.6 linux/amd64
 megafloyd: downloading Go modules
-megafloyd: building version devel
+megafloyd: building version b64a4fb (commit b64a4fb)
 megafloyd: built /home/vscode/.megafloyd/bin/megafloyd
-floyd version devel
+megafloyd version b64a4fb
 ```
 
-`devel` is expected when the clone has no reachable tag. If the clone has
-tags, `git describe` supplies a value such as `v1.2.3-4-gabc1234`.
+The version is computed with the same command as
+`scripts/build-megafloyd.sh`: `git describe --tags --always --dirty`. A clone
+with no tags therefore shows the short commit, not `devel`. The commit short
+hash is stamped separately into `internal/version.Commit`. If the binary
+reports `devel` or does not match the computed version, `post-create.sh`
+prints an error and exits non-zero, so the Codespace build fails instead of
+silently shipping an unstamped binary.
 
-The binary is named `megafloyd`. The CLI still prints the upstream command
-name `floyd` in its version line, so `floyd version devel` is correct.
+The CLI takes its command name from the executable name, so the binary named
+`megafloyd` prints `megafloyd version ...`. A copy renamed `floyd` prints
+`floyd version ...`.
 
 ## 2. Check the build
 
@@ -51,7 +69,7 @@ Open a terminal in the Codespace and run:
 
 ```bash
 megafloyd --version
-# floyd version devel
+# megafloyd version b64a4fb
 
 megafloyd --help
 # prints USAGE, EXAMPLES, and the command list
@@ -155,7 +173,7 @@ The script is idempotent: it rewrites `~/.megafloyd/env.sh`, adds the
 | `megafloyd: command not found` | Open a new terminal; check `echo $PATH`; use `/home/vscode/.megafloyd/bin/megafloyd` |
 | `go: downloading go1.26.6` | The image ships an earlier 1.26 patch; Go fetches the exact patch from the public proxy |
 | Build fails on a module | Run `cd floyd-go && go mod download` and check that `proxy.golang.org` is reachable |
-| Version prints `devel` | The clone has no reachable tag; expected outside a tagged release |
+| Version prints `devel` | The binary lost its ldflags; `post-create.sh` now fails on this. Check that `git` is available and the checkout is a git clone. |
 | `curl localhost:8080` is refused | Start `megafloyd server --host tcp://0.0.0.0:8080`; the default is a Unix socket |
 | MCP OAuth never returns | The browser redirects to `localhost` on your machine, not the container; use token auth or forward the callback port |
 
@@ -168,13 +186,27 @@ Checked on 2026-10-19:
 - `bash -n .devcontainer/post-create.sh` — exit 0.
 - `shellcheck .devcontainer/post-create.sh` — exit 0.
 - `gitleaks` scan of the changed files — no leaks reported.
-- The exact build command from `post-create.sh`, run locally — exit 0, and
-  the binary printed `floyd version devcontainer-test`.
-- `post-create.sh` in an isolated `HOME` — exit 0; it created `env.sh`, the
-  binary, and the `.bashrc` source line.
-- `megafloyd server --host tcp://127.0.0.1:18080` — `GET /v1/health`
-  returned HTTP 200.
+- `post-create.sh` with an isolated `HOME` and the machine's shared Go module
+  cache — exit 0. The last lines were:
+
+  ```text
+  megafloyd: building version b64a4fb-dirty (commit b64a4fb)
+  megafloyd: built /tmp/mfl-pc2-home.1ABa6Y/.megafloyd/bin/megafloyd
+  megafloyd version b64a4fb-dirty
+  ```
+
+  `-dirty` is present because the script was run before this change was
+  committed; a clean checkout prints `megafloyd version b64a4fb`.
+- A copy of `post-create.sh` run in a fake checkout with no `.git` (and a stub
+  `go` that emits a binary printing `devel`) — exit 1 with
+  `megafloyd: ERROR: binary reports 'devel'; version and commit ldflags were not applied`.
+- A build using the same two `-X` flags with distinct probe values
+  (`zzz-version`, `yyy-commit`) — `--version` printed
+  `floyd version zzz-version`, and both probe strings were present in the
+  binary. This confirms both `Version` and `Commit` are stampable.
 - The Microsoft registry tag list included `1.26-bookworm`.
 
-Not verified here: a live Codespaces container creation. That requires
-GitHub-hosted provisioning and cannot be exercised from this machine.
+Not verified here: a live Codespaces container creation. It is blocked on the
+push described in "Prerequisite: the branch must exist on GitHub". GitHub
+provisioning cannot be exercised from this machine, and the repository has no
+remote branch to build from yet.
