@@ -28,3 +28,12 @@ P6. Command name lists (extracted from source, not yet owner-confirmed):
       scoreboard resilience
     Why: these are extracted from the real sources; owner confirms the list
     before it becomes the shipped surface.
+
+P8. UNVERIFIED third-party report (owner pasted 2026-10-19, not yet verified or
+    endorsed): three claimed bugs/fixes — (1) web server rejects tailnet hosts
+    with 40301 Invalid Host header and prints a 127.0.0.1 URL; (2) TUI exit leaves
+    Kitty CSI-u/mouse modes on and wedges the pane; (3) resume has no --web mode.
+    Claimed fixes: auto-allow *.ts.net + 100.x IP, bind tailscale IP, print
+    magicdns URL, emit terminal reset sequence, detach server stdin, add
+    -r <id> --web. Status: NOTHING BUILT, NOTHING VERIFIED. Owner decides whether
+    any of it becomes work.
