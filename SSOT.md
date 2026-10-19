@@ -128,6 +128,11 @@ chassis markdown-command + skills + MCP-prompt loaders.
 
 ## 5. Operating rules (binding on every agent on this project)
 
+0. Tools are agent-autonomous by default: every ported tool registers in the
+   agent tool registry with its description file, so the model decides when
+   to use it. Slash commands are manual overrides for the owner — never the
+   primary interface. (Owner-ratified 2026-10-19.)
+
 1. Evidence tags: VERIFIED (ran it) / HYPOTHESIS / LEAD. Never assert state
    without the command and its output.
 2. Donor repos are read-only. All work lands in this repo.
