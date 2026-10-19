@@ -108,10 +108,13 @@ separation between owner intent and agent implementation is mandatory.
 36. Company tools + models access control inherited by cloud and phone
     sessions — sign in from a Codespace exactly like at home
 
-### D. Command surface (owner-ratified 2026-10-19)
+### D. Command surface [OWNER-DIRECTIVE 2026-10-19]
 
-Slash commands (typed "/" in session input) — three groups, all in one
-registry:
+Owner directive: slash-command system modeled on the floyd7 harness method;
+superfloyd tools are FIRST autonomous registry tools, slash aliases optional;
+extensible via /skill:<name> and /plugin:<command>. The full extracted
+command name lists (43 floyd7 commands, superfloyd aliases, CLI subcommands)
+are staged in PROPOSALS.md as P6 awaiting line-item confirmation.
 
 1. Modern core (modeled on the floyd7 harness, TS v2.0.2 — the ideal):
    /yolo /auto /permission /settings /plan /model /secondary-model /effort
@@ -139,6 +142,7 @@ chassis (many already exist as palette actions; /goal /tower-class /btw /web
 waves 2–3 and gets registered in the command registry. Group 3 uses the
 chassis markdown-command + skills + MCP-prompt loaders.
 
+
 ## 4. Build waves (each: own worktree, build+test+lint gates, semantic commits)
 
 - Wave 1 — leaf/utility packages (19 files): DONE, merged to main
@@ -150,28 +154,22 @@ chassis markdown-command + skills + MCP-prompt loaders.
   `gofumpt`, commit per package cluster. No wave starts before the prior
   wave merges to main.
 
-## 5. Operating rules
+## 5. Owner directives
 
 0. [OWNER-DIRECTIVE 2026-10-19] Tools are agent-autonomous by default: every
    ported tool registers in the agent tool registry with its description
    file, so the model decides when to use it. Slash commands are manual
    overrides for the owner — never the primary interface.
-
-1. [AGENT-PROPOSAL, pending owner endorsement] Evidence tags: VERIFIED
-   (ran it) / HYPOTHESIS / LEAD. Never assert state without the command and
-   its output.
-2. [OWNER-DIRECTIVE — safety] Donor repos are read-only. Never weaken
+1. [OWNER-DIRECTIVE — safety] Donor repos are read-only. Never weaken
    permission checks. Never commit secrets or credentials.
-3. [OWNER-DIRECTIVE] No upstream connection: never fetch, pull, or push any
+2. [OWNER-DIRECTIVE] No upstream connection: never fetch, pull, or push any
    charmbracelet remote; never redistribute.
-4. [AGENT-PROPOSAL, pending owner endorsement] Three-strike rule: three
-   failed attempts on one defect = stop and report.
-5. [AGENT-PROPOSAL, pending owner endorsement] Memory: update this SSOT +
-   progress notes at every wave boundary.
-6. [AGENT-PROPOSAL, superseded by §0] Process rules the agent adopts (wave
-   gates, worktrees, commit conventions) are proposals, not law. The owner
-   may redirect at any time. When alignment is in doubt, ask — do not guess,
-   do not enshrine.
+3. [OWNER-DIRECTIVE 2026-10-19] The SSOT contains only what the owner has
+   been absolutely clear about. Agent proposals are presented in
+   PROPOSALS.md and championed for entry — never inserted by default.
+
+Agent process choices (how work is organized and verified) live outside the
+SSOT; see PROPOSALS.md.
 
 ## 6. Status log
 
