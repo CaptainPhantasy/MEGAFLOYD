@@ -29,7 +29,9 @@ up to the nearest `package.json`. `dist/main.mjs` resolves the bundle at
 
 No `node_modules` is tracked. The bundle has no external package imports;
 its only non-relative imports are Node built-ins (`node:*`, `fs`, `path`,
-`http`, `ws` and `qrcode` are bundled).
+`http`). `ws` and `qrcode` are bundled. `ws` still probes two optional
+native accelerators, `bufferutil` and `utf-8-validate`, inside `try`/`catch`
+guards; their absence is handled by the JavaScript fallback.
 
 ## 2. Why `dist/main.mjs` was invisible to git
 
@@ -230,6 +232,12 @@ Exercised:
 - Server log capture and shutdown; the port was closed afterwards.
 - Fresh tree with zero `node_modules`.
 
+Known operational gap:
+
+- The engine starts the Node server detached and has no stop command. The
+  verification killed the detached PID directly. A user-facing stop path
+  (for example a `/web stop` command) is not implemented.
+
 Not exercised:
 
 - Tailscale Serve registration and remote URLs (`SkipTailscale` and
@@ -246,6 +254,7 @@ git check-ignore -v floyd-code/apps/floyd-code/dist/main.mjs
 corepack pnpm install --frozen-lockfile
 corepack pnpm --filter @legacy-ai/floyd-code build
 go build ./...
+go build -o /tmp/megafloyd-x-web-bin .
 go test -race ./internal/megafloydweb/...
 go run mvdan.cc/gofumpt@latest -l floyd-go/internal/megafloydweb
 corepack pnpm exec oxlint apps/floyd-code/tsdown.config.ts
