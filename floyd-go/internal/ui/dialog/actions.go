@@ -189,6 +189,16 @@ type ActionRunBuiltin struct {
 	FromPalette bool
 }
 
+// ActionSlashInput dispatches raw slash input typed into the command
+// palette, including arguments (for example "/theme light"). It keeps the
+// model's existing slash parser in charge of aliases and blocked commands.
+type ActionSlashInput struct {
+	Input string
+}
+
+// ActionToggleTerminal toggles the embedded terminal pane.
+type ActionToggleTerminal struct{}
+
 // ActionSetPermissionMode applies a permission mode chosen in the picker.
 type ActionSetPermissionMode struct {
 	// SkipRequests is true for Never Ask and false for Ask When Needed.

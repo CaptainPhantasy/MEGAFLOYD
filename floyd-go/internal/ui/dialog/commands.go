@@ -203,6 +203,32 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			}
 			c.list.ScrollToSelected()
 		case key.Matches(msg, c.keyMap.Select):
+			// Slash input typed into the filter carries its arguments with
+			// it. Dispatch the whole line so "theme light" and
+			// "plan status" reach their handlers instead of being treated
+			// as filter text that matches nothing. The leading slash is
+			// optional because opening the palette consumes it.
+			if typed := strings.TrimSpace(c.input.Value()); typed != "" {
+				fields := strings.Fields(typed)
+				name := strings.TrimPrefix(fields[0], "/")
+				if name == "" {
+					break
+				}
+				_, known := commands.Builtin(strings.ToLower(name))
+				exact := false
+				if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
+					exact = item.ID() == "cmd_"+strings.ToLower(name)
+				}
+				hasArgs := len(fields) > 1
+				slashPrefixed := strings.HasPrefix(typed, "/")
+				if (hasArgs && known) || (slashPrefixed && !exact) {
+					input := typed
+					if !slashPrefixed {
+						input = "/" + typed
+					}
+					return ActionSlashInput{Input: input}
+				}
+			}
 			if selectedItem := c.list.SelectedItem(); selectedItem != nil {
 				if item, ok := selectedItem.(*CommandItem); ok && item != nil {
 					return item.Action()
@@ -550,6 +576,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		transparentLabel = "Enable Background Color"
 	}
 	items = append(items, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
+	items = append(items, NewCommandItem(c.com.Styles, "toggle_terminal", "Toggle Terminal", "alt+t", ActionToggleTerminal{}))
 
 	return items
 }

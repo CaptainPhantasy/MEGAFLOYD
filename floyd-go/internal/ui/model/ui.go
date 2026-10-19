@@ -62,6 +62,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/ui/logo"
 	"github.com/legacy-ai/floyd/internal/ui/notification"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
+	"github.com/legacy-ai/floyd/internal/ui/terminal"
 	"github.com/legacy-ai/floyd/internal/ui/util"
 	"github.com/legacy-ai/floyd/internal/version"
 	"github.com/legacy-ai/floyd/internal/workspace"
@@ -295,6 +296,15 @@ type UI struct {
 
 	// Chat components
 	chat *Chat
+
+	// Embedded terminal pane. terminalVisible replaces the chat pane in
+	// the main layout while the shell has input focus.
+	terminal        *terminal.Component
+	terminalVisible bool
+
+	// planRefreshGeneration debounces plan-state reads triggered by agent
+	// tool messages. Only the newest tick reads the plan file.
+	planRefreshGeneration uint64
 
 	// onboarding state
 	onboarding struct {
@@ -751,6 +761,33 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update terminal capabilities
 	m.caps.Update(msg)
 	switch msg := msg.(type) {
+	case planRefreshTickMsg:
+		if cmd := m.handlePlanRefreshTick(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case planStatusMsg:
+		if m.session != nil && msg.SessionID == m.session.ID && msg.Err == nil {
+			m.status.SetPlanActive(msg.Active)
+		}
+	case terminalReadyMsg:
+		if msg.Err != nil {
+			m.terminalVisible = false
+			cmds = append(cmds, util.ReportError(msg.Err))
+			break
+		}
+		m.terminal = msg.Component
+		m.terminal.Focus()
+		if msg.Cmd != nil {
+			cmds = append(cmds, msg.Cmd)
+		}
+	case terminal.OutputMsg, terminal.ClosedMsg:
+		// Keep draining the PTY even while the pane is hidden so the VT
+		// emulator stays current and the read loop never stalls.
+		if m.terminal != nil {
+			if cmd := m.updateTerminal(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	case builtinResultMsg:
 		if msg.Err != nil {
 			cmds = append(cmds, util.ReportError(msg.Err))
@@ -837,6 +874,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.session = msg.session
 		m.sidebarOffset = 0
 		m.sessionFiles = msg.files
+		// Plan mode is per session. Load the durable state for this one
+		// instead of carrying the previous session's pill.
+		m.status.SetPlanActive(false)
+		cmds = append(cmds, m.refreshPlanState(msg.session.ID))
 		// Session switch: the memoized busy state and queued prompts
 		// belong to the previous session. Drop them and re-fetch
 		// off-thread so the queue pill and esc behavior track the new
@@ -1030,6 +1071,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.todoIsSpinning && !m.isAgentBusy() {
 			m.todoIsSpinning = false
 		}
+		// Plan mode can be entered or exited by the agent's tools, not just
+		// by /plan. Tool traffic is the signal: refresh the durable plan
+		// state shortly after it settles so the pill follows the agent.
+		if cmd := m.planRefreshForMessage(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		// there is a number of things that could change the pills here so we want to re-render
 		m.renderPills()
 	case pubsub.Event[history.File]:
@@ -1104,6 +1151,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.chat.BeginResize())
 		}
 		m.updateLayoutAndSize()
+		if cmd := m.resizeTerminalCmd(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		if m.state == uiChat && m.chat.Follow() {
 			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -1387,6 +1437,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case tea.PasteMsg:
+		if m.terminalVisible && m.terminal != nil {
+			if cmd := m.updateTerminal(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			break
+		}
 		if m.activeInline != nil && m.focus == uiFocusEditor {
 			if p, ok := m.activeInline.(dialog.PasteableEditor); ok {
 				if cmd := p.HandlePaste(msg); cmd != nil {
@@ -2009,6 +2065,23 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 
+	case dialog.ActionSlashInput:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd, handled := m.dispatchSlashInput(msg.Input); handled {
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		} else {
+			name, _, _ := parseSlashInput(msg.Input)
+			cmds = append(cmds, util.ReportWarn("Unknown command: /"+name))
+		}
+
+	case dialog.ActionToggleTerminal:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd := m.toggleTerminal(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
 	case dialog.ActionSetPermissionMode:
 		m.dialog.CloseDialog(dialog.PermissionModeID)
 		if cmd := m.setSkipRequests(msg.SkipRequests); cmd != nil {
@@ -2170,6 +2243,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
+		m.closeTerminal()
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -2562,6 +2636,26 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	var cmds []tea.Cmd
+
+	// The terminal pane owns almost every key while it is open, including
+	// ctrl+c (the shell should see an interrupt, not the quit dialog). The
+	// toggle stays with the app so there is always a way out, but dialogs
+	// remain modal.
+	if !m.dialog.HasDialogs() && key.Matches(msg, m.keyMap.Terminal) {
+		if cmd := m.toggleTerminal(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return tea.Batch(cmds...)
+	}
+	if m.terminalVisible && m.terminal != nil {
+		if m.dialog.HasDialogs() {
+			return m.handleDialogMsg(msg)
+		}
+		if cmd := m.updateTerminal(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return tea.Batch(cmds...)
+	}
 
 	handleGlobalKeys := func(msg tea.KeyPressMsg) bool {
 		switch {
@@ -3174,7 +3268,11 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			m.drawSidebar(scr, layout.sidebar)
 		}
 
-		m.chat.Draw(scr, layout.main)
+		if m.terminalVisible && m.terminal != nil {
+			m.terminal.Draw(scr, layout.main)
+		} else {
+			m.chat.Draw(scr, layout.main)
+		}
 		if layout.pills.Dy() > 0 && m.pillsView != "" {
 			uv.NewStyledString(m.pillsView).Draw(scr, layout.pills)
 		}

@@ -145,6 +145,11 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	indWidth := lipgloss.Width(ind)
 	msgPad := msgStyle.GetPaddingLeft() + msgStyle.GetPaddingRight()
 	avail := max(0, area.Dx()-indWidth-msgPad)
+	// The plan pill is drawn last so notifications cannot hide the mode.
+	// Reserve its width here or the message tail is painted over.
+	if s.planActive {
+		avail = max(0, avail-lipgloss.Width(s.planPill())-1)
+	}
 	msg := strings.Join(strings.Split(s.msg.Msg, "\n"), " ")
 	msg = ansi.Truncate(msg, avail, "…")
 	if w := lipgloss.Width(msg); w < avail {

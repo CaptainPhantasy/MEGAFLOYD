@@ -388,6 +388,62 @@ func LetterYAlt(stretch bool) string {
 	)
 }
 
+// LetterF renders the letter F in the Floyd wordmark.
+func LetterF(bool) string {
+	// Here's what we're making:
+	//
+	// █▀▀▀▀
+	// █▀▀▀
+	// █
+	return heredoc.Doc(`
+		█▀▀▀▀
+		█▀▀▀
+		█
+	`)
+}
+
+// LetterL renders the letter L in the Floyd wordmark.
+func LetterL(bool) string {
+	// Here's what we're making:
+	//
+	// █
+	// █
+	// ▀▀▀▀▀
+	return heredoc.Doc(`
+		█
+		█
+		▀▀▀▀▀
+	`)
+}
+
+// LetterO renders the letter O in the Floyd wordmark.
+func LetterO(bool) string {
+	// Here's what we're making:
+	//
+	// ▄▀▀▀▄
+	// █   █
+	// ▀▀▀▀▀
+	return heredoc.Doc(`
+		▄▀▀▀▄
+		█   █
+		▀▀▀▀▀
+	`)
+}
+
+// LetterD renders the letter D in the Floyd wordmark.
+func LetterD(bool) string {
+	// Here's what we're making:
+	//
+	// █▀▀▀▄
+	// █   █
+	// ▀▀▀▀
+	return heredoc.Doc(`
+		█▀▀▀▄
+		█   █
+		▀▀▀▀
+	`)
+}
+
 func joinLetterform(letters ...string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, letters...)
 }
