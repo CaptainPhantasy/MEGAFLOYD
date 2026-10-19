@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,6 +30,10 @@ type Client struct {
 	baseURL      string
 	http         HTTPDoer
 	tokens       TokenSource
+	authMode     AuthMode
+	adminKey     string
+	loginPath    string
+	overviewPath string
 	usersPath    string
 	invitesPath  string
 	grantPath    string
@@ -37,6 +42,14 @@ type Client struct {
 	revokeMethod string
 	userAgent    string
 	timeout      time.Duration
+
+	// Session state is established lazily and guarded by sessionMu. The
+	// cookie is sent as a request header so an injected HTTPDoer needs no
+	// cookie jar.
+	sessionMu     sync.Mutex
+	sessionCookie string
+	csrfToken     string
+	sessionReady  bool
 }
 
 // New validates cfg and returns a client.
@@ -63,7 +76,20 @@ func New(cfg Config) (*Client, error) {
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	baseURL = strings.TrimRight(parsed.String(), "/")
-	if cfg.Tokens == nil {
+	mode, err := cfg.ResolvedAuthMode()
+	if err != nil {
+		return nil, err
+	}
+	adminKey := strings.TrimSpace(cfg.AdminKey)
+	if mode == AuthModeSession {
+		if adminKey == "" {
+			return nil, fmt.Errorf(
+				"%w: admin session auth has no administrator key; set "+
+					"MEGAFLOYD_ADMIN_KEY or MEGAFLOYD_ADMIN_PASSWORD",
+				ErrNotConfigured,
+			)
+		}
+	} else if cfg.Tokens == nil {
 		return nil, fmt.Errorf(
 			"%w: admin client has no token source", ErrNotConfigured,
 		)
@@ -90,6 +116,10 @@ func New(cfg Config) (*Client, error) {
 		baseURL:      baseURL,
 		http:         doer,
 		tokens:       cfg.Tokens,
+		authMode:     mode,
+		adminKey:     adminKey,
+		loginPath:    normalizePath(cfg.LoginPath, DefaultLoginPath),
+		overviewPath: normalizePath(cfg.OverviewPath, DefaultOverviewPath),
 		usersPath:    normalizePath(cfg.UsersPath, DefaultUsersPath),
 		invitesPath:  normalizePath(cfg.InvitesPath, DefaultInvitesPath),
 		grantPath:    strings.TrimSpace(cfg.GrantPath),
@@ -358,24 +388,32 @@ func (c *Client) doRaw(
 	if err != nil {
 		return 0, nil, err
 	}
-
-	var payload []byte
-	if body != nil {
-		payload, err = json.Marshal(body)
-		if err != nil {
-			return 0, nil, fmt.Errorf(
-				"%w: encode request: %v", ErrInvalidRequest, err,
-			)
-		}
+	payload, err := encodePayload(body)
+	if err != nil {
+		return 0, nil, err
 	}
-
-	requestCtx := ctx
-	if c.timeout > 0 {
-		var cancel context.CancelFunc
-		requestCtx, cancel = context.WithTimeout(ctx, c.timeout)
-		defer cancel()
+	if c.authMode == AuthModeSession {
+		return c.doSession(ctx, method, endpoint, payload, body != nil)
 	}
+	return c.doBearer(ctx, method, endpoint, payload, body != nil)
+}
 
+func encodePayload(body any) ([]byte, error) {
+	if body == nil {
+		return nil, nil
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"%w: encode request: %v", ErrInvalidRequest, err,
+		)
+	}
+	return payload, nil
+}
+
+func (c *Client) doBearer(
+	ctx context.Context, method, endpoint string, payload []byte, hasBody bool,
+) (int, []byte, error) {
 	token, err := c.tokens.AccessToken(ctx)
 	if err != nil {
 		return 0, nil, fmt.Errorf(
@@ -388,48 +426,268 @@ func (c *Client) doRaw(
 		)
 	}
 
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+token)
+	status, raw, responseHeader, err := c.httpRequest(
+		ctx, method, endpoint, payload, hasBody, headers,
+	)
+	if err != nil {
+		return 0, nil, err
+	}
+	if isSuccess(status) {
+		return status, raw, nil
+	}
+	return status, raw, c.responseError(status, raw, responseHeader, token)
+}
+
+// doSession signs in lazily and sends the retained session cookie. Writes
+// carry the CSRF token from the overview response. An expired session is
+// renewed once for reads only; a rejected write is returned to the caller
+// so a mutation is never applied twice.
+func (c *Client) doSession(
+	ctx context.Context, method, endpoint string, payload []byte, hasBody bool,
+) (int, []byte, error) {
+	attempts := 1
+	if isReadMethod(method) {
+		attempts = 2
+	}
+	var status int
+	var raw []byte
+	var responseHeader http.Header
+	for attempt := 0; attempt < attempts; attempt++ {
+		cookie, csrf, err := c.sessionToken(ctx)
+		if err != nil {
+			return 0, nil, err
+		}
+		headers := http.Header{}
+		headers.Set("Cookie", cookie)
+		if !isReadMethod(method) {
+			headers.Set("X-CSRF-Token", csrf)
+		}
+		status, raw, responseHeader, err = c.httpRequest(
+			ctx, method, endpoint, payload, hasBody, headers,
+		)
+		if err != nil {
+			return 0, nil, err
+		}
+		if isSuccess(status) {
+			return status, raw, nil
+		}
+		if status == http.StatusUnauthorized && attempt+1 < attempts {
+			c.invalidateSession(cookie)
+			continue
+		}
+		break
+	}
+	return status, raw, c.responseError(status, raw, responseHeader, c.adminKey)
+}
+
+// sessionToken returns the current cookie and CSRF token, signing in on
+// first use. The lock is held across the login and overview requests so
+// concurrent callers establish one session.
+func (c *Client) sessionToken(
+	ctx context.Context,
+) (cookie, csrf string, err error) {
+	c.sessionMu.Lock()
+	defer c.sessionMu.Unlock()
+	if c.sessionReady {
+		return c.sessionCookie, c.csrfToken, nil
+	}
+	if err := c.loginAndLoadOverviewLocked(ctx); err != nil {
+		return "", "", err
+	}
+	return c.sessionCookie, c.csrfToken, nil
+}
+
+// loginAndLoadOverviewLocked mirrors the admin single-page app: sign in
+// with the administrator key, keep the session cookie, then read the CSRF
+// token from the overview response. The caller holds sessionMu.
+func (c *Client) loginAndLoadOverviewLocked(ctx context.Context) error {
+	c.resetSessionLocked()
+	loginEndpoint, err := c.endpoint(c.loginPath)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(struct {
+		Key string `json:"key"`
+	}{Key: c.adminKey})
+	if err != nil {
+		return fmt.Errorf(
+			"%w: encode login request: %v", ErrInvalidRequest, err,
+		)
+	}
+	status, raw, header, err := c.httpRequest(
+		ctx, http.MethodPost, loginEndpoint, payload, true, nil,
+	)
+	if err != nil {
+		return err
+	}
+	if !isSuccess(status) {
+		return c.responseError(status, raw, header, c.adminKey)
+	}
+	cookie := cookieHeader(header)
+	if cookie == "" {
+		return fmt.Errorf(
+			"%w: administrator login response set no session cookie",
+			ErrInvalidResponse,
+		)
+	}
+	c.sessionCookie = cookie
+
+	var loginResponse struct {
+		CSRF string `json:"csrf"`
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &loginResponse); err != nil {
+			c.resetSessionLocked()
+			return fmt.Errorf(
+				"%w: decode login response: %v", ErrInvalidResponse, err,
+			)
+		}
+	}
+	c.csrfToken = strings.TrimSpace(loginResponse.CSRF)
+
+	overviewEndpoint, err := c.endpoint(c.overviewPath)
+	if err != nil {
+		c.resetSessionLocked()
+		return err
+	}
+	headers := http.Header{}
+	headers.Set("Cookie", cookie)
+	status, raw, header, err = c.httpRequest(
+		ctx, http.MethodGet, overviewEndpoint, nil, false, headers,
+	)
+	if err != nil {
+		c.resetSessionLocked()
+		return err
+	}
+	if !isSuccess(status) {
+		c.resetSessionLocked()
+		return c.responseError(status, raw, header, c.adminKey)
+	}
+	var overview struct {
+		CSRF string `json:"csrf"`
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &overview); err != nil {
+			c.resetSessionLocked()
+			return fmt.Errorf(
+				"%w: decode overview response: %v", ErrInvalidResponse, err,
+			)
+		}
+	}
+	if csrf := strings.TrimSpace(overview.CSRF); csrf != "" {
+		c.csrfToken = csrf
+	}
+	if c.csrfToken == "" {
+		c.resetSessionLocked()
+		return fmt.Errorf(
+			"%w: overview response did not include a csrf token",
+			ErrInvalidResponse,
+		)
+	}
+	c.sessionReady = true
+	return nil
+}
+
+func (c *Client) invalidateSession(cookie string) {
+	c.sessionMu.Lock()
+	defer c.sessionMu.Unlock()
+	if c.sessionCookie == cookie {
+		c.resetSessionLocked()
+	}
+}
+
+// resetSessionLocked clears session state. The caller holds sessionMu.
+func (c *Client) resetSessionLocked() {
+	c.sessionReady = false
+	c.sessionCookie = ""
+	c.csrfToken = ""
+}
+
+func (c *Client) httpRequest(
+	ctx context.Context, method, endpoint string, payload []byte,
+	hasBody bool, headers http.Header,
+) (int, []byte, http.Header, error) {
+	requestCtx := ctx
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
+
 	request, err := http.NewRequestWithContext(
 		requestCtx, method, endpoint, bytes.NewReader(payload),
 	)
 	if err != nil {
-		return 0, nil, fmt.Errorf(
+		return 0, nil, nil, fmt.Errorf(
 			"%w: build request: %v", ErrInvalidRequest, err,
 		)
 	}
-	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", c.userAgent)
-	if body != nil {
+	if hasBody {
 		request.Header.Set("Content-Type", "application/json")
+	}
+	for name, values := range headers {
+		for _, value := range values {
+			request.Header.Add(name, value)
+		}
 	}
 
 	response, err := c.http.Do(request)
 	if err != nil {
-		return 0, nil, fmt.Errorf("%w: %v", ErrConnection, err)
+		return 0, nil, nil, fmt.Errorf("%w: %v", ErrConnection, err)
 	}
 	defer response.Body.Close()
 
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes))
 	if err != nil {
-		return response.StatusCode, nil, fmt.Errorf(
+		return response.StatusCode, nil, response.Header, fmt.Errorf(
 			"%w: read response: %v", ErrConnection, err,
 		)
 	}
+	return response.StatusCode, raw, response.Header, nil
+}
 
-	if response.StatusCode >= 200 && response.StatusCode < 300 {
-		return response.StatusCode, raw, nil
+func (c *Client) responseError(
+	status int, raw []byte, header http.Header, secrets ...string,
+) *APIError {
+	apiError := decodeAPIError(status, raw)
+	for _, secret := range secrets {
+		apiError.Code = redactSecret(apiError.Code, secret)
+		apiError.Description = redactSecret(apiError.Description, secret)
+		apiError.Body = redactSecret(apiError.Body, secret)
 	}
-
-	apiError := decodeAPIError(response.StatusCode, raw)
-	apiError.Code = redactSecret(apiError.Code, token)
-	apiError.Description = redactSecret(apiError.Description, token)
-	apiError.Body = redactSecret(apiError.Body, token)
-	if location := response.Header.Get("Location"); location != "" {
+	if location := header.Get("Location"); location != "" {
 		apiError.Description = strings.TrimSpace(
 			apiError.Description + " (redirect to " + location + ")",
 		)
 	}
-	return response.StatusCode, raw, apiError
+	return apiError
+}
+
+func cookieHeader(header http.Header) string {
+	if header == nil {
+		return ""
+	}
+	cookies := (&http.Response{Header: header}).Cookies()
+	parts := make([]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		if cookie.Name == "" {
+			continue
+		}
+		parts = append(parts, cookie.Name+"="+cookie.Value)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func isSuccess(status int) bool {
+	return status >= 200 && status < 300
+}
+
+func isReadMethod(method string) bool {
+	return method == http.MethodGet || method == http.MethodHead
 }
 
 func (c *Client) endpoint(path string) (string, error) {

@@ -24,10 +24,21 @@
 // unless the operator supplies MEGAFLOYD_ADMIN_GRANT_PATH or
 // MEGAFLOYD_ADMIN_REVOKE_PATH. This package never guesses a route.
 //
-// Authentication is an Authorization: Bearer header carrying the access
-// token from internal/megafloydauth. The live admin app itself signs in
-// with an administrator key, keeps a same-origin session cookie, and sends
-// X-CSRF-Token on writes; whether the server accepts a Bearer token on the
-// admin routes is UNKNOWN. Token material is never included in errors or
-// output.
+// Two authentication modes are supported:
+//
+//   - Session mode mirrors the admin single-page app. It posts the
+//     administrator key to POST /admin/api/login as {"key": "..."},
+//     retains the session cookie from Set-Cookie, reads the CSRF token
+//     from GET /admin/api/overview, and sends X-CSRF-Token on writes. Set
+//     MEGAFLOYD_ADMIN_AUTH_MODE=session and MEGAFLOYD_ADMIN_KEY (or
+//     MEGAFLOYD_ADMIN_PASSWORD), or just set the key: an unset mode
+//     selects session mode when a key is present.
+//   - Bearer mode, the fallback, sends Authorization: Bearer with the
+//     access token from internal/megafloydauth. It is selected when
+//     MEGAFLOYD_ADMIN_AUTH_MODE=bearer, or when no administrator key is
+//     configured.
+//
+// The login and overview paths can be overridden with
+// MEGAFLOYD_ADMIN_LOGIN_PATH and MEGAFLOYD_ADMIN_OVERVIEW_PATH. Key and
+// token material never appear in errors or output.
 package megafloydadmin
