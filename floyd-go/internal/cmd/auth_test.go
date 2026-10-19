@@ -109,6 +109,7 @@ func TestAuthCommandRegistration(t *testing.T) {
 		{path: []string{"auth", "login"}, want: authLoginCmd},
 		{path: []string{"auth", "logout"}, want: authLogoutCmd},
 		{path: []string{"auth", "status"}, want: authStatusCmd},
+		{path: []string{"auth", "token"}, want: authTokenCmd},
 	} {
 		cmd, _, err := rootCmd.Find(tt.path)
 		require.NoError(t, err, tt.path)
@@ -297,6 +298,57 @@ func TestAuthLogoutWhenNotLoggedIn(t *testing.T) {
 	out, err := runAuthCommand(t, authLogoutCmd, runAuthLogout)
 	require.NoError(t, err)
 	require.Contains(t, out, "Not logged in")
+}
+
+func TestAuthTokenPrintsStoredAccessToken(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	manager, store, name := newTestManager(t, &fakeAuthFlow{}, now)
+	require.NoError(t, store.Save(name, megafloydauth.Token{
+		AccessToken:  "access-token",
+		RefreshToken: "refresh-token",
+		ExpiresAt:    now.Add(time.Hour).Unix(),
+		ExpiresIn:    3600,
+	}))
+	useAuthRuntime(t, &authRuntime{Manager: manager})
+
+	out, err := runAuthCommand(t, authTokenCmd, runAuthToken)
+	require.NoError(t, err)
+	require.Equal(t, "access-token\n", out)
+}
+
+func TestAuthTokenRefreshesExpiredToken(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	flow := &fakeAuthFlow{refresh: &megafloydauth.Token{
+		AccessToken:  "refreshed-access",
+		RefreshToken: "refreshed-refresh",
+		ExpiresAt:    now.Add(time.Hour).Unix(),
+		ExpiresIn:    3600,
+	}}
+	manager, store, name := newTestManager(t, flow, now)
+	require.NoError(t, store.Save(name, megafloydauth.Token{
+		AccessToken:  "expired-access",
+		RefreshToken: "expired-refresh",
+		ExpiresAt:    now.Add(-time.Hour).Unix(),
+		ExpiresIn:    3600,
+	}))
+	useAuthRuntime(t, &authRuntime{Manager: manager})
+
+	out, err := runAuthCommand(t, authTokenCmd, runAuthToken)
+	require.NoError(t, err)
+	require.Equal(t, "refreshed-access\n", out)
+
+	stored, ok, err := store.Load(name)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "refreshed-access", stored.AccessToken)
+}
+
+func TestAuthTokenRequiresLogin(t *testing.T) {
+	manager, _, _ := newTestManager(t, &fakeAuthFlow{}, time.Unix(1_700_000_000, 0))
+	useAuthRuntime(t, &authRuntime{Manager: manager})
+
+	_, err := runAuthCommand(t, authTokenCmd, runAuthToken)
+	require.ErrorIs(t, err, megafloydauth.ErrNotLoggedIn)
 }
 
 func TestAuthLoginOverHTTP(t *testing.T) {

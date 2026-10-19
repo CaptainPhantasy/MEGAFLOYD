@@ -17,6 +17,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
+	"charm.land/fantasy/providers/anthropic"
 	"github.com/charmbracelet/x/etag"
 	"github.com/legacy-ai/floyd/internal/agent/hyper"
 	"github.com/legacy-ai/floyd/internal/csync"
@@ -300,4 +301,120 @@ func (c cache[T]) Store(v T) error {
 		return fmt.Errorf("failed to write provider data to cache: %w", err)
 	}
 	return nil
+}
+
+// CompanyAuthAPIKeyScheme marks a provider api_key as a placeholder for a
+// company-auth access token. Set it in provider configuration, for example
+// api_key = "company-auth://default", then run `floyd auth login` once. The
+// application replaces the placeholder with a bearer token in memory before
+// providers are built; the placeholder is never sent to a provider and the
+// token is never written back to the config file. Use it with provider types
+// that carry a bearer credential (the OpenAI-compatible default and
+// anthropic); other wire protocols use different credential fields.
+//
+// Model discovery runs during config load, before the application can
+// substitute the token. Give a placeholder provider an explicit models list
+// or set discover_models = false so the placeholder is never sent to the
+// provider's /models endpoint.
+const CompanyAuthAPIKeyScheme = "company-auth://"
+
+// IsCompanyAuthAPIKey reports whether value is a company-auth placeholder.
+func IsCompanyAuthAPIKey(value string) bool {
+	return strings.HasPrefix(strings.TrimSpace(value), CompanyAuthAPIKeyScheme)
+}
+
+// CompanyAuthProviderIDs returns the sorted IDs of providers configured
+// with a company-auth placeholder. A provider is included when either its
+// resolved key or its original template carries the placeholder.
+func CompanyAuthProviderIDs(cfg *Config) []string {
+	if cfg == nil || cfg.Providers == nil {
+		return nil
+	}
+	var ids []string
+	for id, provider := range cfg.Providers.Copy() {
+		if provider.Disable {
+			continue
+		}
+		if IsCompanyAuthAPIKey(provider.APIKey) || IsCompanyAuthAPIKey(provider.APIKeyTemplate) {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// CompanyAuthRefreshCommand returns the api_key template that re-resolves a
+// company-auth token after a provider rejects the current one with 401. The
+// coordinator re-runs this template through the shell resolver, which calls
+// `auth token` and therefore Manager.Token's lazy refresh, then rebuilds the
+// provider.
+func CompanyAuthRefreshCommand(executable string) string {
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return ""
+	}
+	return "$(" + shellSingleQuote(executable) + " auth token)"
+}
+
+// SetProviderCompanyAuthCredential replaces a company-auth placeholder with
+// accessToken and installs refreshCommand as the provider's api_key
+// template. The change is in memory only: credentials are never persisted to
+// the user's config file. It reports false when the provider does not exist
+// or does not currently carry a placeholder, so a real API-key provider can
+// never be overwritten by this path.
+func (s *ConfigStore) SetProviderCompanyAuthCredential(
+	providerID, accessToken, refreshCommand string,
+) bool {
+	if s == nil || accessToken == "" || providerID == "" {
+		return false
+	}
+	cfg := s.Config()
+	if cfg == nil || cfg.Providers == nil {
+		return false
+	}
+	current, ok := cfg.Providers.Get(providerID)
+	if !ok || !IsCompanyAuthAPIKey(current.APIKey) {
+		return false
+	}
+
+	applied := false
+	s.mutateInMemory(func(cfg *Config) {
+		if cfg.Providers == nil {
+			return
+		}
+		provider, ok := cfg.Providers.Get(providerID)
+		if !ok || !IsCompanyAuthAPIKey(provider.APIKey) {
+			return
+		}
+
+		// cloneForWrite shares the provider map with the published
+		// snapshot, so replace it instead of mutating it in place.
+		providers := csync.NewMap[string, ProviderConfig]()
+		for id, pc := range cfg.Providers.Copy() {
+			providers.Set(id, pc)
+		}
+		provider.APIKey = companyAuthBearerToken(provider.Type, accessToken)
+		provider.APIKeyTemplate = refreshCommand
+		providers.Set(providerID, provider)
+		cfg.Providers = providers
+		applied = true
+	})
+	return applied
+}
+
+// companyAuthBearerToken renders a token for the provider's wire protocol.
+// Anthropic-style providers read the Authorization header only when the key
+// is already bearer-prefixed; every other supported type adds the prefix
+// itself.
+func companyAuthBearerToken(providerType catwalk.Type, accessToken string) string {
+	if providerType == anthropic.Name {
+		return "Bearer " + accessToken
+	}
+	return accessToken
+}
+
+// shellSingleQuote quotes a value for safe use inside a POSIX shell command
+// substitution.
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }

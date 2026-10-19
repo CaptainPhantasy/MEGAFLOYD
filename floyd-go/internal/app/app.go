@@ -707,6 +707,11 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
+	// Resolve company-auth placeholders before providers are built. This
+	// also re-runs after a config reload, when the placeholder is back.
+	if err := applyCompanyAuthCredentials(ctx, app.config); err != nil {
+		return err
+	}
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 		Config:      app.config,
