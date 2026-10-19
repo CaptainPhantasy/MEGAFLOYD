@@ -1,0 +1,38 @@
+# MEGAFLOYD example floydrc — MCP room for home and cloud.
+#
+# Copy to the global floydrc the launcher points at (today that is
+# $XDG_CONFIG_HOME/floyd/floydrc, normally ~/.config/floyd/floydrc) or to
+# ./.floydrc inside a project. This file contains no secrets.
+#
+# Environment selection:
+#   MEGAFLOYD_ENV=home   tailnet URL (default)
+#   MEGAFLOYD_ENV=cloud  owner-published public URL from
+#                        MEGAFLOYD_MCP_ROOM_URL
+#
+# Optional credential: MEGAFLOYD_MCP_ROOM_TOKEN. It is only sent when set,
+# so the file stays secret-free and an empty value sends no header.
+
+room_timeout=30
+
+if [[ "${MEGAFLOYD_ENV:-home}" == "cloud" ]]; then
+	# The public URL is not published yet. With no URL, skip the room
+	# instead of failing the whole config load: a Codespace must still
+	# start, minus the room tools.
+	room_url="${MEGAFLOYD_MCP_ROOM_URL:-}"
+	room_timeout=60
+else
+	room_url="https://inference.tail58d565.ts.net:8443/mcp"
+fi
+
+if [[ -n "$room_url" ]]; then
+	if [[ -n "${MEGAFLOYD_MCP_ROOM_TOKEN:-}" ]]; then
+		mcp add room --type http \
+			--url "$room_url" \
+			--timeout "$room_timeout" \
+			--header Authorization "Bearer ${MEGAFLOYD_MCP_ROOM_TOKEN}"
+	else
+		mcp add room --type http \
+			--url "$room_url" \
+			--timeout "$room_timeout"
+	fi
+fi

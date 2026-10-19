@@ -1,0 +1,28 @@
+# MEGAFLOYD MCP room — cloud (Codespace or VM).
+#
+# The owner publishes the public room endpoint under floydslabs.com. Until
+# that URL is published this example registers no room and megafloyd still
+# starts; set MEGAFLOYD_MCP_ROOM_URL to enable it.
+#
+# Required to enable the room:
+#   MEGAFLOYD_MCP_ROOM_URL=https://<owner-published-host>/mcp
+#
+# Optional credential:
+#   MEGAFLOYD_MCP_ROOM_TOKEN=<token>
+# The header is only added when the variable is non-empty, so no secret
+# belongs in this file.
+
+room_url="${MEGAFLOYD_MCP_ROOM_URL:-}"
+
+if [[ -n "$room_url" ]]; then
+	if [[ -n "${MEGAFLOYD_MCP_ROOM_TOKEN:-}" ]]; then
+		mcp add room --type http \
+			--url "$room_url" \
+			--timeout 60 \
+			--header Authorization "Bearer ${MEGAFLOYD_MCP_ROOM_TOKEN}"
+	else
+		mcp add room --type http \
+			--url "$room_url" \
+			--timeout 60
+	fi
+fi
