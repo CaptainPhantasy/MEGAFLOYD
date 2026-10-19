@@ -124,6 +124,12 @@ func (s FileStore) List() ([]string, error) {
 	return names, nil
 }
 
+// Path returns the on-disk file for name. It is useful for status output;
+// no caller should read the file through this path.
+func (s FileStore) Path(name string) (string, error) {
+	return s.pathFor(name)
+}
+
 func (s FileStore) pathFor(name string) (string, error) {
 	if s.Dir == "" {
 		return "", errors.New("megafloydauth: credentials directory is not configured")

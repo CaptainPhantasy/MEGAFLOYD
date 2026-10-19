@@ -50,6 +50,12 @@ type Config struct {
 	HomeDir string
 	// CredentialsDir overrides <HomeDir>/credentials when set.
 	CredentialsDir string
+	// DeviceAuthorizationPath overrides the device-authorization endpoint
+	// path. Empty means DefaultDeviceAuthorizationPath.
+	DeviceAuthorizationPath string
+	// TokenPath overrides the token endpoint path. Empty means
+	// DefaultTokenPath. Both the device grant and refresh use it.
+	TokenPath string
 	// HTTPClient is injectable for tests. Nil means the caller's default.
 	HTTPClient HTTPDoer
 	// Now is injectable for tests. Nil means time.Now.
@@ -83,7 +89,19 @@ func FromEnv(lookup EnvLookup) Config {
 		Platform: firstNonEmpty(lookup("MEGAFLOYD_AUTH_PLATFORM"), DefaultPlatform),
 		Version:  firstNonEmpty(lookup("MEGAFLOYD_VERSION"), lookup("FLOYD_CODE_VERSION")),
 		HomeDir:  firstNonEmpty(lookup("MEGAFLOYD_HOME"), defaultHomeDir()),
+		DeviceAuthorizationPath: firstNonEmpty(
+			lookup("MEGAFLOYD_AUTH_DEVICE_PATH"),
+		),
+		TokenPath: firstNonEmpty(lookup("MEGAFLOYD_AUTH_TOKEN_PATH")),
 	}
+}
+
+// clientID returns the configured client ID or the built-in default.
+func (c Config) clientID() string {
+	if c.ClientID != "" {
+		return c.ClientID
+	}
+	return DefaultClientID
 }
 
 // CredentialsPath returns the directory that holds token files, or the

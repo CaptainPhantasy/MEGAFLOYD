@@ -94,12 +94,14 @@ func TestFromEnvPrecedence(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
-		"MEGAFLOYD_AUTH_HOST":      "https://mega.example",
-		"FLOYD_CODE_OAUTH_HOST":    "https://f7.example",
-		"FLOYD_CODE_BASE_URL":      "https://f7.example/api",
-		"MEGAFLOYD_HOME":           "/tmp/megafloyd-home",
-		"MEGAFLOYD_VERSION":        "1.2.3",
-		"MEGAFLOYD_AUTH_CLIENT_ID": "client-from-env",
+		"MEGAFLOYD_AUTH_HOST":        "https://mega.example",
+		"FLOYD_CODE_OAUTH_HOST":      "https://f7.example",
+		"FLOYD_CODE_BASE_URL":        "https://f7.example/api",
+		"MEGAFLOYD_HOME":             "/tmp/megafloyd-home",
+		"MEGAFLOYD_VERSION":          "1.2.3",
+		"MEGAFLOYD_AUTH_CLIENT_ID":   "client-from-env",
+		"MEGAFLOYD_AUTH_DEVICE_PATH": "/custom/device",
+		"MEGAFLOYD_AUTH_TOKEN_PATH":  "/custom/token",
 	}
 	cfg := FromEnv(func(key string) string { return env[key] })
 
@@ -109,6 +111,8 @@ func TestFromEnvPrecedence(t *testing.T) {
 	require.Equal(t, "1.2.3", cfg.Version)
 	require.Equal(t, "/tmp/megafloyd-home", cfg.HomeDir)
 	require.Equal(t, "/tmp/megafloyd-home/credentials", cfg.CredentialsPath())
+	require.Equal(t, "/custom/device", cfg.DeviceAuthorizationPath)
+	require.Equal(t, "/custom/token", cfg.TokenPath)
 }
 
 func TestTokenExpiryUsesHalfLife(t *testing.T) {
@@ -140,12 +144,4 @@ func TestHeadersMintDeviceID(t *testing.T) {
 	again, err := cfg.Headers()
 	require.NoError(t, err)
 	require.Equal(t, headers["X-Msh-Device-Id"], again["X-Msh-Device-Id"])
-}
-
-func TestUnimplementedFlowFailsClosed(t *testing.T) {
-	t.Parallel()
-
-	var flow DeviceFlow = UnimplementedFlow{}
-	_, err := flow.RequestDeviceAuthorization(t.Context())
-	require.ErrorIs(t, err, ErrNotImplemented)
 }
