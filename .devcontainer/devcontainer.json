@@ -1,0 +1,36 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
+  "name": "megafloyd (Go 1.26)",
+  "image": "mcr.microsoft.com/devcontainers/go:1.26-bookworm",
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "MEGAFLOYD_HOME": "/home/vscode/.megafloyd",
+    "MEGAFLOYD_DATA_DIR": "/home/vscode/.megafloyd/data",
+    "MEGAFLOYD_CONFIG_DIR": "/home/vscode/.megafloyd/config",
+    "MEGAFLOYD_CACHE_DIR": "/home/vscode/.megafloyd/cache",
+    "MEGAFLOYD_LOG_DIR": "/home/vscode/.megafloyd/logs",
+    "MEGAFLOYD_INFERENCE_URL": "",
+    "MEGAFLOYD_AUTH_URL": "",
+    "MEGAFLOYD_MCP_ROOM_URL": ""
+  },
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/home/vscode/.megafloyd/bin"
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "forwardPorts": [
+    8080
+  ],
+  "portsAttributes": {
+    "8080": {
+      "label": "megafloyd server (optional TCP; nothing listens by default)",
+      "onAutoForward": "notify"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go"
+      ]
+    }
+  }
+}
