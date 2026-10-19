@@ -14,16 +14,16 @@ var requiredBuiltins = []string{
 	"reload-tui", "compact", "goal", "init", "fork", "title", "usage",
 	"status", "undo", "editor", "theme", "login", "logout", "export-md",
 	"export-debug-zip", "copy", "exit", "version", "swarm", "btw",
-	"desktop", "feedback",
+	"desktop", "feedback", "web", "remote-control",
 }
 
 func TestBuiltinRegistryCoversRequiredList(t *testing.T) {
 	t.Parallel()
 
-	require.Len(t, requiredBuiltins, 40, "the audited list excludes /web and /remote-control")
-	require.Len(t, builtinCommands, 35)
+	require.Len(t, requiredBuiltins, 42, "the audited list now includes /web and /remote-control")
+	require.Len(t, builtinCommands, 37)
 	require.Len(t, BlockedBuiltin, 5)
-	require.Len(t, ExcludedBuiltin, 2)
+	require.Empty(t, ExcludedBuiltin)
 
 	registered := make(map[string]bool, len(builtinCommands))
 	for _, cmd := range builtinCommands {
@@ -87,6 +87,7 @@ func TestBuiltinAliasesResolve(t *testing.T) {
 		"export":         "export-md",
 		"bug":            "feedback",
 		"q":              "exit",
+		"rc":             "remote-control",
 	} {
 		cmd, ok := Builtin(alias)
 		require.True(t, ok, "alias %q should resolve", alias)

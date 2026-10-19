@@ -55,6 +55,8 @@ var builtinCommands = []BuiltinCommand{
 	{Name: "feedback", Aliases: []string{"bug"}, Description: "Open the issue tracker to report a problem"},
 	{Name: "reload", Description: "Reload configuration from disk (local mode)"},
 	{Name: "reload-tui", Description: "Reapply UI styles from the current configuration"},
+	{Name: "web", Description: "Start or reuse the web UI and show its URL"},
+	{Name: "remote-control", Aliases: []string{"rc"}, Description: "Start or reuse the web UI through the Floyd relay"},
 }
 
 // BlockedBuiltin documents a required command that cannot be shipped as a
@@ -68,11 +70,9 @@ var BlockedBuiltin = map[string]string{
 	"desktop":     "no desktop or install URL is documented for this private fork; the reference URL belongs to the upstream product",
 }
 
-// ExcludedBuiltin are commands owned by the remote lane.
-var ExcludedBuiltin = map[string]string{
-	"web":            "owned by the remote lane",
-	"remote-control": "owned by the remote lane",
-}
+// ExcludedBuiltin would list commands owned by another lane. The remote
+// lane's commands are now registered, so no command is excluded.
+var ExcludedBuiltin = map[string]string{}
 
 // Builtins returns a copy of the registered builtin command list.
 func Builtins() []BuiltinCommand {
