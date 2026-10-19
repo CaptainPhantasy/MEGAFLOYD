@@ -1,0 +1,10 @@
+# MEGAFLOYD MCP room — home (tailnet).
+#
+# Copy to the global floydrc ($XDG_CONFIG_HOME/floyd/floydrc) or to
+# ./.floydrc. No credential is needed on the tailnet today; if the room
+# starts requiring one, use the token block from
+# .floydrc.example-megafloyd instead of pasting a secret here.
+mcp add room \
+	--type http \
+	--url "https://inference.tail58d565.ts.net:8443/mcp" \
+	--timeout 30
