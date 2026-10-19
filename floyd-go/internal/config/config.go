@@ -408,6 +408,14 @@ type Options struct {
 	// /add-dir and persisted at workspace scope so the set follows the
 	// project rather than the machine.
 	AdditionalDirs []string `json:"additional_dirs,omitempty" jsonschema:"description=Extra directories outside the working directory that file tools may access,example=/Users/me/src/shared"`
+	// Execution bounds command execution for agent tools.
+	Execution *ExecutionOptions `json:"execution,omitempty" jsonschema:"description=Command execution limits for agent tools"`
+	// FileOps controls tools that create, modify, or delete files.
+	FileOps *FileOpsOptions `json:"file_ops,omitempty" jsonschema:"description=Mutating file operation settings"`
+	// RuntimeProfile selects the runtime lane when neither the
+	// environment nor the executable name decides. See
+	// Config.EffectiveRuntimeProfile for the precedence.
+	RuntimeProfile string `json:"runtime_profile,omitempty" jsonschema:"description=Runtime profile used when FLOYD_RUNTIME_PROFILE and the executable name are both silent,enum=floyd,enum=superfloyd,default=floyd"`
 }
 
 type MCPs map[string]MCPConfig
@@ -833,10 +841,10 @@ func (h *HeartbeatConfig) Cooldown() time.Duration {
 // mutator must never write through the live pointer. Instead it clones,
 // mutates the clone, and atomically swaps it in. The clone gives fresh
 // copies of every field a typed mutator touches in place — Models,
-// RecentModels, MCP, and Options (with its nested TUI pointer). Providers
-// is a *csync.Map (internally synchronized) and is shared by reference;
-// the remaining fields are immutable after load from the mutators'
-// standpoint and are likewise shared.
+// RecentModels, MCP, and Options (with its nested TUI, Execution, and
+// FileOps values). Providers is a *csync.Map (internally synchronized)
+// and is shared by reference; the remaining fields are immutable after
+// load from the mutators' standpoint and are likewise shared.
 func (c *Config) cloneForWrite() *Config {
 	nc := *c
 	nc.Models = maps.Clone(c.Models)
@@ -847,6 +855,18 @@ func (c *Config) cloneForWrite() *Config {
 		if c.Options.TUI != nil {
 			tui := *c.Options.TUI
 			opts.TUI = &tui
+		}
+		if c.Options.Execution != nil {
+			execution := *c.Options.Execution
+			opts.Execution = &execution
+		}
+		if c.Options.FileOps != nil {
+			fileOps := *c.Options.FileOps
+			if c.Options.FileOps.Enabled != nil {
+				enabled := *c.Options.FileOps.Enabled
+				fileOps.Enabled = &enabled
+			}
+			opts.FileOps = &fileOps
 		}
 		nc.Options = &opts
 	}

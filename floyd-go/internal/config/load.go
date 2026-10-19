@@ -546,6 +546,9 @@ func (c *Config) applyEnv(resolver VariableResolver) {
 // Configs loaded from disk get this via setDefaults; configs arriving over the
 // wire from a Floyd server need the same treatment before the UI reads them.
 //
+// Execution, FileOps, and RuntimeProfile defaults are filled here too, so
+// tool code can read the resolved values without a second nil check.
+//
 // DiffMode is deliberately left alone: the permissions dialog reads its zero
 // value as "choose split or unified from the terminal width".
 func (c *Config) NormalizeOptions() {
@@ -560,6 +563,23 @@ func (c *Config) NormalizeOptions() {
 	}
 	if c.Options.TUI.ExitBanner == "" {
 		c.Options.TUI.ExitBanner = ExitBannerDefault
+	}
+	if c.Options.Execution == nil {
+		c.Options.Execution = &ExecutionOptions{}
+	}
+	c.Options.Execution.applyDefaults()
+	if c.Options.FileOps == nil {
+		c.Options.FileOps = &FileOpsOptions{}
+	}
+	if c.Options.FileOps.Enabled == nil {
+		enabled := DefaultFileOpsEnabled
+		c.Options.FileOps.Enabled = &enabled
+	}
+	if c.Options.FileOps.MaxReadSizeBytes <= 0 {
+		c.Options.FileOps.MaxReadSizeBytes = DefaultMaxReadSizeBytes
+	}
+	if c.Options.RuntimeProfile != "" {
+		c.Options.RuntimeProfile = string(NormalizeRuntimeProfile(c.Options.RuntimeProfile))
 	}
 }
 
