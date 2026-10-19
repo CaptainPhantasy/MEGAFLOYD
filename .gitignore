@@ -55,6 +55,8 @@ credentials
 !floyd-code/packages/**/credentials/**
 !floyd-code/packages/migration-legacy/test/fixtures/**/.floyd/
 !floyd-code/packages/migration-legacy/test/fixtures/**/.floyd/**
+!floyd-go/.floyd/
+!floyd-go/.floyd/commands/**
 
 # editors / OS
 .DS_Store
