@@ -22,6 +22,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/megafloydweb"
 	"github.com/legacy-ai/floyd/internal/message"
+	"github.com/legacy-ai/floyd/internal/plan"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/shell"
 	"github.com/legacy-ai/floyd/internal/ui/dialog"
@@ -51,6 +52,7 @@ const (
 	handlerProvider
 	handlerHelp
 	handlerNew
+	handlerPlan
 	handlerSessions
 	handlerTasks
 	handlerMCP
@@ -103,6 +105,8 @@ func builtinHandlerFor(name string) builtinHandlerID {
 		return handlerHelp
 	case "new":
 		return handlerNew
+	case "plan":
+		return handlerPlan
 	case "sessions":
 		return handlerSessions
 	case "tasks":
@@ -278,6 +282,9 @@ func (m *UI) runBuiltin(name, args string, fromPalette bool) tea.Cmd {
 			return cmd
 		}
 		return nil
+
+	case handlerPlan:
+		return m.planCommand(args)
 
 	case handlerSessions:
 		return m.openDialog(dialog.SessionsID)
@@ -979,6 +986,79 @@ func parseGoalArgs(args string) (goalAction, string) {
 func startRalphGoal(dataDir, sessionID, objective string) error {
 	_, err := ralph.New(dataDir).Start(sessionID, objective, ralph.DefaultMaxIterations, "")
 	return err
+}
+
+// planCommand implements /plan: bare text (or "enter") activates plan
+// mode, "status" shows the plan file, "clear" empties it, and "cancel"
+// leaves plan mode without approval. State lives on disk per session, so
+// the agent process sees the same plan.
+func (m *UI) planCommand(args string) tea.Cmd {
+	if m.session == nil {
+		return util.ReportWarn("No active session. Send a prompt first, then use /plan.")
+	}
+	cfg := m.com.Config()
+	if cfg == nil || cfg.Options == nil || cfg.Options.DataDirectory == "" {
+		return util.ReportError(fmt.Errorf("data directory is not configured"))
+	}
+
+	svc := plan.NewService(cfg.Options.DataDirectory)
+	sessionID := m.session.ID
+
+	switch strings.ToLower(strings.TrimSpace(args)) {
+	case "", "enter":
+		status, err := svc.Status(sessionID)
+		if err != nil {
+			return util.ReportError(err)
+		}
+		if status.Active {
+			m.status.SetPlanActive(true)
+			return util.ReportInfo("Plan mode is already active. Plan file: " + status.Path)
+		}
+		entered, err := svc.Enter(sessionID)
+		if err != nil {
+			return util.ReportError(err)
+		}
+		m.status.SetPlanActive(true)
+		return util.ReportInfo("Plan mode active. Write the plan to: " + entered.Path)
+
+	case "status":
+		status, err := svc.Status(sessionID)
+		if err != nil {
+			return util.ReportError(err)
+		}
+		m.status.SetPlanActive(status.Active)
+		if !status.Active {
+			return m.showInfo("Plan", "No active plan. Run /plan to enter plan mode.")
+		}
+		content := status.Content
+		runes := []rune(content)
+		if len(runes) > 4000 {
+			content = string(runes[:4000]) + "\n…"
+		}
+		body := fmt.Sprintf("Plan file: %s\nPlan ID: %s\n\n", status.Path, status.ID)
+		if strings.TrimSpace(content) == "" {
+			body += "(empty — write the plan before calling exit_plan_mode)"
+		} else {
+			body += content
+		}
+		return m.showInfo("Plan", body)
+
+	case "clear":
+		if err := svc.Clear(sessionID); err != nil {
+			return util.ReportError(err)
+		}
+		return util.ReportInfo("Plan file cleared.")
+
+	case "cancel":
+		if err := svc.Cancel(sessionID); err != nil {
+			return util.ReportError(err)
+		}
+		m.status.SetPlanActive(false)
+		return util.ReportInfo("Plan mode cancelled. The plan file is kept.")
+
+	default:
+		return util.ReportWarn("Usage: /plan [enter|status|clear|cancel]")
+	}
 }
 
 func (m *UI) goalCommand(args string) tea.Cmd {
