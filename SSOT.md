@@ -167,9 +167,13 @@ chassis markdown-command + skills + MCP-prompt loaders.
 3. [OWNER-DIRECTIVE 2026-10-19] The SSOT contains only what the owner has
    been absolutely clear about. Agent proposals are presented in
    PROPOSALS.md and championed for entry — never inserted by default.
-
-Agent process choices (how work is organized and verified) live outside the
-SSOT; see PROPOSALS.md.
+4. [OWNER-APPROVED 2026-10-19, formerly PROPOSALS P1-P6] Process rules now
+   binding: P1 evidence tags (VERIFIED/HYPOTHESIS/LEAD) on state claims;
+   P2 three-strike stop-and-report on repeated failure; P3 SSOT + progress
+   updated at every wave boundary; P4 build+test+lint gate green before the
+   next wave; P5 per-feature worktrees for parallel agents; P6 the approved
+   command-name lists (43 floyd7 slash commands, superfloyd manual aliases,
+   CLI subcommands) as the shipped command surface.
 
 ## 6. Status log
 
@@ -180,5 +184,14 @@ SSOT; see PROPOSALS.md.
 - 2026-10-18: WAVE 1 COMPLETE on branch `port/wave1-utilities` — 13 new
   packages + 5 additive files + 1 test, 14 commits; `db/embed.go` skipped
   (host already has identical embed). Gates re-verified independently:
-  build exit 0, tests ok, tree clean. Awaiting owner ratification of §3
-  before wave 2.
+  build exit 0, tests ok, tree clean.
+- 2026-10-19: WAVE 2 COMPLETE and merged — ralph (loop + install + 3
+  commands), 21 tools registered via coordinator.buildTools + allowed in
+  default coder agent + 27 description .md files, workflow engine, plugins,
+  extensibility, skills dedup, 3 test files. 12 commits, +7,520/−182.
+  Gates green (build 0, race-tests 0 FAIL, gofumpt clean); independently
+  re-verified (build, registration greps, ralph wiring) before merge.
+  Known cosmetic churn: gofumpt reformatted 137 pre-existing chassis files.
+  WAVE 3 dispatched (UI dialogs, slash layer, ghost-text, CLI commands);
+  pre-merge check against approved P6 list required.
+- 2026-10-19: Owner approved P1-P6; process rules promoted into §5.4.

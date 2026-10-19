@@ -1,4 +1,4 @@
-# PROPOSALS — awaiting owner decision
+# PROPOSALS — ALL APPROVED 2026-10-19 (now SSOT §5.4; kept for reference)
 
 Nothing here is law. Each item enters SSOT.md only after the owner says yes.
 
