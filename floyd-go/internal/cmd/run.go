@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"charm.land/log/v2"
@@ -20,6 +22,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/event"
 	"github.com/legacy-ai/floyd/internal/format"
 	"github.com/legacy-ai/floyd/internal/herdr"
+	"github.com/legacy-ai/floyd/internal/megafloydweb"
 	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/pubsub"
 	"github.com/legacy-ai/floyd/internal/session"
@@ -185,6 +188,114 @@ func init() {
 	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	runCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	runCmd.MarkFlagsMutuallyExclusive("session", "continue")
+
+	installWebHandoff(runCmd)
+	installWebHandoff(rootCmd)
+	megafloydweb.RestoreTerminalOnFatalSignals(func() bool { return tuiActive.Load() })
+}
+
+// tuiActive reports whether the root TUI currently owns the terminal.
+var tuiActive atomic.Bool
+
+const (
+	webFlag    = "web"
+	resumeFlag = "resume"
+)
+
+// addWebFlags registers the additive web handoff flags. It never changes
+// an existing flag: if a command already defines one of these names the
+// existing definition wins.
+func addWebFlags(cmd *cobra.Command) {
+	if cmd.Flags().Lookup(webFlag) == nil {
+		cmd.Flags().Bool(webFlag, false, "Hand off to the web UI instead of running here")
+	}
+	if cmd.Flags().Lookup(resumeFlag) == nil {
+		cmd.Flags().StringP(resumeFlag, "r", "", "Session ID to open in the web UI (requires --web)")
+	}
+}
+
+// installWebHandoff wraps a command's RunE so --web is handled before the
+// terminal UI or a non-interactive run starts. Existing behavior is
+// untouched when --web is absent.
+func installWebHandoff(cmd *cobra.Command) {
+	addWebFlags(cmd)
+
+	run := cmd.RunE
+	if run == nil {
+		return
+	}
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		handled, err := runWebHandoffIfRequested(c)
+		if handled {
+			return err
+		}
+		if c != rootCmd {
+			return run(c, args)
+		}
+		// The TUI runtime restores the terminal on its own exit, panic,
+		// SIGINT, and SIGTERM paths. tuiActive only enables the fatal
+		// signal handler for the paths it does not cover.
+		tuiActive.Store(true)
+		defer tuiActive.Store(false)
+		return run(c, args)
+	}
+}
+
+// runWebHandoffIfRequested starts or reuses the Node web server when --web
+// is set. The boolean reports whether the command was fully handled.
+func runWebHandoffIfRequested(cmd *cobra.Command) (bool, error) {
+	web, _ := cmd.Flags().GetBool(webFlag)
+	resume, _ := cmd.Flags().GetString(resumeFlag)
+	if !web {
+		if resume != "" {
+			return true, errors.New("the --resume flag requires --web; use -s/--session to resume in the terminal")
+		}
+		return false, nil
+	}
+
+	sessionID := resume
+	if sessionID == "" && cmd.Flags().Lookup("session") != nil {
+		sessionID, _ = cmd.Flags().GetString("session")
+	}
+
+	cwd, err := ResolveCwd(cmd)
+	if err != nil {
+		return true, err
+	}
+	executable, _ := os.Executable()
+
+	result, err := megafloydweb.StartWeb(cmd.Context(), megafloydweb.Options{
+		CWD:        cwd,
+		Executable: executable,
+		SessionID:  sessionID,
+	})
+	if err != nil {
+		return true, err
+	}
+
+	printWebHandoff(cmd, result)
+	return true, nil
+}
+
+// printWebHandoff writes the clickable URLs and the server state.
+func printWebHandoff(cmd *cobra.Command, result megafloydweb.Result) {
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Web UI: %s\n", result.URL)
+	if result.LocalURL != "" && result.LocalURL != result.URL {
+		fmt.Fprintf(out, "Local:  %s\n", result.LocalURL)
+	}
+	if result.RemoteControlURL != "" {
+		fmt.Fprintf(out, "Remote: %s\n", result.RemoteControlURL)
+	}
+	state := "started"
+	if result.Reused {
+		state = "reused"
+	}
+	fmt.Fprintf(out, "Server: %s on %s:%d (%s)\n", state, result.Bind.Host, result.Port, result.Bind.Mode)
+	fmt.Fprintf(out, "Log:    %s\n", result.LogPath)
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(out, "Warning: %s\n", warning)
+	}
 }
 
 // runNonInteractive executes the agent via the server and streams output
