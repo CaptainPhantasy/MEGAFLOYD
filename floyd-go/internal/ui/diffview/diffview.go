@@ -233,7 +233,7 @@ func (dv *DiffView) String() string {
 	case layoutSplit:
 		return style.Render(strings.TrimSuffix(dv.renderSplit(), "\n"))
 	default:
-		panic("unknown diffview layout")
+		return style.Render("[diffview: unsupported layout]")
 	}
 }
 
