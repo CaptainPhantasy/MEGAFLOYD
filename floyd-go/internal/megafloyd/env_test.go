@@ -102,3 +102,19 @@ func TestApplyChassisEnvIsIdempotent(t *testing.T) {
 		t.Fatalf("second apply exported %v, want none", applied)
 	}
 }
+
+func TestApplyChassisEnvMegafloydWins(t *testing.T) {
+	clearEnv(t)
+	t.Setenv(ConfigEnv, "/m/config")
+	t.Setenv(ChassisGlobalConfigEnv, "/inherited/config")
+
+	d, err := Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	ApplyChassisEnv(d)
+
+	if got := os.Getenv(ChassisGlobalConfigEnv); got != "/m/config" {
+		t.Fatalf("%s = %q, want /m/config", ChassisGlobalConfigEnv, got)
+	}
+}

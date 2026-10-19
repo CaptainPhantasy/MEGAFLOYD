@@ -58,8 +58,10 @@ For every value, the first non-empty wins:
    working when you switch commands).
 3. The `~/.megafloyd` default.
 
-`ApplyChassisEnv` never overwrites a `FLOYD_*` variable that is already set in
-the process environment.
+`ApplyChassisEnv` leaves an inherited `FLOYD_*` variable untouched unless the
+matching `MEGAFLOYD_*` variable is explicitly set; then the `MEGAFLOYD_*`
+value wins. The launcher resolves the three directory values with the same
+order before exporting the mirrors.
 
 ## Layout
 

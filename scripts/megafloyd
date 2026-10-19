@@ -14,9 +14,32 @@ APP=megafloyd
 SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 
 MEGAFLOYD_HOME=${MEGAFLOYD_HOME:-"$HOME/.megafloyd"}
-MEGAFLOYD_CONFIG_DIR=${MEGAFLOYD_CONFIG_DIR:-"$MEGAFLOYD_HOME/config"}
-MEGAFLOYD_DATA_DIR=${MEGAFLOYD_DATA_DIR:-"$MEGAFLOYD_HOME/data"}
-MEGAFLOYD_CACHE_DIR=${MEGAFLOYD_CACHE_DIR:-"$MEGAFLOYD_HOME/cache"}
+
+# Directory precedence matches internal/megafloyd: an explicit MEGAFLOYD_*
+# value wins, then an inherited FLOYD_* value, then the home subdirectory.
+if [ -n "${MEGAFLOYD_CONFIG_DIR:-}" ]; then
+	:
+elif [ -n "${FLOYD_GLOBAL_CONFIG:-}" ]; then
+	MEGAFLOYD_CONFIG_DIR=$FLOYD_GLOBAL_CONFIG
+else
+	MEGAFLOYD_CONFIG_DIR=$MEGAFLOYD_HOME/config
+fi
+
+if [ -n "${MEGAFLOYD_DATA_DIR:-}" ]; then
+	:
+elif [ -n "${FLOYD_GLOBAL_DATA:-}" ]; then
+	MEGAFLOYD_DATA_DIR=$FLOYD_GLOBAL_DATA
+else
+	MEGAFLOYD_DATA_DIR=$MEGAFLOYD_HOME/data
+fi
+
+if [ -n "${MEGAFLOYD_CACHE_DIR:-}" ]; then
+	:
+elif [ -n "${FLOYD_CACHE_DIR:-}" ]; then
+	MEGAFLOYD_CACHE_DIR=$FLOYD_CACHE_DIR
+else
+	MEGAFLOYD_CACHE_DIR=$MEGAFLOYD_HOME/cache
+fi
 
 mkdir -p "$MEGAFLOYD_HOME" \
 	"$MEGAFLOYD_CONFIG_DIR" \
@@ -28,11 +51,10 @@ mkdir -p "$MEGAFLOYD_HOME" \
 export MEGAFLOYD_HOME MEGAFLOYD_CONFIG_DIR MEGAFLOYD_DATA_DIR MEGAFLOYD_CACHE_DIR
 export MEGAFLOYD_ACTIVE=1
 
-# Compatibility mirrors. An inherited FLOYD_* value wins over the mirror so an
-# existing floyd environment is honored.
-export FLOYD_GLOBAL_CONFIG=${FLOYD_GLOBAL_CONFIG:-"$MEGAFLOYD_CONFIG_DIR"}
-export FLOYD_GLOBAL_DATA=${FLOYD_GLOBAL_DATA:-"$MEGAFLOYD_DATA_DIR"}
-export FLOYD_CACHE_DIR=${FLOYD_CACHE_DIR:-"$MEGAFLOYD_CACHE_DIR"}
+# Compatibility mirrors, derived from the resolved values above.
+export FLOYD_GLOBAL_CONFIG=$MEGAFLOYD_CONFIG_DIR
+export FLOYD_GLOBAL_DATA=$MEGAFLOYD_DATA_DIR
+export FLOYD_CACHE_DIR=$MEGAFLOYD_CACHE_DIR
 
 if [ -n "${MEGAFLOYD_IDENTITY:-}" ]; then
 	export FLOYD_IDENTITY=${FLOYD_IDENTITY:-"$MEGAFLOYD_IDENTITY"}

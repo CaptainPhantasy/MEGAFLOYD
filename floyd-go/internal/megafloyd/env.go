@@ -40,13 +40,21 @@ func ChassisEnv(d Dirs) map[string]string {
 }
 
 // ApplyChassisEnv exports the FLOYD_* mirrors for d into the process
-// environment. Variables that are already set are left untouched, so an
-// explicit FLOYD_* override always wins. It returns the names it exported, in
-// map order.
+// environment. An inherited FLOYD_* value is left untouched unless the
+// matching MEGAFLOYD_* variable is explicitly set, in which case the
+// MEGAFLOYD_* value wins. It returns the names it exported, in map order.
 func ApplyChassisEnv(d Dirs) []string {
+	explicit := map[string]bool{
+		ChassisGlobalConfigEnv: os.Getenv(ConfigEnv) != "",
+		ChassisGlobalDataEnv:   os.Getenv(DataEnv) != "",
+		ChassisCacheDirEnv:     os.Getenv(CacheEnv) != "",
+		ChassisIdentityEnv:     os.Getenv(IdentityEnv) != "",
+		ChassisProfileEnv:      os.Getenv(ProfileEnv) != "",
+		ChassisSkillsDirEnv:    os.Getenv(SkillsEnv) != "",
+	}
 	var applied []string
 	for name, value := range ChassisEnv(d) {
-		if _, exists := os.LookupEnv(name); exists {
+		if _, exists := os.LookupEnv(name); exists && !explicit[name] {
 			continue
 		}
 		if err := os.Setenv(name, value); err != nil {
