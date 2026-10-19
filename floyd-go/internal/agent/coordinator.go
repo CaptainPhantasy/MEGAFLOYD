@@ -742,6 +742,14 @@ func (c *coordinator) planService() *plan.Service {
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
 	plans := c.planService()
+	// Tools resolve paths through the permission service, so the current
+	// additional-directory set must be in place before they run. This is
+	// also the pickup point after a config reload in server mode.
+	if c.cfg != nil {
+		if cfg := c.cfg.Config(); cfg != nil && cfg.Options != nil {
+			c.permissions.SetAdditionalDirs(cfg.Options.AdditionalDirs)
+		}
+	}
 	var allTools []fantasy.AgentTool
 	if slices.Contains(agent.AllowedTools, AgentToolName) {
 		agentTool, err := c.agentTool(ctx)
@@ -793,8 +801,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewGlobTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob),
-		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
+		tools.NewGlobTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob),
+		tools.NewGrepTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),

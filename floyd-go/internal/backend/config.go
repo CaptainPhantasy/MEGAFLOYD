@@ -24,6 +24,15 @@ func publishConfigChanged(ws *Workspace) {
 		return
 	}
 
+	// Keep the permission allowlist in step with config writes that add
+	// or remove additional workspace directories, so a remote /add-dir
+	// takes effect without restarting the agent.
+	if ws.App.Permissions != nil && ws.Cfg != nil {
+		if cfg := ws.Cfg.Config(); cfg != nil && cfg.Options != nil {
+			ws.App.Permissions.SetAdditionalDirs(cfg.Options.AdditionalDirs)
+		}
+	}
+
 	// Re-init MCP servers whose config changed. MCP state is process-global,
 	// so this only needs to happen once regardless of which workspace
 	// triggered the write. Run async so unrelated config writes (model

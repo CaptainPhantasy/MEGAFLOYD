@@ -5,10 +5,10 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/legacy-ai/floyd/internal/filepathext"
 	"github.com/legacy-ai/floyd/internal/fsext"
 	"github.com/legacy-ai/floyd/internal/permission"
 )
@@ -27,7 +27,10 @@ func NewSmartReplaceTool(permissions permission.Service, wd string) fantasy.Agen
 		"smart_replace",
 		string(smartReplaceDescription),
 		func(ctx context.Context, params SmartReplaceParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			fullPath := filepath.Join(wd, params.FilePath)
+			fullPath := filepathext.SmartJoin(wd, params.FilePath)
+			if pathErr := checkToolPath(permissions, fullPath); pathErr != nil {
+				return deniedPathResponse(pathErr), nil
+			}
 			b, err := os.ReadFile(fullPath)
 			if err != nil {
 				return fantasy.NewTextResponse(err.Error()), nil

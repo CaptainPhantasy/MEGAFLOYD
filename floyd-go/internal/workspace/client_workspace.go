@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -526,6 +527,31 @@ func (w *ClientWorkspace) WorkingDir() string {
 
 func (w *ClientWorkspace) Resolver() config.VariableResolver {
 	return config.IdentityResolver()
+}
+
+// AdditionalDirs returns the extra workspace directories from the cached
+// server config snapshot.
+func (w *ClientWorkspace) AdditionalDirs() []string {
+	cfg := w.Config()
+	if cfg == nil || cfg.Options == nil {
+		return nil
+	}
+	return slices.Clone(cfg.Options.AdditionalDirs)
+}
+
+// AddAdditionalDir persists an extra workspace directory through the
+// server's config RPC and refreshes the cached snapshot.
+func (w *ClientWorkspace) AddAdditionalDir(ctx context.Context, path string) ([]string, error) {
+	dir, err := NormalizeAdditionalDir(w.WorkingDir(), path)
+	if err != nil {
+		return nil, err
+	}
+	dirs := mergeAdditionalDir(w.AdditionalDirs(), dir)
+	if err := w.client.SetConfigField(ctx, w.workspaceID(), config.ScopeWorkspace, "options.additional_dirs", dirs); err != nil {
+		return nil, err
+	}
+	w.refreshWorkspace()
+	return w.AdditionalDirs(), nil
 }
 
 // -- Config mutations --

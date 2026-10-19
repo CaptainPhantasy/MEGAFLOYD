@@ -23,7 +23,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/csync"
+	"github.com/legacy-ai/floyd/internal/filepathext"
 	"github.com/legacy-ai/floyd/internal/fsext"
+	"github.com/legacy-ai/floyd/internal/permission"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns
@@ -121,7 +123,7 @@ func escapeRegexPattern(pattern string) string {
 	return escaped
 }
 
-func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
+func NewGrepTool(permissions permission.Service, workingDir string, config config.ToolGrep) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GrepToolName,
 		grepDescription(),
@@ -135,7 +137,10 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 				searchPattern = escapeRegexPattern(params.Pattern)
 			}
 
-			searchPath := cmp.Or(params.Path, workingDir)
+			searchPath := filepathext.SmartJoin(workingDir, cmp.Or(params.Path, workingDir))
+			if pathErr := checkToolPath(permissions, searchPath); pathErr != nil {
+				return deniedPathResponse(pathErr), nil
+			}
 
 			searchCtx, cancel := context.WithTimeout(ctx, config.GetTimeout())
 			defer cancel()

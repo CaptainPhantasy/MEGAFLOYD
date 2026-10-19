@@ -200,6 +200,12 @@ type Workspace interface {
 	Config() *config.Config
 	WorkingDir() string
 	Resolver() config.VariableResolver
+	// AdditionalDirs returns the extra directories that file tools may
+	// access beyond the working directory.
+	AdditionalDirs() []string
+	// AddAdditionalDir validates path, adds it to the workspace set, and
+	// persists the set at workspace scope. It returns the effective list.
+	AddAdditionalDir(ctx context.Context, path string) ([]string, error)
 
 	// Config mutations (proxied to server in client mode)
 	UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error

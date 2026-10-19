@@ -21,8 +21,8 @@ func TestBuiltinRegistryCoversRequiredList(t *testing.T) {
 	t.Parallel()
 
 	require.Len(t, requiredBuiltins, 42, "the audited list now includes /web and /remote-control")
-	require.Len(t, builtinCommands, 38)
-	require.Len(t, BlockedBuiltin, 4)
+	require.Len(t, builtinCommands, 41)
+	require.Len(t, BlockedBuiltin, 1)
 	require.Empty(t, ExcludedBuiltin)
 
 	registered := make(map[string]bool, len(builtinCommands))

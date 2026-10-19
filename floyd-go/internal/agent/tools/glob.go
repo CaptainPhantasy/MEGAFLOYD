@@ -18,6 +18,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/filepathext"
 	"github.com/legacy-ai/floyd/internal/fsext"
+	"github.com/legacy-ai/floyd/internal/permission"
 )
 
 const GlobToolName = "glob"
@@ -50,7 +51,7 @@ type GlobResponseMetadata struct {
 	Truncated     bool `json:"truncated"`
 }
 
-func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
+func NewGlobTool(permissions permission.Service, workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GlobToolName,
 		globDescription(),
@@ -59,7 +60,15 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil
 			}
 
-			searchPath := cmp.Or(params.Path, workingDir)
+			searchPath := filepathext.SmartJoin(workingDir, cmp.Or(params.Path, workingDir))
+			if pathErr := checkToolPath(permissions, searchPath); pathErr != nil {
+				return deniedPathResponse(pathErr), nil
+			}
+			if prefix, _ := filepathext.SplitGlobPrefix(params.Pattern); prefix != "" {
+				if pathErr := checkToolPath(permissions, filepathext.SmartJoin(searchPath, prefix)); pathErr != nil {
+					return deniedPathResponse(pathErr), nil
+				}
+			}
 
 			// Bound the search so a huge or symlink-heavy root (e.g. $HOME
 			// or a module cache) fails cleanly instead of pinning the CPU

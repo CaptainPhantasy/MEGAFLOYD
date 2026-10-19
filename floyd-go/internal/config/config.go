@@ -272,8 +272,10 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	// Here we can add themes later or any TUI related options
-	//
+	// Theme selects the TUI palette. Empty keeps the provider-derived
+	// default, which is the dark Charmtone palette for every built-in
+	// provider.
+	Theme string `json:"theme,omitempty" jsonschema:"description=TUI color theme,enum=auto,enum=dark,enum=light,default=dark"`
 
 	Completions Completions        `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool              `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
@@ -401,6 +403,11 @@ type Options struct {
 	Notifications             string        `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string      `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=floyd-config"`
 	Budget                    *BudgetConfig `json:"budget,omitempty" jsonschema:"description=Token budget settings for cost control"`
+	// AdditionalDirs lists extra project directories that file tools may
+	// read and write, in addition to the working directory. Managed by
+	// /add-dir and persisted at workspace scope so the set follows the
+	// project rather than the machine.
+	AdditionalDirs []string `json:"additional_dirs,omitempty" jsonschema:"description=Extra directories outside the working directory that file tools may access,example=/Users/me/src/shared"`
 }
 
 type MCPs map[string]MCPConfig
@@ -762,6 +769,11 @@ type Config struct {
 
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
+
+	// Experimental stores per-flag overrides for features registered in
+	// internal/experiments. A missing key falls through to the flag's
+	// environment override, then to its built-in default.
+	Experimental map[string]bool `json:"experimental,omitempty" jsonschema:"description=Experimental feature overrides keyed by flag id"`
 
 	Agents map[string]Agent `json:"-"`
 }

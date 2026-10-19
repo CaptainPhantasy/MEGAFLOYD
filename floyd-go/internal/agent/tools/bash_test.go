@@ -39,6 +39,12 @@ func (m *mockBashPermissionService) SkipRequests() bool {
 	return false
 }
 
+func (m *mockBashPermissionService) SetAdditionalDirs(dirs []string) {}
+
+func (m *mockBashPermissionService) AdditionalDirs() []string { return nil }
+
+func (m *mockBashPermissionService) ValidatePath(path string) error { return nil }
+
 func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
@@ -109,6 +115,12 @@ func (m *recordingPermissionService) SetSkipRequests(skip bool) {}
 func (m *recordingPermissionService) SkipRequests() bool {
 	return false
 }
+
+func (m *recordingPermissionService) SetAdditionalDirs(dirs []string) {}
+
+func (m *recordingPermissionService) AdditionalDirs() []string { return nil }
+
+func (m *recordingPermissionService) ValidatePath(path string) error { return nil }
 
 func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
