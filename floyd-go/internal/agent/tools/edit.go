@@ -71,6 +71,9 @@ func NewEditTool(
 			}
 
 			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
+			if pathErr := checkToolPath(permissions, params.FilePath); pathErr != nil {
+				return deniedPathResponse(pathErr), nil
+			}
 
 			var response fantasy.ToolResponse
 			var err error

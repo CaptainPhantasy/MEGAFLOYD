@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -36,10 +37,16 @@ type AppWorkspace struct {
 // NewAppWorkspace creates a new AppWorkspace wrapping the given app
 // and config store.
 func NewAppWorkspace(a *app.App, store *config.ConfigStore) *AppWorkspace {
-	return &AppWorkspace{
+	w := &AppWorkspace{
 		app:   a,
 		store: store,
 	}
+	if a != nil && a.Permissions != nil && store != nil {
+		if cfg := store.Config(); cfg != nil && cfg.Options != nil {
+			a.Permissions.SetAdditionalDirs(cfg.Options.AdditionalDirs)
+		}
+	}
+	return w
 }
 
 // -- Sessions --
@@ -339,6 +346,36 @@ func (w *AppWorkspace) WorkingDir() string {
 
 func (w *AppWorkspace) Resolver() config.VariableResolver {
 	return w.store.Resolver()
+}
+
+// AdditionalDirs returns the persisted extra workspace directories.
+func (w *AppWorkspace) AdditionalDirs() []string {
+	cfg := w.Config()
+	if cfg == nil || cfg.Options == nil {
+		return nil
+	}
+	return slices.Clone(cfg.Options.AdditionalDirs)
+}
+
+// AddAdditionalDir validates and persists an extra workspace directory,
+// then publishes it to the live permission service so file tools accept
+// paths under it immediately.
+func (w *AppWorkspace) AddAdditionalDir(ctx context.Context, path string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	dir, err := NormalizeAdditionalDir(w.WorkingDir(), path)
+	if err != nil {
+		return nil, err
+	}
+	dirs := mergeAdditionalDir(w.AdditionalDirs(), dir)
+	if err := w.store.SetConfigField(config.ScopeWorkspace, "options.additional_dirs", dirs); err != nil {
+		return nil, err
+	}
+	if w.app != nil && w.app.Permissions != nil {
+		w.app.Permissions.SetAdditionalDirs(dirs)
+	}
+	return slices.Clone(dirs), nil
 }
 
 // -- Config mutations --

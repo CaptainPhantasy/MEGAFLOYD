@@ -39,6 +39,12 @@ func (m *mockPermissionService) SkipRequests() bool {
 	return false
 }
 
+func (m *mockPermissionService) SetAdditionalDirs(dirs []string) {}
+
+func (m *mockPermissionService) AdditionalDirs() []string { return nil }
+
+func (m *mockPermissionService) ValidatePath(path string) error { return nil }
+
 func (m *mockPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }

@@ -82,6 +82,17 @@ type Service interface {
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
+	// SetAdditionalDirs replaces the extra roots, beyond the working
+	// directory, that file tools may access. Paths are made absolute and
+	// deduplicated; empty entries are ignored.
+	SetAdditionalDirs(dirs []string)
+	// AdditionalDirs returns the extra roots in effect.
+	AdditionalDirs() []string
+	// ValidatePath reports whether path is inside the working directory
+	// or an additional root. It returns a *PathOutsideError otherwise.
+	// Symlinks are resolved on the deepest existing component so a link
+	// cannot be used to escape an allowed root.
+	ValidatePath(path string) error
 }
 
 // PermissionKey is a composite key for session permission lookups.
@@ -103,6 +114,9 @@ type permissionService struct {
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
 	allowedTools          []string
+
+	additionalDirsMu sync.RWMutex
+	additionalDirs   []string
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex

@@ -232,6 +232,12 @@ func (m *mockViewPermissionService) SkipRequests() bool {
 	return false
 }
 
+func (m *mockViewPermissionService) SetAdditionalDirs(dirs []string) {}
+
+func (m *mockViewPermissionService) AdditionalDirs() []string { return nil }
+
+func (m *mockViewPermissionService) ValidatePath(path string) error { return nil }
+
 func (m *mockViewPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }

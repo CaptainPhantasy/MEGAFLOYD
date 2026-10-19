@@ -29,6 +29,15 @@ func NewApplyPatchTool(permissions permission.Service, wd string) fantasy.AgentT
 		"apply_patch",
 		string(applyUnifiedDiffDescription),
 		func(ctx context.Context, params ApplyPatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if pathErr := checkToolPath(permissions, wd); pathErr != nil {
+				return deniedPathResponse(pathErr), nil
+			}
+			for _, target := range patchTargetPaths(params.Patch) {
+				if pathErr := checkToolPath(permissions, resolvePatchPath(wd, target)); pathErr != nil {
+					return deniedPathResponse(pathErr), nil
+				}
+			}
+
 			// A unified diff can touch any file under the working
 			// directory, so the permission request covers the whole
 			// tree rather than a single path.

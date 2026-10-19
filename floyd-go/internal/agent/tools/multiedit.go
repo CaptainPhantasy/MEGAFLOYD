@@ -76,6 +76,9 @@ func NewMultiEditTool(
 			}
 
 			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
+			if pathErr := checkToolPath(permissions, params.FilePath); pathErr != nil {
+				return deniedPathResponse(pathErr), nil
+			}
 
 			// Validate all edits before applying any
 			if err := validateEdits(params.Edits); err != nil {
