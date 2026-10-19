@@ -33,6 +33,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/history"
 	"github.com/legacy-ai/floyd/internal/log"
 	"github.com/legacy-ai/floyd/internal/lsp"
+	megafloydskills "github.com/legacy-ai/floyd/internal/megafloyd/skills"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/permission"
 	"github.com/legacy-ai/floyd/internal/pubsub"
@@ -166,6 +167,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// Install ralph loop slash commands into .floyd/commands/
 	if err := ralph.InstallCommands(cfg.Options.DataDirectory); err != nil {
 		slog.Warn("Failed to install ralph commands", "error", err)
+	}
+
+	// Install megafloyd skill slash commands into <DataDirectory>/commands.
+	// Non-fatal: a read-only data directory must never block startup.
+	if err := megafloydskills.InstallCommands(cfg.Options.DataDirectory); err != nil {
+		slog.Warn("Failed to install megafloyd skills", "error", err)
 	}
 
 	// TODO: remove the concept of agent config, most likely.
