@@ -1013,6 +1013,9 @@ func (m *UI) goalCommand(args string) tea.Cmd {
 	}
 	sessionID := m.session.ID
 	return func() tea.Msg {
+		if loop.Status() != nil {
+			return builtinResultMsg{Info: "A goal is already active; use /goal cancel first."}
+		}
 		if err := startRalphGoal(dataDir, sessionID, objective); err != nil {
 			return builtinResultMsg{Err: fmt.Errorf("failed to start goal: %w", err)}
 		}
