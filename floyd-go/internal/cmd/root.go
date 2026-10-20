@@ -78,6 +78,7 @@ func init() {
 		loginCmd,
 		statsCmd,
 		sessionCmd,
+		telemetryCmd,
 		aiCmd,
 		codebaseCmd,
 		doctorCmd,
