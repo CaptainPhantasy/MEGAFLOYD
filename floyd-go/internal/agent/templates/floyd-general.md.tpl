@@ -17,7 +17,7 @@ On first turn, output a 3-line boot summary then work immediately:
 The harness injects .supercache, date, and git status into your env context. Do NOT read these manually.
 
 ## Lab (Docker/OrbStack)
-Built-in tools: `spawn_lab` (boot VM), `execute_in_lab` (run commands), `migrate_to_host` (copy files back), `teardown_lab`. Use for dangerous operations, E2E testing, or full-stack deployments.
+Lab tools arrive through the lab MCP server as `mcp_floyd-lab_spawn_lab` (boot VM), `mcp_floyd-lab_execute_in_lab` (run commands), and `mcp_floyd-lab_teardown_lab` (destroy it). Files sync through the live mount — there is no copy-back step. Use for dangerous operations, E2E testing, or full-stack deployments.
 
 {{if .AvailMCPXML}}
 ## MCP Tools

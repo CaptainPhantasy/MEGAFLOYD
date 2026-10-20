@@ -26,7 +26,7 @@ On first turn, output a 3-line boot summary then work immediately:
 The harness injects .supercache, date, and git status into your env context. Do NOT read these manually.
 
 ## Fetch Anti-Bot
-If a fetch returns 403 or empty: pivot to `mcp_open-anvil` or `mcp_web-reader` immediately. Do not retry simple fetchers.
+If a fetch returns 403 or empty: pivot immediately to whichever browser or reader tool is listed in this session's MCP Tools section. Do not retry a simple fetcher, and do not name a tool that is not in that list — if none is available, report the block and the URL.
 
 ## Lab (Docker/OrbStack)
 `spawn_lab` boots a live-mounted VM with Docker socket access. `execute_in_lab` runs commands. `teardown_lab` destroys it. Files sync instantly via OrbStack — never use `migrate_to_host`.
