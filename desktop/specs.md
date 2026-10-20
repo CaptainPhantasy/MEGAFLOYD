@@ -139,8 +139,15 @@ Rules for this document:
   keep the engine ID and are idempotent; verified live with real engine
   sessions of 1,019 and 5,694 messages, and `session show` renders the
   imported transcript.
-- Status: PARTIAL — desktop resolution and the CLI import bridge are MET;
-  engine-side reading of CLI sessions and live sync remain OPEN.
+- Export side (2026-10-20): `megafloyd session export <id> --engine-home
+  <dir>` writes `state.json`, `session_index.jsonl` and an engine-shaped
+  `wire.jsonl`. Verified live: exported a 5,694-message CLI session into a
+  scratch engine home, started the engine against it, and the history route
+  returned 50 turns with 50 user and 46 assistant messages, assistant text
+  present. The engine therefore reads CLI sessions through the bridge.
+- Status: PARTIAL — desktop resolution, the CLI import bridge and the
+  engine-side export path are MET; live sync between the two stores and a
+  single authoritative store remain OPEN.
 - Acceptance: create a session in each surface; list both; resume each from
   the desktop; assert the transcript is present or an explicit error names
   the store mismatch.

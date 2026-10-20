@@ -13,8 +13,9 @@ Agent Skills.
 [Charm Crush](https://github.com/charmbracelet/crush) v0.92.0
 (FSL-1.1-MIT).** It is for internal use only and must never be redistributed
 or published. Upstream engine behavior is unchanged unless documented in this
-repo. The `origin` remote still points at the upstream `charmbracelet/crush`
-repository — do not push there.
+repo. The fork has no upstream link: `origin` is the private
+`github.com/CaptainPhantasy/MEGAFLOYD` repository, and there is no remote
+pointing at `charmbracelet/crush`.
 
 Key facts:
 
