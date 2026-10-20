@@ -1,0 +1,20 @@
+# Build artifacts
+build/
+MEGAFLOYD.app/
+*.dmg
+
+# Pinned upstream (recreate from the DMG; see docs/REBRAND.md)
+vendor/
+
+# Platform build inputs (pinned in PLATFORM-COMMIT; see README)
+platform/
+platform-src/
+
+# Generated icon intermediates
+desktop/assets/MEGAFLOYD.iconset/
+desktop/assets/icon-1024.png
+
+# Local runtime state
+.floyd/
+.DS_Store
+node_modules/

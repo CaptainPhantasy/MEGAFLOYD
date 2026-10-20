@@ -1,0 +1,14 @@
+{
+  "name": "megafloyd-desktop",
+  "productName": "MEGAFLOYD",
+  "version": "1.0.0",
+  "description": "MEGAFLOYD Desktop — native shell for the MEGAFLOYD engine.",
+  "private": true,
+  "type": "module",
+  "main": "src/main.mjs",
+  "author": "Legacy AI",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  }
+}
