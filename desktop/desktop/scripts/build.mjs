@@ -202,6 +202,20 @@ function main() {
   plistSet(plist, 'NSHumanReadableCopyright', 'string', 'Legacy AI');
   plistSet(plist, 'LSMinimumSystemVersion', 'string', '12.0');
   plistSet(plist, 'CFBundleLocalizations', 'json', '["en"]');
+  const usageDescriptions = {
+    NSAccessibilityUsageDescription: 'MEGAFLOYD needs accessibility access to show the selection toolbar.',
+    NSAppleEventsUsageDescription: 'MEGAFLOYD needs to send Apple events to open files and apps you choose.',
+    NSAudioCaptureUsageDescription: 'MEGAFLOYD needs audio capture to transcribe recordings.',
+    NSBluetoothAlwaysUsageDescription: 'MEGAFLOYD needs Bluetooth to connect external devices.',
+    NSBluetoothPeripheralUsageDescription: 'MEGAFLOYD needs Bluetooth to connect external devices.',
+    NSCameraUsageDescription: 'MEGAFLOYD needs the camera for video calls.',
+    NSLocalNetworkUsageDescription: 'MEGAFLOYD needs local network access to reach your services.',
+    NSMicrophoneUsageDescription: 'MEGAFLOYD needs the microphone for voice input.',
+    NSScreenCaptureUsageDescription: 'MEGAFLOYD needs screen recording to take screenshots.',
+  };
+  for (const [key, text] of Object.entries(usageDescriptions)) {
+    plistSet(plist, key, 'string', text);
+  }
   plistRemove(plist, 'ElectronAsarIntegrity');
   plistRemove(plist, 'CFBundleDocumentTypes');
   plistSet(plist, 'CFBundleURLTypes', 'json', JSON.stringify([{
