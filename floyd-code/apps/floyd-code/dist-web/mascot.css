@@ -1,0 +1,43 @@
+
+/* ===== Floyd mascot dock (supplied plate + extracted glyph) ===== */
+#floyd-mascot {
+  position: fixed; left: 0; top: 0; width: 150px;
+  z-index: 44; pointer-events: none;
+  opacity: 0; transform: translate3d(0, 10px, 0);
+  transition: opacity .6s ease, transform .6s cubic-bezier(.2,.8,.2,1);
+  will-change: transform, opacity;
+}
+#floyd-mascot.fm-in { opacity: 1; transform: translate3d(0, 0, 0); }
+#floyd-mascot .fm-cabinet {
+  display: block; width: 100%; height: auto; pointer-events: auto;
+  cursor: pointer; user-select: none; -webkit-user-drag: none;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, .45));
+}
+#floyd-mascot .fm-screen {
+  position: absolute;
+  left: 35.45%; top: 24.37%; width: 37.63%; height: 23.48%;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+#floyd-mascot .fm-screen img {
+  width: 86%; height: auto; max-height: 86%; object-fit: contain;
+  display: block; user-select: none; -webkit-user-drag: none;
+  transition: opacity .16s linear;
+}
+#floyd-mascot.fm-think .fm-screen img { animation: fm-breathe 1.7s ease-in-out infinite; }
+@keyframes fm-breathe { 0%,100% { opacity: .84; } 50% { opacity: 1; } }
+.mascot-peek { display: none !important; }
+.ws-mascot { display: flex !important; align-items: center; justify-content: center; }
+.floyd-peek {
+  width: 36px; height: 36px; flex: none; cursor: pointer;
+  background-image: url("/mascot-sprite.webp");
+  background-size: 432px 216px;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #floyd-mascot, #floyd-mascot .fm-face { animation: none !important; transition: none !important; }
+}
+@media (max-width: 900px) { #floyd-mascot { width: 112px; } }
+@media (max-width: 720px) { #floyd-mascot { display: none; } }
