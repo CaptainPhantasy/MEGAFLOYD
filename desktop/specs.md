@@ -134,8 +134,13 @@ Rules for this document:
   `owner: chassis` / `session-store-mismatch`; an id in neither resolved to
   `owner: none` / `session-not-found`. A bare UUID matched `session_<uuid>`,
   and a prefixed id matched the chassis UUID.
-- Status: PARTIAL — the desktop MUST/SHOULD are MET; one authoritative store
-  (or documented mirror) remains OPEN platform work.
+- CLI side (2026-10-20): `docs/session-bridge.md` adds
+  `megafloyd session engines` and `megafloyd session import <id>`. Imports
+  keep the engine ID and are idempotent; verified live with real engine
+  sessions of 1,019 and 5,694 messages, and `session show` renders the
+  imported transcript.
+- Status: PARTIAL — desktop resolution and the CLI import bridge are MET;
+  engine-side reading of CLI sessions and live sync remain OPEN.
 - Acceptance: create a session in each surface; list both; resume each from
   the desktop; assert the transcript is present or an explicit error names
   the store mismatch.

@@ -559,6 +559,12 @@ type partWrapper struct {
 	Data ContentPart `json:"data"`
 }
 
+// MarshalParts serializes message parts in the session storage format.
+// Callers outside this package (session import) need the tagged wrapper.
+func MarshalParts(parts []ContentPart) ([]byte, error) {
+	return marshalParts(parts)
+}
+
 func marshalParts(parts []ContentPart) ([]byte, error) {
 	wrappedParts := make([]partWrapper, len(parts))
 
