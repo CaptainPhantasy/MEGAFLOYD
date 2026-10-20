@@ -8,13 +8,16 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/legacy-ai/floyd/internal/enginebridge"
+	"github.com/legacy-ai/floyd/internal/engineexport"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/session"
 )
 
 var (
-	sessionEnginesJSON bool
-	sessionImportJSON  bool
+	sessionEnginesJSON      bool
+	sessionImportJSON       bool
+	sessionExportJSON       bool
+	sessionExportEngineHome string
 )
 
 var sessionEnginesCmd = &cobra.Command{
@@ -33,11 +36,22 @@ var sessionImportCmd = &cobra.Command{
 	RunE:  runSessionImport,
 }
 
+var sessionExportCmd = &cobra.Command{
+	Use:   "export <session-id>",
+	Short: "Export a CLI session into the desktop/web engine store",
+	Long:  "Write a local session into the engine's on-disk format so the desktop/web UI can list and open it. The engine gets a session_<uuid> id derived from the local id.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSessionExport,
+}
+
 func init() {
 	sessionEnginesCmd.Flags().BoolVar(&sessionEnginesJSON, "json", false, "output in JSON format")
 	sessionImportCmd.Flags().BoolVar(&sessionImportJSON, "json", false, "output in JSON format")
+	sessionExportCmd.Flags().BoolVar(&sessionExportJSON, "json", false, "output in JSON format")
+	sessionExportCmd.Flags().StringVar(&sessionExportEngineHome, "engine-home", "", "engine home to write into (default: discovered)")
 	sessionCmd.AddCommand(sessionEnginesCmd)
 	sessionCmd.AddCommand(sessionImportCmd)
+	sessionCmd.AddCommand(sessionExportCmd)
 }
 
 type engineSessionJSON struct {
@@ -140,4 +154,63 @@ func runSessionImport(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Imported %s (%d messages)\n", result.Session.ID, result.Copied)
 	return nil
+}
+
+func runSessionExport(cmd *cobra.Command, args []string) error {
+	ctx, svc, cleanup, err := sessionSetup(cmd)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	found, err := svc.sessions.Get(ctx, args[0])
+	if err != nil {
+		return fmt.Errorf("session %s: %w", args[0], err)
+	}
+	stored, err := svc.messages.List(ctx, found.ID)
+	if err != nil {
+		return fmt.Errorf("list messages for %s: %w", found.ID, err)
+	}
+
+	converted := make([]engineexport.Message, 0, len(stored))
+	for _, item := range stored {
+		converted = append(converted, engineexport.Message{
+			Role:      string(item.Role),
+			Parts:     item.Parts,
+			CreatedAt: unixTimestamp(item.CreatedAt),
+		})
+	}
+
+	home := sessionExportEngineHome
+	if home == "" {
+		home = enginebridge.Home()
+	}
+	result, err := engineexport.Export(home, found.ID, found.Title, svc.cfg.WorkingDir(), converted)
+	if err != nil {
+		return fmt.Errorf("export session: %w", err)
+	}
+
+	if sessionExportJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetEscapeHTML(false)
+		return enc.Encode(map[string]any{
+			"id":       result.EngineID,
+			"dir":      result.Dir,
+			"messages": result.Messages,
+		})
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Exported %s to %s (%d messages)\n", result.EngineID, result.Dir, result.Messages)
+	return nil
+}
+
+// unixTimestamp converts a stored unix value to time. Values below 1e12 are
+// seconds (the session store uses seconds); larger values are milliseconds.
+func unixTimestamp(value int64) time.Time {
+	if value <= 0 {
+		return time.Time{}
+	}
+	if value < 1_000_000_000_000 {
+		return time.Unix(value, 0)
+	}
+	return time.UnixMilli(value)
 }
