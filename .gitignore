@@ -66,3 +66,6 @@ credentials
 
 # vite transient config timestamps
 *.timestamp-*.mjs
+
+# local build output (produced by scripts/build-megafloyd.sh)
+bin/
