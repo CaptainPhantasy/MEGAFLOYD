@@ -279,3 +279,23 @@ Starting the binary in this repo rewrites `.floyd/commands` from that embed
 (`internal/app/app.go:175`, `internal/megafloyd/skills/install.go:148`).
 The seven `skills.json` registry entries are stale too. See
 `docs/review-notes.md`.
+
+## 2026-10-22 — Super Floyd Source, tear-down, identity wiring (BUILD)
+
+- Created `CaptainPhantasy/superfloyd-source` (private). Snapshot push `713c15a`
+  (6,095 files; `.github/workflows/cloud-ci.yml` omitted — token lacks `workflow` scope).
+  Clone-back tree hash `03ff56a4…` matches the pushed tree exactly.
+- Redacted the PostHog key in `docs/MERGE-STATUS-20261016.md` before pushing (`d5da931`).
+- Found the gap: `megafloydweb` never imported `internal/agent`; the Node agent rendered an
+  82-line `system.md` with `role_additional` hardcoded to `''` (`profile-shared.ts:147`).
+- Wired it (`1beed90`, branch `identity-wired` in the new repo): `WebRolePrompt()` composes
+  kernel + protocol + role; `BuildChildEnv` passes it as `FLOYD_ROLE_ADDITIONAL=gz1:…`;
+  `agent-core-v2` decodes it into `role_additional`.
+- Obfuscated the layers in the artifact: templates are gzip+base64 blobs
+  (`templates_blob.go`, generator `scripts/obfuscate-prompts.mjs`); binary `strings` shows
+  0 hits for `Protocol Kernel` and `SOTA Full-Stack Architect`.
+- Proof: Go tests pass; tsc 0 errors; vitest 4/4; rebuilt `dist/main.mjs` contains the decode;
+  `make build` + `verify` 14/14 + `smoke` 3/3; engine `--web` served HTTP 200.
+- Report: `docs/INSIDE-THE-SOURCE.md` (also on `docs-inside` in the new repo).
+- Not wired yet: Go tools/skills vs TS tools/skills, hooks (TS only), web UI source
+  (`code-app` repo absent), CI workflow.
