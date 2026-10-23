@@ -29,7 +29,7 @@ Phase gates declared in `PLAN.md`: P0 **done**, P1 **staged**, P2–P5 **not sta
 
 ### F1 — Telemetry key remediation is real and correctly scoped
 `floyd-go/internal/event/event.go` no longer hardcodes the PostHog project key present in the source:
-- source `floyd-v6/src/internal/event/event.go:18` → `key = "phc_4zt4VgDWLqbYnJYEwLRxFoaTL2noNrQij0C6E8k3I0V"`
+- source `floyd-v6/src/internal/event/event.go:18` → `key = "phc_REDACTED_ROTATE_ME"`
 - merged `floyd-go/internal/event/event.go:19-23` → `telemetryKeyEnv = "MEGAFLOYD_POSTHOG_KEY"`, client init reads the env var and logs `"PostHog telemetry disabled"` when unset.
 
 `.gitleaks.toml` allowlists exactly four reviewed paths (doc examples + one test fixture) and is not broad. **Impact:** positive — this is the one intentional source divergence and it is documented. Remaining caveat: the key still lives in the *source* repo `floyd-v6/src` (outside this project).
