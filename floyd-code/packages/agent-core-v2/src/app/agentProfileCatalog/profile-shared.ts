@@ -1,3 +1,5 @@
+import { gunzipSync } from 'node:zlib';
+
 import { renderPrompt } from '#/_base/utils/render-prompt';
 
 import {
@@ -195,10 +197,29 @@ export function renderSystemPromptResult(
   return {
     text: renderPrompt(SYSTEM_PROMPT_TEMPLATE, {
       ...systemPromptVars(context, options),
-      role_additional: roleAdditional,
+      role_additional: roleAdditional.length > 0 ? roleAdditional : inheritedRoleAdditional(),
     }),
     environment: environmentForTemplate(context),
   };
+}
+
+// inheritedRoleAdditional decodes the identity stack handed down by the Go
+// chassis in FLOYD_ROLE_ADDITIONAL (gz1: + gzip + base64). It is decoded once
+// per process; an absent, malformed, or unsupported value yields '' so the
+// agent still starts with its generic prompt.
+let cachedRoleAdditional: string | undefined;
+
+export function inheritedRoleAdditional(): string {
+  if (cachedRoleAdditional !== undefined) return cachedRoleAdditional;
+  cachedRoleAdditional = '';
+  const raw = process.env['FLOYD_ROLE_ADDITIONAL'];
+  if (raw === undefined || !raw.startsWith('gz1:')) return cachedRoleAdditional;
+  try {
+    cachedRoleAdditional = gunzipSync(Buffer.from(raw.slice(4), 'base64')).toString('utf8').trim();
+  } catch {
+    cachedRoleAdditional = '';
+  }
+  return cachedRoleAdditional;
 }
 
 function environmentForTemplate(context: AgentProfileContext): EnvironmentDisclosureSnapshot {

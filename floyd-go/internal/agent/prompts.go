@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
-	_ "embed"
+	"encoding/base64"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,23 +15,53 @@ import (
 	"github.com/legacy-ai/floyd/internal/config"
 )
 
-//go:embed templates/floyd-general.md.tpl
-var floydGeneralPromptTmpl []byte
+// The authored prompt layers are compiled in as gzip+base64 blobs, never as
+// plain text: internal/agent/templates/*.tpl remains the editable source, and
+// scripts/obfuscate-prompts.mjs regenerates internal/agent/templates_blob.go.
+// Decoding happens once, in memory, so a shipped binary contains no readable
+// identity text.
+var (
+	floydGeneralPromptTmpl    = mustDecodeTemplate("floyd-general.md.tpl")
+	superfloydCoderPromptTmpl = mustDecodeTemplate("superfloyd-coder.md.tpl")
+	coderPromptTmpl           = mustDecodeTemplate("coder.md.tpl")
+	taskPromptTmpl            = mustDecodeTemplate("task.md.tpl")
+	initializePromptTmpl      = mustDecodeTemplate("initialize.md.tpl")
+	floydProtocolTmpl         = mustDecodeTemplate("floyd_protocol.md.tpl")
+	protocolKernelTmpl        = mustDecodeTemplate("protocol_kernel.md.tpl")
+)
 
-//go:embed templates/superfloyd-coder.md.tpl
-var superfloydCoderPromptTmpl []byte
+// decodeTemplate inflates one encoded template. It returns nil when the name
+// is unknown or the blob is corrupt.
+func decodeTemplate(name string) []byte {
+	encoded, ok := encodedTemplates[name]
+	if !ok {
+		return nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil
+	}
+	defer zr.Close()
+	out, err := io.ReadAll(zr)
+	if err != nil {
+		return nil
+	}
+	return out
+}
 
-//go:embed templates/task.md.tpl
-var taskPromptTmpl []byte
-
-//go:embed templates/initialize.md.tpl
-var initializePromptTmpl []byte
-
-//go:embed templates/floyd_protocol.md.tpl
-var floydProtocolTmpl []byte
-
-//go:embed templates/protocol_kernel.md.tpl
-var protocolKernelTmpl []byte
+// mustDecodeTemplate fails at start-up rather than silently running without a
+// prompt layer.
+func mustDecodeTemplate(name string) []byte {
+	b := decodeTemplate(name)
+	if len(bytes.TrimSpace(b)) == 0 {
+		panic("agent: missing or corrupt embedded prompt template " + name)
+	}
+	return b
+}
 
 // promptTemplate returns the template for the given prompt name. A template
 // found in <global config dir>/prompts/<name>.md.tpl overrides the embedded
@@ -86,4 +119,23 @@ func InitializePrompt(cfg *config.ConfigStore) (string, error) {
 // FloydProtocol returns the standard FLOYD.md protocol content.
 func FloydProtocol() string {
 	return string(floydProtocolTmpl)
+}
+
+// ProtocolKernel returns the protocol kernel with the owner-mandated output
+// style directive applied.
+func ProtocolKernel() string {
+	return protocolKernelPrompt()
+}
+
+// WebRolePrompt returns the complete authored identity stack for consumers
+// outside the Go session loop — currently the Node web agent, which otherwise
+// runs with a generic system prompt and none of these layers. The order
+// matches the Go session: protocol kernel, FLOYD protocol, selected role
+// template.
+func WebRolePrompt() string {
+	return strings.Join([]string{
+		strings.TrimSpace(protocolKernelPrompt()),
+		strings.TrimSpace(FloydProtocol()),
+		strings.TrimSpace(promptTemplate("coder", roleTemplateFor(os.Getenv("FLOYD_RUNTIME_PROFILE"), os.Args[0]))),
+	}, "\n\n")
 }

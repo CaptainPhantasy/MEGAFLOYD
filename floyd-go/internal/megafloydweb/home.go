@@ -31,6 +31,7 @@ const (
 const (
 	allowedHostsEnv = "FLOYD_CODE_ALLOWED_HOSTS"
 	codeHomeEnv     = "FLOYD_CODE_HOME"
+	rolePromptEnv   = "FLOYD_ROLE_ADDITIONAL"
 	homeEnv         = "MEGAFLOYD_HOME"
 	nodeEnv         = "MEGAFLOYD_WEB_NODE"
 	scriptEnv       = "MEGAFLOYD_WEB_SCRIPT"

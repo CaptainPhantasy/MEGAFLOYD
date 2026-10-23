@@ -85,3 +85,19 @@ func entryCount(env []string, key string) int {
 	}
 	return count
 }
+
+func TestBuildChildEnvCarriesRolePrompt(t *testing.T) {
+	t.Parallel()
+
+	env := BuildChildEnv([]string{"PATH=/usr/bin"}, Tailscale{}, "")
+
+	value := LookupEnv(env, rolePromptEnv)
+	require.True(t, strings.HasPrefix(value, "gz1:"), "role prompt carries the version tag")
+	require.Equal(t, 1, entryCount(env, rolePromptEnv), "one role prompt entry")
+
+	decoded, err := decodeRolePrompt(value)
+	require.NoError(t, err)
+	require.Contains(t, decoded, "# Protocol Kernel", "kernel layer present")
+	require.Contains(t, decoded, "SUPERFLOYD", "role layer present")
+	require.True(t, len(decoded) > 5000, "all three layers, not a fragment")
+}

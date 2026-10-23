@@ -1,10 +1,20 @@
 package megafloydweb
 
-import "strings"
+import (
+	"bytes"
+	"compress/gzip"
+	"encoding/base64"
+	"errors"
+	"io"
+	"strings"
+
+	"github.com/legacy-ai/floyd/internal/agent"
+)
 
 // BuildChildEnv returns base with FLOYD_CODE_ALLOWED_HOSTS extended by the
-// Tailscale DNS name and IPv4 address, and with FLOYD_CODE_HOME pointing at
-// dataDir when the caller did not already set it.
+// Tailscale DNS name and IPv4 address, with FLOYD_CODE_HOME pointing at
+// dataDir when the caller did not already set it, and with the authored
+// identity stack in FLOYD_ROLE_ADDITIONAL.
 //
 // Existing allowlist entries are preserved and come first. The result has
 // exactly one entry per managed key, so the child does not depend on
@@ -14,7 +24,27 @@ func BuildChildEnv(base []string, info Tailscale, dataDir string) []string {
 	if dataDir != "" && strings.TrimSpace(LookupEnv(env, codeHomeEnv)) == "" {
 		env = setEnv(env, codeHomeEnv, dataDir)
 	}
-	return env
+	return withRolePrompt(env)
+}
+
+// withRolePrompt attaches the Go prompt layers to the child environment. The
+// payload is gzip+base64 with a version tag so it survives the environment
+// untouched (embedded newlines would otherwise break process spawning) and so
+// the child can reject anything it does not understand.
+func withRolePrompt(env []string) []string {
+	prompt := strings.TrimSpace(agent.WebRolePrompt())
+	if prompt == "" {
+		return env
+	}
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write([]byte(prompt)); err != nil {
+		return env
+	}
+	if err := zw.Close(); err != nil {
+		return env
+	}
+	return setEnv(env, rolePromptEnv, "gz1:"+base64.StdEncoding.EncodeToString(buf.Bytes()))
 }
 
 // setEnv removes every entry with key and appends one new entry.
@@ -87,4 +117,30 @@ func dedupeHosts(values []string) []string {
 // environment, split for command-line reuse.
 func AllowedHosts(env []string) []string {
 	return splitHostList(LookupEnv(env, allowedHostsEnv))
+}
+
+// errRolePromptVersion reports an environment value this build cannot read.
+var errRolePromptVersion = errors.New("unsupported role prompt encoding")
+
+// decodeRolePrompt reverses withRolePrompt's encoding. It exists so tests can
+// assert the wire format the Node agent depends on.
+func decodeRolePrompt(value string) (string, error) {
+	raw, ok := strings.CutPrefix(value, "gz1:")
+	if !ok {
+		return "", errRolePromptVersion
+	}
+	packed, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return "", err
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(packed))
+	if err != nil {
+		return "", err
+	}
+	defer zr.Close()
+	out, err := io.ReadAll(zr)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
