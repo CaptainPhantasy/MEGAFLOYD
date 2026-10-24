@@ -8,11 +8,94 @@ import { afterEach, expect, test } from 'vitest';
 import { WebSocket } from 'ws';
 import { transcriptResponseSchema } from '@legacy-ai/transcript';
 import { startGoServer } from '../src/goRuntime/server';
+import { GoRuntime } from '../src/goRuntime/runtime';
 import type { GoPermission } from '../src/goRuntime/client';
 import { listSkillsResponseSchema } from '../src/protocol/rest-skill';
 
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
+
+test('canonical native subagents are discovered recursively without treating branches as agents', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'megafloyd-child-sessions-'));
+  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const socket = join(dir, 'go.sock');
+  const root = { id: 'root', title: 'Conversation', created_at: 1720000000, parent_session_id: '' };
+  const branch = { ...root, id: 'branch', title: 'User branch', parent_session_id: root.id };
+  const child = { ...root, id: 'task-child', title: 'Research', parent_session_id: root.id };
+  const grandchild = { ...root, id: 'task-grandchild', title: 'Verify', parent_session_id: child.id };
+  const foreign = { ...root, id: 'foreign-child', title: 'Other conversation task', parent_session_id: 'other-root' };
+  const all = [root, branch, child, grandchild, foreign];
+  const server = createServer((req, res) => {
+    const path = new URL(req.url!, 'http://fixture').pathname;
+    const send = (value: unknown) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
+    if (path.endsWith('/sessions')) return send([root, branch]);
+    if (path.endsWith('/subagents')) return send({ items: [child, grandchild, foreign].filter((item) => item.parent_session_id === path.split('/').at(-2)) });
+    if (path.endsWith('/messages')) return send([{ id: 'child-message', session_id: grandchild.id, role: 'assistant', parts: [{ type: 'text', data: { text: 'Verified child result.' } }] }]);
+    const session = all.find((item) => path.endsWith(`/sessions/${item.id}`));
+    if (session) return send(session);
+    if (path.startsWith('/v1/clients/')) return send({});
+    res.statusCode = 404; send({ message: 'Unknown native fixture session' });
+  });
+  await new Promise<void>((resolve) => server.listen(socket, resolve));
+  cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const runtime = new GoRuntime(`unix://${socket}`, dir, join(dir, 'data'));
+  runtime.workspace = { id: 'fixture-workspace', path: dir, data_dir: join(dir, 'data') };
+  cleanups.push(() => runtime.close());
+  expect(await runtime.agents(root.id)).toMatchObject([
+    { agentId: 'main', type: 'main' },
+    { agentId: child.id, type: 'sub', parentAgentId: 'main', label: 'Research' },
+    { agentId: grandchild.id, type: 'sub', parentAgentId: child.id, label: 'Verify' },
+  ]);
+  expect(await runtime.agentSession(root.id, child.id)).toBe(child.id);
+  expect(await runtime.messages(await runtime.agentSession(root.id, grandchild.id))).toMatchObject([{ session_id: grandchild.id, parts: [{ data: { text: 'Verified child result.' } }] }]);
+  await expect(runtime.agentSession(root.id, foreign.id)).rejects.toMatchObject({ status: 404 });
+  await expect(runtime.agentSession(root.id, branch.id)).rejects.toMatchObject({ status: 404 });
+  await expect(runtime.agents('missing-root')).rejects.toMatchObject({ status: 404 });
+});
+
+test('canonical submitted goals configure before dispatching the actual constrained prompt once', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'megafloyd-submitted-goal-'));
+  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const socket = join(dir, 'go.sock');
+  const requests: Array<{ action: string; body: Record<string, unknown>; settings: Record<string, unknown> }> = [];
+  const messages: Record<string, unknown>[] = [];
+  let settings: Record<string, unknown> = {};
+  const server = createServer(async (req, res) => {
+    const path = new URL(req.url!, 'http://fixture').pathname;
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    const body = raw ? JSON.parse(raw) : {};
+    const send = (value: unknown) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
+    if (path.endsWith('/agent') && req.method === 'GET') return send({ is_ready: true, is_busy: false, model_cfg: { provider: 'fixture', model: 'plain' }, model: { id: 'plain', can_reason: false } });
+    if (path.endsWith('/sessions/existing-session')) return send({ id: 'existing-session', is_busy: false });
+    if (path.endsWith('/messages')) return send(messages);
+    if (path.endsWith('/settings') && req.method === 'POST') settings = { ...settings, ...body };
+    if (req.method === 'POST') {
+      requests.push({ action: path.split('/').at(-1)!, body, settings: { ...settings } });
+      if (path.endsWith('/agent')) messages.push({ id: body.run_id, role: 'user', parts: [{ type: 'text', data: { text: body.prompt } }] });
+      return send({});
+    }
+    if (path.startsWith('/v1/clients/')) return send({});
+    res.statusCode = 404; send({ message: 'Unexpected goal fixture request' });
+  });
+  await new Promise<void>((resolve) => server.listen(socket, resolve));
+  cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const runtime = new GoRuntime(`unix://${socket}`, dir, join(dir, 'data'));
+  runtime.workspace = { id: 'fixture-workspace', path: dir, data_dir: join(dir, 'data') };
+  cleanups.push(() => runtime.close());
+  for (const [index, goal] of [{ goal_objective: 'Inspect the project' }, { goal_control: 'resume' }].entries()) {
+    requests.length = 0;
+    await runtime.submit('existing-session', { prompt_id: `goal-prompt-${index}`, ...goal, profile: 'reviewer', disabled_tools: ['edit'], content: [{ type: 'text', text: 'Inspect only; do not edit.' }, { type: 'text', text: 'Report the evidence before any change.' }] });
+    expect(requests.map((item) => item.action)).toEqual(['settings', 'goal', 'agent']);
+    expect(requests[1]?.body).toMatchObject({ defer_start: true });
+    expect(requests[1]?.settings).toEqual({ profile: 'reviewer', disabled_tools: ['edit'] });
+    expect(requests[2]?.body).toMatchObject({ session_id: 'existing-session', run_id: `goal-prompt-${index}`, prompt: 'Inspect only; do not edit.\nReport the evidence before any change.' });
+    expect(requests.filter((item) => item.action === 'agent')).toHaveLength(1);
+  }
+  requests.length = 0;
+  await runtime.configure({ goal_control: 'resume', profile: 'reviewer' }, 'existing-session');
+  expect(requests.map((item) => item.action)).toEqual(['settings', 'goal']);
+  expect(requests[1]?.body['defer_start']).not.toBe(true);
+});
 
 test('canonical web chat continues the Go session, preserves tools, and recovers approvals on reconnect', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'megafloyd-web-'));
@@ -113,6 +196,7 @@ test('canonical web chat continues the Go session, preserves tools, and recovers
     if (path.endsWith('/agent') && req.method === 'GET') return send({ is_ready: true, is_busy: false, model_cfg: { provider: 'example', model: 'example-model' }, model: { id: 'example-model', name: 'Example Model', context_window: 4096 } });
     if (path.endsWith('/interactions')) { expect(subscribed).toBe(true); return send({ permissions, questions }); }
     if (path.endsWith('/sessions') && req.method === 'GET') return send(sessions);
+    if (path.endsWith('/subagents')) return send({ items: [] });
     if (path.endsWith(`/sessions/${sessionId}`)) return send({ ...session, attached_clients: [...currentSessions].filter(([id, selected]) => selected === sessionId && clientStreams.has(id)).length });
     if (path.endsWith('/messages')) return send(childMessages.get(path.split('/').at(-2)!) || messages);
     const child = sessions.find((item) => path.endsWith(`/sessions/${item.id}`));
@@ -263,7 +347,7 @@ test('canonical web chat continues the Go session, preserves tools, and recovers
   const flat = await listV2('page_size=50&include=git');
   expect(flat).toMatchObject({ total: 1, items: [{ id: sessionId, git: { branch: null, pull_request: null } }] });
   expect(await listV2('page_size=50&meta.archived=true&include=git')).toEqual({ total: 0, items: [], has_more: false, next_page_token: null });
-  const archive = await web.app.inject({ method: 'POST', url: '/api/v2/sessions::archive', payload: { ids: [sessionId] } });
+  const archive = await web.app.inject({ method: 'POST', url: '/api/v2/sessions:archive', payload: { ids: [sessionId] } });
   expect(archive.statusCode, archive.body).toBe(200);
   expect(archive.json().data).toMatchObject({ results: [{ id: sessionId, ok: true }], succeeded: 1, failed: 0 });
   expect((await listV2('meta.archived=true')).items[0]).toMatchObject({ id: sessionId, meta: { archived: true, archived_at: 1720000002000 } });
@@ -414,7 +498,7 @@ test('canonical web chat continues the Go session, preserves tools, and recovers
   expect(forked).toMatchObject({ id: 'forked-session', title: 'Saved branch' });
   const branched = await api(`/sessions/${sessionId}/children`, { title: 'New branch' });
   expect(branched).toMatchObject({ id: 'branched-session', title: 'New branch' });
-  expect((await api(`/sessions/${sessionId}/transcript?agent_id=branched-session`)).items).toEqual([]);
+  expect((await api('/sessions/branched-session/transcript?agent_id=main')).items).toEqual([]);
   queued.push({ id: 'queue-1', run_id: 'queued-run', prompt: 'Next step', created_at: '2026-01-01T00:00:00.000Z' });
   expect((await api(`/sessions/${sessionId}/prompts`)).queued).toMatchObject([{ prompt_id: 'queued-run', content: [{ type: 'text', text: 'Next step' }] }]);
   expect(await api(`/sessions/${sessionId}/prompts::steer`, { prompt_ids: ['queued-run'] })).toMatchObject({ steered: true });

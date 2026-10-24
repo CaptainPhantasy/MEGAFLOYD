@@ -1,4 +1,4 @@
-# MEGAFLOYD release packages
+# MegaFloyd release packages
 
 MEGAFLOYD installs one complete release: the Go engine, web server and browser assets, and the macOS desktop shell. The terminal launcher uses the Go engine inside that same desktop app. Releases are served from `https://inference.tail58d565.ts.net:8444/megafloyd`; the existing `/code` feed belongs to Floyd7.
 
@@ -37,7 +37,7 @@ The downloaded `install.sh` accepts the same `--prefix`, `--manifest`, `--archiv
 
 Installation verifies the entire archive and file inventory, installs `<prefix>/releases/<release_id>`, and switches `<prefix>/current` with an atomic rename. `<prefix>/bin/megafloyd` and `<prefix>/MEGAFLOYD.app` both select that release. Existing entry points and receipts receive dated backups. A failed activation check restores the previous links and receipt. The installed terminal command provides `megafloyd update --check` and `megafloyd update` through the same package installer.
 
-An update changes code and assets only. Existing processes retain their immutable release until the identified idle MEGAFLOYD runtime is restarted. Preserve the workspace/session when coordinating that restart. Private state stays under the existing `~/.megafloyd` and project `.megafloyd` paths; provider credentials, model settings, session databases, memories, and tasks are never included in the package or overwritten by the installer. Database recovery is a separate coordinated operation if a future release changes compatibility.
+An update changes code and assets only. Existing processes retain their immutable release until the identified idle MEGAFLOYD runtime is restarted. Preserve the workspace/session when coordinating that restart. Personal state defaults to the current account's `~/.megafloyd`, with private workspace stores under `data/workspaces/<canonical-workspace-hash>`. An explicit `--data-dir` or this account's `state/workspace-data.json` mapping can preserve a deliberately selected existing store. Provider credentials, model settings, session databases, memories, and tasks are never included in the package or overwritten by the installer. Database recovery is a separate coordinated operation if a future release changes compatibility.
 
 The focused package check uses the actual built archive and no model calls:
 
@@ -49,3 +49,5 @@ python3 scripts/verify-megafloyd-package.py \
 ```
 
 It proves successful complete installation, rejection of a corrupted archive, restoration after a controlled post-switch executable failure, preservation of unrelated files, and routing of the installed update command. The receipt records the exact archive hash tested.
+
+Current release: [installed completion](megafloyd-completion.md) and [234343 release verification](megafloyd-release-verification.md). See [the current environment and state layout](megafloyd-namespace.md), [login startup and telemetry](megafloyd-startup-telemetry-verification.md), [custom frontend preservation](megafloyd-web-branding-preservation.md), and [workstation MCP onboarding](megafloyd-mcp-onboarding.md). The installed executable was built from implementation `8c4876a3d166d9ac1ddd9952f27b2ab0bed3dfd3`; later documentation and ship-manifest metadata commits do not rebuild it.

@@ -68,7 +68,7 @@ export function registerGoRoutes(app: FastifyInstance, runtime: GoRuntime, views
       const managed = await options.mcp.route(selected.runtime, decodeURIComponent(url.pathname.slice('/api/v2'.length)), req.method, object(req.body), url.searchParams);
       if (managed) return reply.send(envelope(managed.data, req.id));
       if (req.method === 'GET' && url.pathname === '/api/v2/sessions') return reply.send(envelope(await listGoSessionsV2(runtime, views, url.searchParams, await options.workspaces.all()), req.id));
-      const batch = /^\/api\/v2\/sessions::(archive|restore|delete)$/.exec(url.pathname);
+      const batch = /^\/api\/v2\/sessions:(archive|restore|delete)$/.exec(url.pathname);
       if (req.method === 'POST' && batch) return reply.send(envelope(await batchSessions(async (id) => (await options.workspaces.session(id)).runtime, batch[1]!, object(req.body)), req.id));
       throw new GoRequestError(404, `No route for ${req.method} ${url.pathname}`);
     } catch (error) {
@@ -118,7 +118,7 @@ async function dispatch(runtime: GoRuntime, views: LocalViews, req: FastifyReque
   if (post && path === '/workspaces') return options.workspaces.register(text(body['root']), typeof body['name'] === 'string' ? body['name'] : undefined);
   if (get && path === '/sessions') {
     const [sessions, info, pending, permission] = await Promise.all([runtime.sessions(), runtime.info(), runtime.interactions(), runtime.permission()]);
-    const selected = sessions.filter((item) => !item.parent_session_id && (query.get('archived_only') === 'true' ? item.archived : query.get('include_archive') === 'true' || !item.archived) && (!query.has('busy') || item.is_busy === (query.get('busy') === 'true')) && (!query.has('exclude_empty') || query.get('exclude_empty') !== 'true' || item.message_count > 0));
+    const selected = sessions.filter((item) => (query.get('archived_only') === 'true' ? item.archived : query.get('include_archive') === 'true' || !item.archived) && (!query.has('busy') || item.is_busy === (query.get('busy') === 'true')) && (!query.has('exclude_empty') || query.get('exclude_empty') !== 'true' || item.message_count > 0));
     if (query.get('workspace_id') && query.get('workspace_id') !== workspaceKey(runtime.workspace.path)) throw new GoRequestError(404, 'Workspace is not attached to this Go runtime');
     const page = pageItems(selected.sort((a, b) => b.updated_at - a.updated_at || b.id.localeCompare(a.id)), query);
     return { items: page.items.map((item) => projectSession(item, runtime.workspace, info, projectInteractions(pending, item.id, runtime.timestamps), runtime.sequence(item.id), permission)), has_more: page.hasMore };

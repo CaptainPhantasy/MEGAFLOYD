@@ -6,7 +6,7 @@ import { expect, test } from 'vitest';
 import { GoRuntime } from '../src/goRuntime/runtime';
 import type { GoAgentInfo } from '../src/goRuntime/client';
 
-test('canonical model switching resets output and reasoning defaults without generation', async () => {
+test('canonical model switching applies destination defaults and explicit reasoning without generation', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'megafloyd-model-defaults-'));
   const socket = join(dir, 'go.sock');
   const models = [
@@ -57,7 +57,7 @@ test('canonical model switching resets output and reasoning defaults without gen
     expect(selected).toEqual({ provider: 'fixture', model: 'plain', max_tokens: 8192, reasoning_effort: '', think: false });
     expect(writes.at(-1)?.scope).toBe(1);
     await assertThinking('off');
-    await runtime.configure({ model: 'fixture/reasoning', thinking: 'medium' });
+    await runtime.configure({ model: 'fixture/reasoning' });
     expect(selected).toEqual({ provider: 'fixture', model: 'reasoning', max_tokens: 32768, reasoning_effort: 'high', think: false });
     expect(writes.at(-1)?.scope).toBe(0);
     await assertThinking('high');
@@ -68,10 +68,19 @@ test('canonical model switching resets output and reasoning defaults without gen
     expect(selected.reasoning_effort).toBe('none'); expect(selected.think).toBe(false);
     const count = writes.length;
     await runtime.configure({ thinking: await assertThinking('off') }); expect(writes).toHaveLength(count);
-    await runtime.configure({ model: 'fixture/bounded', thinking: 'high' });
+    await runtime.configure({ model: 'fixture/bounded' });
     expect(selected).toEqual({ provider: 'fixture', model: 'bounded', max_tokens: 4096, reasoning_effort: 'medium', think: false });
     await expect(runtime.configure({ thinking: 'high' })).rejects.toThrow('does not support');
-    await runtime.configure({ model: 'fixture/boolean', thinking: 'high' });
+    await runtime.configure({ model: 'fixture/reasoning', thinking: 'off' });
+    expect(selected).toEqual({ provider: 'fixture', model: 'reasoning', max_tokens: 32768, reasoning_effort: 'none', think: false });
+    await assertThinking('off');
+    await runtime.configure({ model: 'fixture/bounded', thinking: 'low' });
+    expect(selected).toEqual({ provider: 'fixture', model: 'bounded', max_tokens: 4096, reasoning_effort: 'low', think: false });
+    const writesBeforeInvalid = writes.length;
+    await expect(runtime.configure({ model: 'fixture/boolean', thinking: 'high' })).rejects.toThrow('does not support');
+    expect(writes).toHaveLength(writesBeforeInvalid);
+    expect(selected.model).toBe('bounded');
+    await runtime.configure({ model: 'fixture/boolean' });
     expect(selected).toEqual({ provider: 'fixture', model: 'boolean', max_tokens: 16384, reasoning_effort: '', think: true });
     await assertThinking('on');
     await runtime.configure({ thinking: 'off' });

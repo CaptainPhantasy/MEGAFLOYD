@@ -50,6 +50,9 @@ type Input struct {
 	CompletionCriterion string       `json:"completion_criterion,omitempty"`
 	Reason              string       `json:"reason,omitempty"`
 	Budget              *BudgetInput `json:"budget,omitempty"`
+	// DeferStart configures a goal for the caller's accompanying prompt.
+	// Standalone start/resume controls still dispatch immediately by default.
+	DeferStart bool `json:"defer_start,omitempty"`
 }
 
 func read(metadata map[string]any) (*State, error) {

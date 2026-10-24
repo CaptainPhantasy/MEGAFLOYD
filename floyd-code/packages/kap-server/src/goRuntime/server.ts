@@ -22,8 +22,13 @@ import { GoPlugins } from './plugins';
 import { GoMcp } from './mcp';
 import { GoRequestError } from './client';
 import { GoOAuth } from './oauth';
+import { classify } from '../security/bindClassify';
 
 export async function startGoServer(opts: ServerStartOptions): Promise<RunningServer> {
+  const host = opts.host === 'localhost' ? '127.0.0.1' : opts.host ?? '127.0.0.1';
+  if (classify(host) !== 'loopback') {
+    throw new Error('Shared Go web mode requires a loopback listener; use an SSH tunnel over the company mesh for remote access.');
+  }
   const env = opts.env ?? process.env;
   process.title = 'megafloyd-web';
   const goHost = env['MEGAFLOYD_GO_HOST'];
@@ -34,7 +39,6 @@ export async function startGoServer(opts: ServerStartOptions): Promise<RunningSe
   const homeDir = resolve(opts.homeDir || env['FLOYD_CODE_HOME']!);
   if (env['MEGAFLOYD_HOME'] && homeDir !== resolve(env['MEGAFLOYD_HOME'], 'web')) throw new Error('Shared Go web home must be MEGAFLOYD_HOME/web');
   try { parseToml(await readFile(join(homeDir, 'gui.toml'), 'utf8')); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  const host = opts.host ?? '127.0.0.1';
   const logger = opts.logger ?? createServerLogger({ level: opts.logLevel ?? 'warn' });
   const app = Fastify({ loggerInstance: logger, disableRequestLogging: true }) as unknown as FastifyInstance;
   app.setValidatorCompiler(() => () => true);

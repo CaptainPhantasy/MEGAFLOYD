@@ -126,30 +126,23 @@ export class GoRuntime extends EventEmitter {
 
   async agentSession(id: string, agentId = 'main'): Promise<string> {
     if (agentId === 'main') { await this.session(id); return id; }
-    const sessions = await this.sessions();
-    let item = sessions.find((session) => session.id === agentId);
-    const seen = new Set<string>();
-    while (item?.parent_session_id && !seen.has(item.id)) {
-      if (item.parent_session_id === id) return agentId;
-      seen.add(item.id);
-      item = sessions.find((session) => session.id === item!.parent_session_id);
-    }
+    if ((await this.agents(id)).some((agent) => agent.type === 'sub' && agent.agentId === agentId)) return agentId;
     throw new GoRequestError(404, 'Agent does not belong to this Go conversation');
   }
 
   async agents(id: string): Promise<AgentDescriptor[]> {
-    const sessions = await this.sessions();
+    await this.session(id);
     const ids = new Set([id]);
+    const parents = [id];
     const result: AgentDescriptor[] = [{ agentId: 'main', type: 'main' }];
-    let added: boolean;
-    do {
-      added = false;
-      for (const session of sessions) if (session.parent_session_id && ids.has(session.parent_session_id) && !ids.has(session.id)) {
+    for (const parent of parents) {
+      const children = await this.client.json<{ items: GoSession[] }>('GET', `${this.base}/sessions/${encodeURIComponent(parent)}/subagents`);
+      for (const session of children.items) if (session.parent_session_id === parent && !ids.has(session.id)) {
         ids.add(session.id);
+        parents.push(session.id);
         result.push({ agentId: session.id, type: 'sub', parentAgentId: session.parent_session_id === id ? 'main' : session.parent_session_id, label: session.title, createdAt: iso(session.created_at) });
-        added = true;
       }
-    } while (added);
+    }
     return result;
   }
 
@@ -203,7 +196,7 @@ export class GoRuntime extends EventEmitter {
     return { providers, models, info };
   }
 
-  async configure(selection: Record<string, unknown>, sessionId?: string): Promise<void> {
+  async configure(selection: Record<string, unknown>, sessionId?: string, deferGoalStart = false): Promise<void> {
     for (const [key, value] of Object.entries(selection)) {
       if (!['model', 'thinking', 'permission_mode', 'plan_mode', 'swarm_mode', 'goal_objective', 'goal_control', 'profile', 'system_prompt', 'tools', 'mcp_servers', 'disabled_tools'].includes(key) && value !== undefined && value !== false) throw new GoRequestError(400, `Unknown agent setting ${key}`);
     }
@@ -216,18 +209,19 @@ export class GoRuntime extends EventEmitter {
       if (await this.client.json<GoAgentInfo>('GET', `${this.base}/agent`).then((value) => value.is_busy)) throw new GoRequestError(409, 'Wait for the shared Go agent to finish before changing its model');
       const selected = modelChanged ? (await this.catalog()).models.find((item) => item.model === model) : undefined;
       if (modelChanged && !selected) throw new GoRequestError(400, 'Model is not configured in the Go runtime');
+      const canReason = selected ? selected.capabilities.includes('thinking') : info.model.can_reason;
+      const levels = selected ? selected.support_efforts : info.model.reasoning_levels || [];
       let next = { ...info.model_cfg };
       if (selected) {
-        const canReason = selected.capabilities.includes('thinking');
         next = { provider: selected.provider, model: selected.model.slice(selected.provider.length + 1), max_tokens: selected.max_output_size ?? 0, reasoning_effort: canReason ? selected.default_effort || '' : '', think: canReason && !selected.default_effort };
-      } else if (!info.model.can_reason) {
+      }
+      if (!canReason) {
         next.reasoning_effort = '';
         next.think = false;
       } else if (['off', 'none', 'disabled'].includes(thinking)) {
         next.reasoning_effort = 'none';
         next.think = false;
-      } else {
-        const levels = info.model.reasoning_levels || [];
+      } else if (thinking) {
         const effort = ['on', 'enabled'].includes(thinking) ? preferredModelEffort(levels) || '' : thinking;
         if (effort && !levels.includes(effort)) throw new GoRequestError(400, 'The selected model does not support this reasoning effort');
         next.reasoning_effort = effort;
@@ -244,9 +238,9 @@ export class GoRuntime extends EventEmitter {
       const sessionBase = `${this.base}/sessions/${encodeURIComponent(sessionId)}`;
       if (typeof selection['plan_mode'] === 'boolean' && selection['plan_mode'] !== (await this.client.json<{ active: boolean }>('GET', `${sessionBase}/plan`)).active) await this.client.json('POST', `${sessionBase}/plan`, { action: selection['plan_mode'] ? 'enter' : 'cancel' });
       if (typeof selection['swarm_mode'] === 'boolean' && selection['swarm_mode'] !== (await this.client.json<{ active: boolean }>('GET', `${sessionBase}/swarm`)).active) await this.client.json('POST', `${sessionBase}/swarm`, { active: selection['swarm_mode'] });
-      if (selection['goal_objective'] !== undefined || selection['goal_control'] !== undefined) await this.client.json('POST', `${sessionBase}/goal`, { objective: selection['goal_objective'], control: selection['goal_control'] });
       const settings = Object.fromEntries(Object.entries(selection).filter(([key, value]) => ['system_prompt', 'tools', 'mcp_servers', 'profile', 'disabled_tools'].includes(key) && value !== undefined));
       if (Object.keys(settings).length) await this.client.json('POST', `${sessionBase}/settings`, settings);
+      if (selection['goal_objective'] !== undefined || selection['goal_control'] !== undefined) await this.client.json('POST', `${sessionBase}/goal`, { objective: selection['goal_objective'], control: selection['goal_control'], defer_start: deferGoalStart || undefined });
     }
     this.markDirty();
   }
@@ -295,7 +289,7 @@ export class GoRuntime extends EventEmitter {
 
   private async performSubmit(id: string, submission: Record<string, unknown>, runId: string, content: unknown[]): Promise<Record<string, unknown>> {
     const session = await this.session(id);
-    await this.configure(Object.fromEntries(['model', 'thinking', 'permission_mode', 'plan_mode', 'swarm_mode', 'goal_objective', 'goal_control', 'profile', 'disabled_tools'].filter((key) => submission[key] !== undefined).map((key) => [key, submission[key]])), id);
+    await this.configure(Object.fromEntries(['model', 'thinking', 'permission_mode', 'plan_mode', 'swarm_mode', 'goal_objective', 'goal_control', 'profile', 'disabled_tools'].filter((key) => submission[key] !== undefined).map((key) => [key, submission[key]])), id, true);
     let prompt = content.map((part) => text(object(part)['text'])).join('\n');
     for (const raw of array(submission['skills'])) {
       const skill = object(raw);

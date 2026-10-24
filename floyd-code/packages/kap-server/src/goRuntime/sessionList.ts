@@ -91,7 +91,7 @@ export async function listGoSessionsV2(runtime: GoRuntime, views: LocalViews, qu
     const [sessions, info, pending] = await Promise.all([runtime.sessions(), runtime.info(), runtime.interactions()]);
     const eligible = sessions.filter((session) => {
       const updated = Date.parse(iso(session.updated_at));
-      return !session.parent_session_id && updated >= after && updated <= before && (archived === 'all' || Boolean(session.archived) === (archived === 'true'));
+      return updated >= after && updated <= before && (archived === 'all' || Boolean(session.archived) === (archived === 'true'));
     });
     const messages = await sessionMessages(runtime, eligible.filter((session) => session.message_count > 0).map((session) => session.id));
     for (const session of eligible) {

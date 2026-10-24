@@ -348814,28 +348814,22 @@ var init_runtime$2 = __esmMin((() => {
 				await this.session(id);
 				return id;
 			}
-			const sessions = await this.sessions();
-			let item = sessions.find((session) => session.id === agentId);
-			const seen = /* @__PURE__ */ new Set();
-			while (item?.parent_session_id && !seen.has(item.id)) {
-				if (item.parent_session_id === id) return agentId;
-				seen.add(item.id);
-				item = sessions.find((session) => session.id === item.parent_session_id);
-			}
+			if ((await this.agents(id)).some((agent) => agent.type === "sub" && agent.agentId === agentId)) return agentId;
 			throw new GoRequestError(404, "Agent does not belong to this Go conversation");
 		}
 		async agents(id) {
-			const sessions = await this.sessions();
+			await this.session(id);
 			const ids = new Set([id]);
+			const parents = [id];
 			const result = [{
 				agentId: "main",
 				type: "main"
 			}];
-			let added;
-			do {
-				added = false;
-				for (const session of sessions) if (session.parent_session_id && ids.has(session.parent_session_id) && !ids.has(session.id)) {
+			for (const parent of parents) {
+				const children = await this.client.json("GET", `${this.base}/sessions/${encodeURIComponent(parent)}/subagents`);
+				for (const session of children.items) if (session.parent_session_id === parent && !ids.has(session.id)) {
 					ids.add(session.id);
+					parents.push(session.id);
 					result.push({
 						agentId: session.id,
 						type: "sub",
@@ -348843,9 +348837,8 @@ var init_runtime$2 = __esmMin((() => {
 						label: session.title,
 						createdAt: iso(session.created_at)
 					});
-					added = true;
 				}
-			} while (added);
+			}
 			return result;
 		}
 		async tasks(id) {
@@ -349010,7 +349003,7 @@ var init_runtime$2 = __esmMin((() => {
 				info
 			};
 		}
-		async configure(selection, sessionId) {
+		async configure(selection, sessionId, deferGoalStart = false) {
 			for (const [key, value] of Object.entries(selection)) if (![
 				"model",
 				"thinking",
@@ -349034,17 +349027,17 @@ var init_runtime$2 = __esmMin((() => {
 				if (await this.client.json("GET", `${this.base}/agent`).then((value) => value.is_busy)) throw new GoRequestError(409, "Wait for the shared Go agent to finish before changing its model");
 				const selected = modelChanged ? (await this.catalog()).models.find((item) => item.model === model) : void 0;
 				if (modelChanged && !selected) throw new GoRequestError(400, "Model is not configured in the Go runtime");
+				const canReason = selected ? selected.capabilities.includes("thinking") : info.model.can_reason;
+				const levels = selected ? selected.support_efforts : info.model.reasoning_levels || [];
 				let next = { ...info.model_cfg };
-				if (selected) {
-					const canReason = selected.capabilities.includes("thinking");
-					next = {
-						provider: selected.provider,
-						model: selected.model.slice(selected.provider.length + 1),
-						max_tokens: selected.max_output_size ?? 0,
-						reasoning_effort: canReason ? selected.default_effort || "" : "",
-						think: canReason && !selected.default_effort
-					};
-				} else if (!info.model.can_reason) {
+				if (selected) next = {
+					provider: selected.provider,
+					model: selected.model.slice(selected.provider.length + 1),
+					max_tokens: selected.max_output_size ?? 0,
+					reasoning_effort: canReason ? selected.default_effort || "" : "",
+					think: canReason && !selected.default_effort
+				};
+				if (!canReason) {
 					next.reasoning_effort = "";
 					next.think = false;
 				} else if ([
@@ -349054,8 +349047,7 @@ var init_runtime$2 = __esmMin((() => {
 				].includes(thinking)) {
 					next.reasoning_effort = "none";
 					next.think = false;
-				} else {
-					const levels = info.model.reasoning_levels || [];
+				} else if (thinking) {
 					const effort = ["on", "enabled"].includes(thinking) ? preferredModelEffort(levels) || "" : thinking;
 					if (effort && !levels.includes(effort)) throw new GoRequestError(400, "The selected model does not support this reasoning effort");
 					next.reasoning_effort = effort;
@@ -349080,10 +349072,6 @@ var init_runtime$2 = __esmMin((() => {
 				const sessionBase = `${this.base}/sessions/${encodeURIComponent(sessionId)}`;
 				if (typeof selection["plan_mode"] === "boolean" && selection["plan_mode"] !== (await this.client.json("GET", `${sessionBase}/plan`)).active) await this.client.json("POST", `${sessionBase}/plan`, { action: selection["plan_mode"] ? "enter" : "cancel" });
 				if (typeof selection["swarm_mode"] === "boolean" && selection["swarm_mode"] !== (await this.client.json("GET", `${sessionBase}/swarm`)).active) await this.client.json("POST", `${sessionBase}/swarm`, { active: selection["swarm_mode"] });
-				if (selection["goal_objective"] !== void 0 || selection["goal_control"] !== void 0) await this.client.json("POST", `${sessionBase}/goal`, {
-					objective: selection["goal_objective"],
-					control: selection["goal_control"]
-				});
 				const settings = Object.fromEntries(Object.entries(selection).filter(([key, value]) => [
 					"system_prompt",
 					"tools",
@@ -349092,6 +349080,11 @@ var init_runtime$2 = __esmMin((() => {
 					"disabled_tools"
 				].includes(key) && value !== void 0));
 				if (Object.keys(settings).length) await this.client.json("POST", `${sessionBase}/settings`, settings);
+				if (selection["goal_objective"] !== void 0 || selection["goal_control"] !== void 0) await this.client.json("POST", `${sessionBase}/goal`, {
+					objective: selection["goal_objective"],
+					control: selection["goal_control"],
+					defer_start: deferGoalStart || void 0
+				});
 			}
 			this.markDirty();
 		}
@@ -349190,7 +349183,7 @@ var init_runtime$2 = __esmMin((() => {
 				"goal_control",
 				"profile",
 				"disabled_tools"
-			].filter((key) => submission[key] !== void 0).map((key) => [key, submission[key]])), id);
+			].filter((key) => submission[key] !== void 0).map((key) => [key, submission[key]])), id, true);
 			let prompt = content.map((part) => text(object(part)["text"])).join("\n");
 			for (const raw of array(submission["skills"])) {
 				const skill = object(raw);
@@ -352071,7 +352064,7 @@ async function listGoSessionsV2(runtime, views, query, sources = [{
 		]);
 		const eligible = sessions.filter((session) => {
 			const updated = Date.parse(iso(session.updated_at));
-			return !session.parent_session_id && updated >= after && updated <= before && (archived === "all" || Boolean(session.archived) === (archived === "true"));
+			return updated >= after && updated <= before && (archived === "all" || Boolean(session.archived) === (archived === "true"));
 		});
 		const messages = await sessionMessages(runtime, eligible.filter((session) => session.message_count > 0).map((session) => session.id));
 		for (const session of eligible) {
@@ -352926,7 +352919,7 @@ function registerGoRoutes(app, runtime, views, options) {
 			const managed = await options.mcp.route(selected.runtime, decodeURIComponent(url.pathname.slice(7)), req.method, object(req.body), url.searchParams);
 			if (managed) return reply.send(envelope(managed.data, req.id));
 			if (req.method === "GET" && url.pathname === "/api/v2/sessions") return reply.send(envelope(await listGoSessionsV2(runtime, views, url.searchParams, await options.workspaces.all()), req.id));
-			const batch = /^\/api\/v2\/sessions::(archive|restore|delete)$/.exec(url.pathname);
+			const batch = /^\/api\/v2\/sessions:(archive|restore|delete)$/.exec(url.pathname);
 			if (req.method === "POST" && batch) return reply.send(envelope(await batchSessions(async (id) => (await options.workspaces.session(id)).runtime, batch[1], object(req.body)), req.id));
 			throw new GoRequestError(404, `No route for ${req.method} ${url.pathname}`);
 		} catch (error) {
@@ -353084,7 +353077,7 @@ async function dispatch$1(runtime, views, req, options) {
 			runtime.interactions(),
 			runtime.permission()
 		]);
-		const selected = sessions.filter((item) => !item.parent_session_id && (query.get("archived_only") === "true" ? item.archived : query.get("include_archive") === "true" || !item.archived) && (!query.has("busy") || item.is_busy === (query.get("busy") === "true")) && (!query.has("exclude_empty") || query.get("exclude_empty") !== "true" || item.message_count > 0));
+		const selected = sessions.filter((item) => (query.get("archived_only") === "true" ? item.archived : query.get("include_archive") === "true" || !item.archived) && (!query.has("busy") || item.is_busy === (query.get("busy") === "true")) && (!query.has("exclude_empty") || query.get("exclude_empty") !== "true" || item.message_count > 0));
 		if (query.get("workspace_id") && query.get("workspace_id") !== workspaceKey(runtime.workspace.path)) throw new GoRequestError(404, "Workspace is not attached to this Go runtime");
 		const page = pageItems(selected.sort((a, b) => b.updated_at - a.updated_at || b.id.localeCompare(a.id)), query);
 		return {
@@ -359598,8 +359591,65 @@ var init_oauth$1 = __esmMin((() => {
 	};
 }));
 //#endregion
+//#region ../../packages/kap-server/src/security/bindClassify.ts
+function ipv4ToInt(ip) {
+	const [a, b, c, d] = ip.split(".");
+	return (Number(a) << 24 >>> 0) + (Number(b) << 16 >>> 0) + (Number(c) << 8 >>> 0) + (Number(d) >>> 0) >>> 0;
+}
+function ipv4InCidr(ip, base, prefix) {
+	const mask = prefix === 0 ? 0 : 4294967295 << 32 - prefix >>> 0;
+	return (ipv4ToInt(ip) & mask) >>> 0 === (ipv4ToInt(base) & mask) >>> 0;
+}
+function expandV6(host) {
+	const lower = host.toLowerCase();
+	if (lower.includes("::")) {
+		const halves = lower.split("::");
+		const leftRaw = halves[0] ?? "";
+		const rightRaw = halves[1] ?? "";
+		const left = leftRaw.length > 0 ? leftRaw.split(":") : [];
+		const right = rightRaw.length > 0 ? rightRaw.split(":") : [];
+		const missing = 8 - (left.length + right.length);
+		if (missing < 0) return null;
+		return [
+			...left,
+			...Array(missing).fill("0"),
+			...right
+		];
+	}
+	const parts = lower.split(":");
+	return parts.length === 8 ? parts : null;
+}
+function isLinkLocalV6$1(host) {
+	const groups = expandV6(host);
+	if (groups === null) return false;
+	const first = Number.parseInt(groups[0] ?? "", 16);
+	return first >= 65152 && first <= 65215;
+}
+function classify(host, opts) {
+	if (host === "" || host === "0.0.0.0" || host === "::") return opts?.bindClass ?? "public";
+	if (host === "localhost") return "loopback";
+	const family = net.isIP(host);
+	if (family === 4) {
+		if (host.startsWith("127.")) return "loopback";
+		if (ipv4InCidr(host, "10.0.0.0", 8)) return "lan";
+		if (ipv4InCidr(host, "172.16.0.0", 12)) return "lan";
+		if (ipv4InCidr(host, "192.168.0.0", 16)) return "lan";
+		if (ipv4InCidr(host, "169.254.0.0", 16)) return "lan";
+		return "public";
+	}
+	if (family === 6) {
+		if (host.toLowerCase() === "::1") return "loopback";
+		if (isLinkLocalV6$1(host)) return "lan";
+		return "public";
+	}
+	return "public";
+}
+var init_bindClassify = __esmMin((() => {}));
+//#endregion
 //#region ../../packages/kap-server/src/goRuntime/server.ts
 async function startGoServer(opts) {
+	const host = opts.host === "localhost" ? "127.0.0.1" : opts.host ?? "127.0.0.1";
+	if (classify(host) !== "loopback") throw new Error("Shared Go web mode requires a loopback listener; use an SSH tunnel over the company mesh for remote access.");
 	const env = opts.env ?? process.env;
 	process.title = "megafloyd-web";
 	const goHost = env["MEGAFLOYD_GO_HOST"];
@@ -359614,7 +359664,6 @@ async function startGoServer(opts) {
 	} catch (error) {
 		if (error.code !== "ENOENT") throw error;
 	}
-	const host = opts.host ?? "127.0.0.1";
 	const logger = opts.logger ?? createServerLogger({ level: opts.logLevel ?? "warn" });
 	const app = (0, import_fastify$1.default)({
 		loggerInstance: logger,
@@ -359748,6 +359797,7 @@ var init_server = __esmMin((() => {
 	init_mcp$1();
 	init_client();
 	init_oauth$1();
+	init_bindClassify();
 }));
 //#endregion
 //#region ../../packages/kap-server/src/protocol/asyncapi.ts
@@ -381486,61 +381536,6 @@ function getServerVersion() {
 }
 var cached;
 var init_version = __esmMin((() => {}));
-//#endregion
-//#region ../../packages/kap-server/src/security/bindClassify.ts
-function ipv4ToInt(ip) {
-	const [a, b, c, d] = ip.split(".");
-	return (Number(a) << 24 >>> 0) + (Number(b) << 16 >>> 0) + (Number(c) << 8 >>> 0) + (Number(d) >>> 0) >>> 0;
-}
-function ipv4InCidr(ip, base, prefix) {
-	const mask = prefix === 0 ? 0 : 4294967295 << 32 - prefix >>> 0;
-	return (ipv4ToInt(ip) & mask) >>> 0 === (ipv4ToInt(base) & mask) >>> 0;
-}
-function expandV6(host) {
-	const lower = host.toLowerCase();
-	if (lower.includes("::")) {
-		const halves = lower.split("::");
-		const leftRaw = halves[0] ?? "";
-		const rightRaw = halves[1] ?? "";
-		const left = leftRaw.length > 0 ? leftRaw.split(":") : [];
-		const right = rightRaw.length > 0 ? rightRaw.split(":") : [];
-		const missing = 8 - (left.length + right.length);
-		if (missing < 0) return null;
-		return [
-			...left,
-			...Array(missing).fill("0"),
-			...right
-		];
-	}
-	const parts = lower.split(":");
-	return parts.length === 8 ? parts : null;
-}
-function isLinkLocalV6$1(host) {
-	const groups = expandV6(host);
-	if (groups === null) return false;
-	const first = Number.parseInt(groups[0] ?? "", 16);
-	return first >= 65152 && first <= 65215;
-}
-function classify(host, opts) {
-	if (host === "" || host === "0.0.0.0" || host === "::") return opts?.bindClass ?? "public";
-	if (host === "localhost") return "loopback";
-	const family = net.isIP(host);
-	if (family === 4) {
-		if (host.startsWith("127.")) return "loopback";
-		if (ipv4InCidr(host, "10.0.0.0", 8)) return "lan";
-		if (ipv4InCidr(host, "172.16.0.0", 12)) return "lan";
-		if (ipv4InCidr(host, "192.168.0.0", 16)) return "lan";
-		if (ipv4InCidr(host, "169.254.0.0", 16)) return "lan";
-		return "public";
-	}
-	if (family === 6) {
-		if (host.toLowerCase() === "::1") return "loopback";
-		if (isLinkLocalV6$1(host)) return "lan";
-		return "public";
-	}
-	return "public";
-}
-var init_bindClassify = __esmMin((() => {}));
 //#endregion
 //#region ../../packages/kap-server/src/middleware/securityHeaders.ts
 function createSecurityHeadersHook(opts) {

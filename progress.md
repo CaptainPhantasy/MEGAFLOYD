@@ -1,11 +1,11 @@
 <!-- owner-final-release-hold-20261024:start -->
-**Owner release hold — recorded 20261024T231641Z (UTC).**
+**Release coordination — completed 2026-10-24 (UTC).**
 
-Final build, package assembly, publication, installation, and runtime activation are held. The owner requires an advance alert before final build/packaging. Resume only after the coordinating root agent confirms the required advance notice was given, the artwork is ready, and this hold is lifted. Source edits, intermediate compilation, and focused read-only checks remain allowed.
+The owner's earlier release hold was lifted after advance notice, the approved artwork checks and the explicit coordinated build instruction. Release `megafloyd-20261024T234343Z`, built from implementation commit `8c4876a3d166d9ac1ddd9952f27b2ab0bed3dfd3`, is installed, running and published. Actual icon restore, browser/desktop keyboard handoffs and the per-user startup job passed; the existing 23-message session, DeepSeek 384000/high, configuration and credential bytes were preserved.
 
-The current installed and last-verified running release is `megafloyd-20261024T230715Z` (version `2026.10.24`). Preserve its app, session history, credentials, and current DeepSeek V4.1 Flash settings (384,000 maximum output tokens, High reasoning). Do not quit/restart the app or bootstrap the staged login job during this hold.
+The owner's requirement to give advance notice before a future final build remains in force. Historical worker notes below keep their original scope; they do not override this current release record. Final documentation and the ship-manifest pointer are recorded separately from the implementation, with no executable rebuild. [PR #1](https://github.com/CaptainPhantasy/MEGAFLOYD/pull/1) remains open and review follow-up is ongoing.
+**Review follow-up:** The results below describe the installed `234343` release. PR #1 subsequently identified shared-runtime binding, subagent discovery, branch listing, batch-action, thinking-selection and goal-dispatch defects. Corrections are being verified in the review branch; an amended package and its installed acceptance remain pending. The earlier release receipts are retained with their original scope.
 
-Candidate `megafloyd-20261024T231400Z` has intermediate native/main compilation outputs only. It has not been assembled, published, installed, or activated. Concurrent wordmark/branding work must be coordinated into the final source state before any authorized final package. Existing worker notes and historical verification entries below remain intact; their earlier completion statements do not lift this later hold.
 <!-- owner-final-release-hold-20261024:end -->
 
 # progress.md — MEGAFLOYD completion session log
@@ -309,3 +309,12 @@ The seven `skills.json` registry entries are stale too. See
 - Report: `docs/INSIDE-THE-SOURCE.md` (also on `docs-inside` in the new repo).
 - Not wired yet: Go tools/skills vs TS tools/skills, hooks (TS only), web UI source
   (`code-app` repo absent), CI workflow.
+
+## 2026-10-24 — canonical combined release installed and published
+
+- Implementation `8c4876a3d166d9ac1ddd9952f27b2ab0bed3dfd3` committed 385 reviewed files and all 561 authorized frontend assets; pushed without force to `codex/megafloyd-canonical-completion`. PR #1 is open and its implementation CI passed. Automated review follow-up remains ongoing; no merge is claimed.
+- Release `megafloyd-20261024T234343Z` was built from that clean implementation commit. The installed app's actual native/web hashes and BuildID matched. Plain icon launch at 23:45:41 UTC restored the same workspace/session with all 23 messages, DeepSeek 384000/high and protected configuration/credential bytes unchanged.
+- Actual browser and desktop keyboard `/tui` checks launched the correct installed terminal and completed to idle. Only the two verification terminal clients were closed normally. The desktop and owner's browser remain available.
+- The actual per-user startup job ran at 23:48:57 UTC, found all six configured work locations ready, exited 0 and reused desktop PID89919 without a duplicate. No reboot, forced unmount, model generation or credential change was used for these final checks.
+- The complete package was published only after installed acceptance; exact HTTPS manifest/archive and installed updater checks passed. This documentation commit records the verified results and final `ship-manifest.json` pointer without rebuilding the executable.
+- Committed reports: [completion](docs/megafloyd-completion.md), [release verification](docs/megafloyd-release-verification.md), [startup and telemetry](docs/megafloyd-startup-telemetry-verification.md), [frontend preservation](docs/megafloyd-web-branding-preservation.md), [MCP onboarding](docs/megafloyd-mcp-onboarding.md), and [current namespace](docs/megafloyd-namespace.md). Full private runtime receipts remain outside Git.

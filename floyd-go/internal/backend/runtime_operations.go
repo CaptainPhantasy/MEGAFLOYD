@@ -43,15 +43,31 @@ func (b *Backend) RuntimePlan(ctx context.Context,wid,sid string,in *proto.Runti
 	return proto.RuntimePlan{Active:status.Active,ID:status.ID,Path:status.Path,Content:status.Content},err
 }
 func (b *Backend) RuntimeSwarm(ctx context.Context,wid,sid string,in *proto.RuntimeSwarmRequest)(agent.SwarmState,error){ws,err:=b.runtimeSession(ctx,wid,sid);if err!=nil{return agent.SwarmState{},err};if in==nil{return agent.RuntimeSwarm(ctx,ws.Sessions,sid)};return agent.SetRuntimeSwarm(ctx,ws.Sessions,sid,in.Active,in.MaxParallel)}
-func (b *Backend) RuntimeGoal(ctx context.Context,wid,sid string,in *goal.Input)(*goal.State,error){
-	ws,err:=b.runtimeSession(ctx,wid,sid);if err!=nil{return nil,err};if in==nil{return goal.Get(ctx,ws.Sessions,sid)}
-	value,err:=goal.Configure(ctx,ws.Sessions,sid,*in);if err!=nil{return nil,err}
-	if in.Control=="pause"||in.Control=="cancel" {if err=b.CancelSession(wid,sid);err!=nil{return nil,err}}
-	if strings.TrimSpace(in.Objective)!=""||in.Control=="resume"{
-		err=b.SendMessage(wid,proto.AgentMessage{SessionID:sid,Prompt:"Work toward the active goal: "+value.Objective,RunID:uuid.NewString()})
-		if err!=nil{_,storeErr:=goal.Configure(context.WithoutCancel(ctx),ws.Sessions,sid,goal.Input{Control:"blocked",Reason:"could not start goal: "+err.Error()});return nil,errors.Join(err,storeErr)}
+func (b *Backend) RuntimeGoal(ctx context.Context, wid, sid string, in *goal.Input) (*goal.State, error) {
+	ws, err := b.runtimeSession(ctx, wid, sid)
+	if err != nil {
+		return nil, err
 	}
-	return value,nil
+	if in == nil {
+		return goal.Get(ctx, ws.Sessions, sid)
+	}
+	value, err := goal.Configure(ctx, ws.Sessions, sid, *in)
+	if err != nil {
+		return nil, err
+	}
+	if in.Control == "pause" || in.Control == "cancel" {
+		if err = b.CancelSession(wid, sid); err != nil {
+			return nil, err
+		}
+	}
+	if !in.DeferStart && (strings.TrimSpace(in.Objective) != "" || in.Control == "resume") {
+		err = b.SendMessage(wid, proto.AgentMessage{SessionID: sid, Prompt: "Work toward the active goal: " + value.Objective, RunID: uuid.NewString()})
+		if err != nil {
+			_, storeErr := goal.Configure(context.WithoutCancel(ctx), ws.Sessions, sid, goal.Input{Control: "blocked", Reason: "could not start goal: " + err.Error()})
+			return nil, errors.Join(err, storeErr)
+		}
+	}
+	return value, nil
 }
 
 func backgroundTask(bg *shell.BackgroundShell)agent.RuntimeTask {
