@@ -7,8 +7,9 @@ binary (`platform-src/floyd-go`), the Node engine and web UI
 (`platform-src/floyd-code`, Floyd Code 2.0.2), and the owner's external
 services (auth server, MCP room).
 
-Pinned platform: `platform-src/PLATFORM-COMMIT` = `bd08789` (commit
-`bd08789417b4db307962800b74457bb4c54cd4d5`).
+Pinned platform: `platform-src/PLATFORM-COMMIT` = `1beed90` (commit
+`1beed9084ee0a571a5d3b6ce07a70025dd85f90b`). `provenance.json` now takes the
+commit from the embedded binary's Go build info, falling back to that file.
 App version: 1.0.0. Engine version: 2.0.2. Go version: stamped at build.
 
 Rules for this document:

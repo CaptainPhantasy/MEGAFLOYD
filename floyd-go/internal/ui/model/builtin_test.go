@@ -43,6 +43,8 @@ func TestRequiredHandlerMappings(t *testing.T) {
 		{"usage", handlerUsage},
 		{"goal", handlerGoal},
 		{"web", handlerWeb},
+		{"desktop", handlerDesktop},
+		{"tui", handlerTUI},
 		{"remote-control", handlerRemoteControl},
 	} {
 		require.Equal(t, tc.want, builtinHandlerFor(tc.name), tc.name)
@@ -53,7 +55,7 @@ func TestWebHandlersBuildCommandsWithoutIO(t *testing.T) {
 	t.Parallel()
 
 	ui, _ := newBuiltinTestUI(testConfigWithModel(1000))
-	for _, name := range []string{"web", "remote-control"} {
+	for _, name := range []string{"web", "desktop", "tui", "remote-control"} {
 		cmd := ui.runBuiltin(name, "", false)
 		require.NotNil(t, cmd, "/%s must return a command", name)
 	}

@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,11 +45,13 @@ import (
 	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/csync"
+	filehistory "github.com/legacy-ai/floyd/internal/history"
 	"github.com/legacy-ai/floyd/internal/hooks"
 	"github.com/legacy-ai/floyd/internal/megafloyd/style"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/plan"
 	"github.com/legacy-ai/floyd/internal/pubsub"
+	"github.com/legacy-ai/floyd/internal/runhealth"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/stringext"
 	"github.com/legacy-ai/floyd/internal/version"
@@ -63,7 +66,7 @@ const (
 	smallContextWindowRatio     = 0.2
 )
 
-var userAgent = fmt.Sprintf("Charm-Floyd/%s (https://charm.land/crush)", version.Version)
+var userAgent = fmt.Sprintf("MegaFloyd/%s (https://github.com/CaptainPhantasy/MEGAFLOYD)", version.Version)
 
 //go:embed templates/title.md
 var titlePrompt []byte
@@ -87,17 +90,19 @@ type SessionAgentCall struct {
 	// reliable completion contract (e.g. `floyd run` against a
 	// session that may be busy) MUST set it; SessionID alone is
 	// ambiguous when concurrent turns share the same session.
-	RunID            string
-	Prompt           string
-	ProviderOptions  fantasy.ProviderOptions
-	Attachments      []message.Attachment
-	MaxOutputTokens  int64
-	Temperature      *float64
-	TopP             *float64
-	TopK             *int64
-	FrequencyPenalty *float64
-	PresencePenalty  *float64
-	NonInteractive   bool
+	RunID                string
+	Prompt               string
+	SystemPromptAddition string
+	RunSettings          SessionRunSettings
+	ProviderOptions      fantasy.ProviderOptions
+	Attachments          []message.Attachment
+	MaxOutputTokens      int64
+	Temperature          *float64
+	TopP                 *float64
+	TopK                 *int64
+	FrequencyPenalty     *float64
+	PresencePenalty      *float64
+	NonInteractive       bool
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -128,6 +133,9 @@ type SessionAgentCall struct {
 	// paths treat as covered by any present mark, preserving the
 	// pre-sequence behavior.
 	acceptSeq uint64
+	queueID   string
+	queuedAt  time.Time
+	steer     bool
 	// OnAuthRefresh, when non-nil, is called by fantasy when a stream
 	// fails with an authentication error (HTTP 401). The callback should
 	// refresh credentials and return nil on success, in which case
@@ -183,17 +191,23 @@ type sessionAgent struct {
 	// date, .supercache) injected as an uncached user message ahead of the
 	// conversation. It mirrors the v5.3 two-layer prompt architecture.
 	dynamicContext *csync.Value[string]
-	tools          *csync.Slice[fantasy.AgentTool]
+	// dynamicContextFunc captures fresh environment state once for each actual run.
+	// Its result is local to that run, including queued turns.
+	dynamicContextFunc func(context.Context) string
+	tools              *csync.Slice[fantasy.AgentTool]
 
 	isSubAgent           bool
 	sessions             session.Service
 	messages             message.Service
+	history              filehistory.Service
+	workingDir           string
 	disableAutoSummarize bool
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
 	sessionStartRunner   *hooks.Runner
 	stopRunner           *hooks.Runner
+	dataDirectory        string
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
@@ -254,15 +268,20 @@ type sessionAgent struct {
 }
 
 type SessionAgentOptions struct {
-	LargeModel           Model
-	SmallModel           Model
-	SystemPromptPrefix   string
-	SystemPrompt         string
+	LargeModel         Model
+	SmallModel         Model
+	SystemPromptPrefix string
+	SystemPrompt       string
+	// DynamicContext builds the uncached environment block when a turn starts.
+	// Nil retains the value supplied through SetDynamicContext.
+	DynamicContext       func(context.Context) string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
+	History              filehistory.Service
+	WorkingDir           string
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
@@ -293,9 +312,12 @@ func NewSessionAgent(
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
 		dynamicContext:       csync.NewValue[string](""),
+		dynamicContextFunc:   opts.DynamicContext,
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
+		history:              opts.History,
+		workingDir:           opts.WorkingDir,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
@@ -303,6 +325,7 @@ func NewSessionAgent(
 		runComplete:          opts.RunComplete,
 		sessionStartRunner:   opts.SessionStartRunner,
 		stopRunner:           opts.StopRunner,
+		dataDirectory:        opts.DataDirectory,
 		planService:          opts.PlanService,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
@@ -323,8 +346,10 @@ func NewSessionAgent(
 // completed the dispatch handoff in Run. Close is the only way to
 // release the reservation and is idempotent.
 type AcceptedRun struct {
-	agent     *sessionAgent
-	sessionID string
+	runSettings *SessionRunSettings
+	settingsErr error
+	agent       *sessionAgent
+	sessionID   string
 	// seq is the monotonic accept sequence stamped by BeginAccepted. A
 	// cancel covers this handle iff seq is at or below the session's
 	// cancel mark, so a handle accepted after a cancel (higher seq) is
@@ -429,6 +454,8 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 	}
 	queued.OnComplete = nil
 	queued.Accepted = nil
+	queued.RunSettings = queued.RunSettings.clone()
+	queued = identifyQueuedCall(queued)
 	existing = append(existing, queued)
 	a.messageQueue.Set(call.SessionID, existing)
 }
@@ -464,9 +491,12 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 			}
 			continue
 		}
-		if queued.RunID != "" {
+		if queued.RunID != "" && !queued.steer {
 			keep = append(keep, queued)
 			continue
+		}
+		if queued.steer {
+			a.recordRuntimeSteer(queued)
 		}
 		fold = append(fold, queued)
 	}
@@ -592,6 +622,7 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 // observes exactly one terminal event regardless of which Run branch ends
 // the turn.
 func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgentCall, complete notify.RunComplete) {
+	a.completeRuntimeSteers(ctx, call.SessionID, complete)
 	if call.OnComplete != nil {
 		call.OnComplete(complete)
 		return
@@ -709,6 +740,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		call.Accepted.Close()
 	}
 	sessMu.Unlock()
+	a.beginRuntimePrompt(call)
 
 	defer cancel()
 	// Conditional cleanup: only remove our entry if it hasn't been replaced
@@ -717,82 +749,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// the new run's cancel and breaking cancellation.
 	defer a.activeRequests.CompareAndDelete(call.SessionID, ac)
 
-	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
-	agentTools := a.tools.Copy()
-	largeModel := a.largeModel.Get()
-	systemPrompt := a.systemPrompt.Get()
-	promptPrefix := a.systemPromptPrefix.Get()
-	var instructions strings.Builder
-
-	for _, server := range mcp.GetStates() {
-		if server.State != mcp.StateConnected {
-			continue
-		}
-		if s := server.Client.InitializeResult().Instructions; s != "" {
-			instructions.WriteString(s)
-			instructions.WriteString("\n\n")
-		}
-	}
-
-	if s := instructions.String(); s != "" {
-		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
-	}
-
-	if len(agentTools) > 0 {
-		// Add Anthropic caching to the last tool.
-		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
-	}
-
-	agent := fantasy.NewAgent(
-		largeModel.Model,
-		fantasy.WithSystemPrompt(systemPrompt),
-		fantasy.WithTools(agentTools...),
-		fantasy.WithUserAgent(userAgent),
-	)
-
-	sessionLock := sync.Mutex{}
-	currentSession, err := a.sessions.Get(ctx, call.SessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get session: %w", err)
-	}
-
-	msgs, err := a.getSessionMessages(ctx, currentSession)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get session messages: %w", err)
-	}
-
-	// Generate title from the first real (non-shell) user prompt.
-	// can take tens of seconds. Blocking Run on it delays the
-	// response to the caller. Use a detached context so the title
-	// goroutine survives Run's cancel.
-	if !hasUserTextMessage(msgs) {
-		// SessionStart hooks: only on a session's first run. They cannot
-		// block; their context is prepended to the prompt so the model
-		// sees it before its first response.
-		if a.sessionStartRunner != nil {
-			ssCtx := context.WithoutCancel(ctx)
-			ss, ssErr := a.sessionStartRunner.Run(ssCtx, hooks.EventSessionStart, call.SessionID, "", "")
-			if ssErr != nil {
-				slog.Warn("SessionStart hook execution error", "error", ssErr)
-			}
-			if ss.Context != "" {
-				call.Prompt = ss.Context + "\n\n" + call.Prompt
-			}
-		}
-		titleCtx := context.WithoutCancel(ctx)
-		go a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
-	}
-
-	// Add the user message to the session.
-	_, err = a.createUserMessage(ctx, call)
-	if err != nil {
-		return nil, err
-	}
-	userMsgCreated = true
-
-	// Add the session to the context. The run context (genCtx) and its
-	// cancel func were already created and registered under the dispatch
-	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
 	// skipRunComplete is set just before the queued-recursion path so
 	// the outer Run doesn't publish a RunComplete that would race
@@ -872,6 +828,126 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		a.publishRunComplete(ctx, call, complete)
 	}()
 
+	var err error
+	finishHealth := func(outcome error) error { return outcome }
+	healthFinished := false
+	if !a.isSubAgent && a.dataDirectory != "" {
+		finishHealth, err = runhealth.Begin(genCtx, a.dataDirectory, runhealth.TaskKey(call.SessionID, call.Prompt))
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer func() {
+		if !healthFinished {
+			retErr = finishHealth(retErr)
+		}
+	}()
+
+	goalRun, err := a.beginRuntimeGoal(ctx, call)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { retErr = errors.Join(retErr, goalRun.Finish(context.WithoutCancel(ctx), retErr)) }()
+	call.SystemPromptAddition += goalRun.Prompt()
+
+	// Apply the captured settings to this call only, including queued turns.
+	call.RunSettings = call.RunSettings.clone()
+	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
+	agentTools := call.RunSettings.filterTools(a.tools.Copy())
+	largeModel := a.largeModel.Get()
+	systemPrompt := a.systemPrompt.Get()
+	if addition := call.RunSettings.promptAddition(); addition != "" {
+		systemPrompt += "\n\n" + addition
+	}
+	if call.SystemPromptAddition != "" {
+		systemPrompt += "\n\n" + call.SystemPromptAddition
+	}
+	promptPrefix := a.systemPromptPrefix.Get()
+	dynamicContext := a.dynamicContext.Get()
+	if a.dynamicContextFunc != nil {
+		dynamicContext = a.dynamicContextFunc(genCtx)
+	}
+	var instructions strings.Builder
+
+	for name, server := range mcp.GetStatesForWorkspace(a.workingDir) {
+		if call.RunSettings.MCPServers != nil && !slices.Contains(*call.RunSettings.MCPServers, name) {
+			continue
+		}
+		if server.State != mcp.StateConnected {
+			continue
+		}
+		if s := server.Client.InitializeResult().Instructions; s != "" {
+			instructions.WriteString(s)
+			instructions.WriteString("\n\n")
+		}
+	}
+
+	if s := instructions.String(); s != "" {
+		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+	}
+
+	if len(agentTools) > 0 {
+		// Add Anthropic caching to the last tool.
+		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
+	}
+
+	agent := fantasy.NewAgent(
+		largeModel.Model,
+		fantasy.WithSystemPrompt(systemPrompt),
+		fantasy.WithTools(agentTools...),
+		fantasy.WithUserAgent(userAgent),
+	)
+
+	sessionLock := sync.Mutex{}
+	currentSession, err := a.sessions.Get(ctx, call.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+
+	msgs, err := a.getSessionMessages(ctx, currentSession)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session messages: %w", err)
+	}
+
+	// Generate title from the first real (non-shell) user prompt.
+	// can take tens of seconds. Blocking Run on it delays the
+	// response to the caller. Use a detached context so the title
+	// goroutine survives Run's cancel.
+	if !hasUserTextMessage(msgs) {
+		// SessionStart hooks: only on a session's first run. They cannot
+		// block; their context is prepended to the prompt so the model
+		// sees it before its first response.
+		if a.sessionStartRunner != nil {
+			ssCtx := context.WithoutCancel(ctx)
+			ss, ssErr := a.sessionStartRunner.Run(ssCtx, hooks.EventSessionStart, call.SessionID, "", "")
+			if ssErr != nil {
+				slog.Warn("SessionStart hook execution error", "error", ssErr)
+			}
+			if ss.Context != "" {
+				call.Prompt = ss.Context + "\n\n" + call.Prompt
+			}
+		}
+		titleCtx := context.WithoutCancel(ctx)
+		go a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
+	}
+
+	// Add the user message to the session.
+	userMessage, err := a.createUserMessage(ctx, call)
+	if err != nil {
+		return nil, err
+	}
+	userMsgCreated = true
+	a.runtimePromptUserMessage(call.SessionID, call.RunID, userMessage.ID)
+	turnHistory := a.fileHistoryRun()
+	genCtx, err = turnHistory.Begin(genCtx, call.SessionID, userMessage.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { retErr = errors.Join(retErr, turnHistory.Finish()) }()
+
+	// Add the session to the context. The run context (genCtx) and its
+	// cancel func were already created and registered under the dispatch
+	// mutex above for both the accepted and in-process paths.
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
 
 	startTime := time.Now()
@@ -908,6 +984,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		FrequencyPenalty: call.FrequencyPenalty,
 		MaxRetries:       &maxRetries,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			callContext = turnHistory.Context(callContext)
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
@@ -923,7 +1000,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 
 			// Use latest tools (updated by SetTools when MCP tools change).
-			prepared.Tools = a.tools.Copy()
+			prepared.Tools = call.RunSettings.filterTools(a.tools.Copy())
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:
@@ -943,6 +1020,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				if createErr != nil {
 					return callContext, prepared, createErr
 				}
+				callContext, createErr = turnHistory.Begin(callContext, call.SessionID, userMessage.ID)
+				if createErr != nil {
+					return callContext, prepared, createErr
+				}
 				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 			}
 
@@ -952,7 +1033,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// message after the system messages. The plan-mode reminder
 			// rides along so it is refreshed every turn without touching
 			// the cacheable system prefix.
-			dynamicCtx := a.dynamicContext.Get()
+			dynamicCtx := dynamicContext
 			if planReminder != "" {
 				if strings.TrimSpace(dynamicCtx) == "" {
 					dynamicCtx = planReminder
@@ -1176,6 +1257,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return getSessionErr
 			}
 			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
+			if err := goalRun.AddUsage(context.WithoutCancel(ctx), usage.InputTokens+usage.OutputTokens+usage.CacheCreationTokens+usage.CacheReadTokens); err != nil {
+				return err
+			}
 			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
 			extractHyperCredits(stepResult.ProviderMetadata)
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
@@ -1186,6 +1270,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
+			func(_ []fantasy.StepResult) bool { return goalRun.ShouldStop() },
 			func(_ []fantasy.StepResult) bool {
 				cw := int64(largeModel.CatwalkCfg.ContextWindow)
 				// If context window is unknown (0), skip auto-summarize
@@ -1314,7 +1399,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
-			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "floyd auth" to re-authenticate.`)
+			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "megafloyd login hyper" to re-authenticate.`)
 		} else if errors.As(err, &providerErr) {
 			if providerErr.Message == "The requested model is not supported." {
 				url := "https://github.com/settings/copilot/features"
@@ -1360,6 +1445,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			a.messageQueue.Set(call.SessionID, existing)
 		}
 	}
+
+	err = errors.Join(err, turnHistory.Finish())
+	err = errors.Join(err, goalRun.Finish(context.WithoutCancel(ctx), err))
+	err = finishHealth(err)
+	healthFinished = true
 
 	// Release active request before publishing the notification.
 	// TUI handlers poll IsSessionBusy() and only re-evaluate when a
@@ -1417,6 +1507,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// RunID does not hang.
 		a.publishCanceledQueueDrops(canceledRunIDDrops)
 	}
+	if len(queuedMessages) == 0 && err == nil && result != nil && ctx.Err() == nil {
+		if next := a.goalContinuation(ctx, goalRun, call); next != nil {
+			queuedMessages = append(queuedMessages, *next)
+			a.messageQueue.Set(call.SessionID, queuedMessages)
+		}
+	}
 	// Ralph loop: after a clean turn with nothing else queued, ask the
 	// loop whether to requeue the same prompt for another iteration.
 	// The continuation is appended here and flows through the normal
@@ -1432,6 +1528,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			slog.Info("Ralph loop: requeuing prompt", "prompt_len", len(nextPrompt), "system_msg", sysMsg)
 			queuedMessages = append(queuedMessages, SessionAgentCall{
 				SessionID:       call.SessionID,
+				RunSettings:     call.RunSettings.clone(),
 				Prompt:          fmt.Sprintf("[RALPH LOOP] %s\n\n%s", sysMsg, nextPrompt),
 				MaxOutputTokens: call.MaxOutputTokens,
 				ProviderOptions: call.ProviderOptions,
@@ -1492,6 +1589,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	mu.Unlock()
 	if outerOwesRunComplete {
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
+		if err != nil {
+			complete.Error = err.Error()
+		}
 		if currentAssistant != nil {
 			complete.MessageID = currentAssistant.ID
 			complete.Text = currentAssistant.Content().String()
@@ -1526,7 +1626,22 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
+	tiered := PrepareTieredContext(msgs)
+	aiMsgs := tieredSummaryMessages(msgs, tiered)
+	if largeModel.CatwalkCfg.SupportsImages {
+		original, _ := a.preparePrompt(msgs, true)
+		for _, msg := range original {
+			var media []fantasy.FilePart
+			for _, part := range msg.Content {
+				if file, ok := fantasy.AsMessagePart[fantasy.FilePart](part); ok {
+					media = append(media, file)
+				}
+			}
+			if len(media) > 0 {
+				aiMsgs = append(aiMsgs, fantasy.NewUserMessage("Retained media from the conversation:", media...))
+			}
+		}
+	}
 
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
@@ -1554,7 +1669,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
+	summaryPromptText := BuildTieredSummaryPrompt(formatSummaryTodos(currentSession.Todos), tiered)
+	slog.Debug("Summarizing tiered context", "session_id", sessionID, "stats", FormatSummaryStats(tiered))
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
@@ -1607,6 +1723,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
+	if preserved := preservedSummaryContent(tiered); preserved != "" {
+		summaryMessage.AppendContent(preservedSummaryHeading + preserved)
+	}
 	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
 	err = a.messages.Update(genCtx, summaryMessage)
 	if err != nil {

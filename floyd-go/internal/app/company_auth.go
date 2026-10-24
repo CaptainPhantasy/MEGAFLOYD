@@ -20,7 +20,10 @@ type companyTokenSource interface {
 // companyTokenSourceFactory builds the default token source from the
 // environment. Tests replace it.
 var companyTokenSourceFactory = func() (companyTokenSource, error) {
-	cfg := megafloydauth.FromEnv(nil)
+	cfg, err := megafloydauth.WithStoredEndpoints(megafloydauth.FromEnv(nil))
+	if err != nil {
+		return nil, err
+	}
 	if cfg.Version == "" {
 		cfg.Version = version.Version
 	}
@@ -31,21 +34,35 @@ var companyTokenSourceFactory = func() (companyTokenSource, error) {
 // Tests replace it.
 var companyAuthExecutable = os.Executable
 
-// applyCompanyAuthCredentials replaces every company-auth api_key
-// placeholder with a bearer token from the stored device login. It runs
+// applyCompanyAuthCredentials replaces selected company-auth api_key
+// placeholders with a bearer token from the stored device login. It runs
 // before the coordinator builds fantasy providers, so the placeholder never
 // reaches a provider. The refresh template installed here lets the
 // coordinator call back into `auth token` (and therefore Manager.Token's
 // lazy refresh) after a 401.
 //
-// It is a no-op when no provider uses the placeholder. A configured
-// placeholder with no usable login is an error: sending the placeholder as
-// a credential would only produce a confusing 401.
+// Unselected account providers never require a login during startup. A newly
+// selected provider is resolved by the coordinator when it is built. This keeps
+// an optional account logout from preventing another provider from starting.
 func applyCompanyAuthCredentials(ctx context.Context, store *config.ConfigStore) error {
 	if store == nil {
 		return nil
 	}
-	providerIDs := config.CompanyAuthProviderIDs(store.Config())
+	cfg := store.Config()
+	if cfg == nil {
+		return nil
+	}
+	selected := make(map[string]bool)
+	for _, model := range cfg.Models {
+		selected[model.Provider] = true
+	}
+	var providerIDs []string
+	for _, id := range config.CompanyAuthProviderIDs(cfg) {
+		if selected[id] {
+			providerIDs = append(providerIDs, id)
+		}
+	}
+
 	if len(providerIDs) == 0 {
 		return nil
 	}
@@ -56,10 +73,10 @@ func applyCompanyAuthCredentials(ctx context.Context, store *config.ConfigStore)
 	}
 	accessToken, err := source.AccessToken(ctx)
 	if err != nil {
-		return fmt.Errorf("company auth: %w; run `floyd auth login`", err)
+		return fmt.Errorf("company auth: %w; run `megafloyd auth login`", err)
 	}
 	if accessToken == "" {
-		return fmt.Errorf("company auth: stored login has no access token; run `floyd auth login`")
+		return fmt.Errorf("company auth: stored login has no access token; run `megafloyd auth login`")
 	}
 
 	executable, err := companyAuthExecutable()

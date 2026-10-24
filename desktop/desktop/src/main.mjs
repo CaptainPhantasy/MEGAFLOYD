@@ -25,11 +25,14 @@ import {
   DOCS_URL,
   HOME_DIR,
   LOGS_DIR,
+  NAVIGATION_STATE_FILE,
   PROJECT_URL,
 } from './config.mjs';
 import { Engine } from './engine.mjs';
+import { initialNavigation, normalizeNavigation, parseDesktopRoute, readNavigation, requestHandoff, sessionFromURL, sessionURL, writeNavigation } from './navigation.mjs';
 import { Log } from './log.mjs';
 import { buildMenu } from './menu.mjs';
+import { checkPackageUpdate, installPackageUpdate } from './updates.mjs';
 import { tokenFromUrl } from './meta.mjs';
 import { sanitizeState } from './redact.mjs';
 import {
@@ -59,29 +62,36 @@ app.setPath('sessionData', path.join(DESKTOP_STATE_DIR, 'session'));
 if (process.platform === 'darwin') app.setAboutPanelOptions({ applicationName: APP_NAME, applicationVersion: APP_VERSION });
 
 const log = new Log(LOGS_DIR);
-const engine = new Engine({ homeDir: HOME_DIR, workspace: DEFAULT_WORKSPACE, log });
+let savedNavigation = null;
+try {
+  savedNavigation = readNavigation(NAVIGATION_STATE_FILE);
+} catch (error) {
+  log.warn('desktop navigation read failed', { message: error?.message });
+}
+let navigation = initialNavigation(savedNavigation, process.env, DEFAULT_WORKSPACE);
+const engine = new Engine({ homeDir: HOME_DIR, workspace: navigation.cwd, goHost: navigation.host, dataDir: navigation.data_dir, log });
 
 /** @type {BrowserWindow[]} */
 const windows = new Set();
 let tray = null;
 let quitting = false;
+let desktopReady = false;
 let engineOrigin = null;
 /** @type {(() => void) | null} */
 let pendingRoute = null;
 let pendingOpenFile = null;
+let lastReadyURL = null;
+let startupSession = navigation.session_id;
 
 log.info('desktop boot', { version: APP_VERSION, home: HOME_DIR, electron: process.versions.electron });
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    const win = firstWindow();
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.show();
-      win.focus();
-    }
+  app.on('second-instance', (_event, argv) => {
+    const route = argv?.find(value => value.startsWith('megafloyd://'));
+    if (route) routeURL(route);
+    else if (desktopReady) showWindow();
   });
 
   app.on('open-url', (event, url) => {
@@ -91,7 +101,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('open-file', (event, filePath) => {
     event.preventDefault();
-    if (!app.isReady()) {
+    if (!desktopReady) {
       pendingOpenFile = filePath;
       return;
     }
@@ -100,7 +110,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(onReady).catch((error) => {
     log.error('fatal during ready', { message: error?.message });
-    dialog.showErrorBox('MEGAFLOYD failed to start', String(error?.stack ?? error));
+    dialog.showErrorBox('MegaFloyd failed to start', String(error?.stack ?? error));
     app.quit();
   });
 
@@ -113,7 +123,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   const shutdown = () => {
-    engine.forceStop();
+    engine.release();
     app.exit(0);
   };
   process.on('SIGINT', shutdown);
@@ -121,7 +131,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
-    engine.forceStop();
+    engine.release();
   });
 
   app.on('before-quit', async (event) => {
@@ -129,7 +139,9 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     quitting = true;
     log.info('desktop quitting');
-    await engine.stop();
+    const win = firstWindow();
+    if (win) await rememberWindow(win, win.webContents.getURL());
+    engine.release();
     app.exit(0);
   });
 }
@@ -152,29 +164,37 @@ async function onReady() {
   if (pendingOpenFile) {
     const dir = path.dirname(pendingOpenFile);
     pendingOpenFile = null;
-    engine.workspace = dir;
+    applyEngineNavigation({ cwd: dir });
+    startupSession = null;
   }
 
   engine.on('state', (state) => {
     broadcast('megafloyd:state', sanitizeState(state));
     refreshTray();
-    if (state.status === 'ready' && state.url) {
+    if (state.status !== 'ready') lastReadyURL = null;
+    if (state.status === 'ready' && state.url && (lastReadyURL !== state.url || pendingRoute)) {
+      lastReadyURL = state.url;
       engineOrigin = new URL(state.url).origin;
       if (pendingRoute) {
         const run = pendingRoute;
         pendingRoute = null;
         run();
+      } else if (startupSession) {
+        const id = startupSession;
+        startupSession = null;
+        void routeSession(id, 0).catch(reportHandoffError);
       } else {
         const target = firstWindow();
         if (target) loadApp(target);
       }
     }
     if (state.status === 'crashed' && Notification.isSupported()) {
-      new Notification({ title: 'MEGAFLOYD engine stopped', body: 'Restarting automatically…' }).show();
+      new Notification({ title: 'MegaFloyd engine stopped', body: 'Restarting automatically…' }).show();
     }
   });
 
   createWindow();
+  desktopReady = true;
   await engine.start();
 }
 
@@ -297,6 +317,13 @@ function installWindowPolicy(win) {
     openExternal(url);
   });
 
+  for (const event of ['did-navigate', 'did-navigate-in-page']) {
+    contents.on(event, (_event, url, isMainFrame = true) => {
+      if (isMainFrame !== false) void rememberWindow(win, url);
+    });
+  }
+  win.on('focus', () => void rememberWindow(win, contents.getURL()));
+
   contents.on('will-attach-webview', (event) => event.preventDefault());
 
   contents.on('page-title-updated', (event) => {
@@ -336,7 +363,7 @@ function loadApp(win) {
   if (state.status !== 'ready' || !state.url) return;
   engine.clearNotice();
   win.__megafloydMode = 'app';
-  win.loadURL(state.url);
+  win.loadURL(sessionURL(state.url, navigation.session_id));
 }
 
 function broadcast(channel, payload) {
@@ -388,6 +415,8 @@ function openExternal(rawUrl) {
 }
 
 function firstWindow() {
+  const focused = BrowserWindow.getFocusedWindow?.();
+  if (focused && windows.has(focused) && !focused.isDestroyed()) return focused;
   for (const win of windows) if (!win.isDestroyed()) return win;
   return null;
 }
@@ -424,36 +453,92 @@ function registerShortcuts() {
   else log.info('global shortcut registered', { accelerator: TOGGLE_ACCELERATOR });
 }
 
-/**
- * `megafloyd://` route table (spec C12).
- *   session/<id>        -> engine UI at /sessions/<id>
- *   workspace?path=<abs>-> restart the engine with that working directory
- *   settings, anything else, unknown -> app home
- */
-function routeURL(rawUrl) {
-  let url;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return;
-  }
-  if (url.protocol !== 'megafloyd:') return;
-  const win = showWindow();
-  const kind = url.hostname.toLowerCase();
-  const rest = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+function applyEngineNavigation(value) {
+  const next = normalizeNavigation({ ...value, cwd: value.cwd || engine.workspace });
+  if (!next) throw new Error('Workspace must be an absolute directory');
+  engine.workspace = next.cwd;
+  engine.goHost = next.host || null;
+  engine.dataDir = next.data_dir || null;
+  navigation = next;
+}
 
-  if (kind === 'session' && rest) {
-    void routeSession(rest.split('/')[0], 0);
+function persistNavigation(value) {
+  navigation = writeNavigation(NAVIGATION_STATE_FILE, value);
+}
+
+function reportHandoffError(error) {
+  log.warn('desktop handoff failed', { message: error?.message });
+  dialog.showErrorBox('MegaFloyd Handoff', String(error?.message ?? error));
+}
+
+function activeURL(win = firstWindow()) {
+  const state = engine.snapshot();
+  if (!state.url) return null;
+  const current = win?.webContents.getURL();
+  try {
+    if (current && new URL(current).origin === new URL(state.url).origin) return current;
+  } catch {}
+  return sessionURL(state.url, navigation.session_id);
+}
+
+async function rememberWindow(win, rawURL) {
+  const state = engine.snapshot();
+  if (!state.url || !rawURL || win.isDestroyed()) return;
+  try {
+    if (new URL(rawURL).origin !== new URL(state.url).origin) return;
+    const id = sessionFromURL(rawURL);
+    if (!id) return;
+    const revision = (win.__megafloydNavigationRevision || 0) + 1;
+    win.__megafloydNavigationRevision = revision;
+    const descriptor = await requestHandoff(state.url, id);
+    if (win.isDestroyed() || firstWindow() !== win || win.__megafloydNavigationRevision !== revision || sessionFromURL(win.webContents.getURL()) !== id) return;
+    win.__megafloydNavigation = normalizeNavigation(descriptor);
+    persistNavigation(descriptor);
+  } catch (error) {
+    log.warn('desktop navigation save failed', { message: error?.message });
+  }
+}
+
+async function handoff(target, win = firstWindow()) {
+  if (!['web', 'tui', 'desktop'].includes(target)) throw new Error('Unknown handoff target');
+  const state = engine.snapshot();
+  if (state.status !== 'ready' || !state.url) throw new Error('MegaFloyd is still starting');
+  const result = await requestHandoff(state.url, sessionFromURL(activeURL(win)), { target });
+  persistNavigation(result);
+  return result;
+}
+
+function routeURL(rawUrl) {
+  const route = parseDesktopRoute(rawUrl);
+  if (!route) return;
+  if (route.home && path.resolve(route.home) !== HOME_DIR) {
+    log.warn('deep link home differs from this instance', { home: route.home });
+    if (desktopReady) reportHandoffError(new Error('Open the MegaFloyd instance for the requested home directory.'));
     return;
   }
-  if (kind === 'workspace') {
-    const dir = url.searchParams.get('path');
-    if (dir) {
-      routeWorkspace(win, dir);
+  if (!desktopReady) {
+    if (route.cwd) applyEngineNavigation(route);
+    startupSession = null;
+    pendingRoute = () => routeURL(rawUrl);
+    return;
+  }
+  const win = showWindow();
+  const state = engine.snapshot();
+  const currentHost = state.runtime?.host || engine.goHost;
+  if (route.kind === 'session') {
+    if (route.cwd && route.host && currentHost && route.host !== currentHost) {
+      applyEngineNavigation(route);
+      pendingRoute = () => void routeSession(route.session_id, 0).catch(reportHandoffError);
+      void engine.switchWorkspace().catch(reportHandoffError);
       return;
     }
+    void routeSession(route.session_id, 0).catch(reportHandoffError);
+    return;
   }
-  log.info('deep link fell back to home', { url: rawUrl });
+  if (route.kind === 'workspace' && route.cwd) {
+    routeWorkspace(win, route.cwd, route);
+    return;
+  }
   openHome(win);
 }
 
@@ -469,8 +554,7 @@ async function routeSession(id, attempt) {
     return;
   }
   const win = showWindow();
-  const target = new URL(state.url);
-  target.pathname = `/sessions/${encodeURIComponent(id)}`;
+  const target = sessionURL(state.url, id);
 
   // Spec C6: resolve against both stores before navigating. A session the
   // web engine does not own must not open as an empty transcript.
@@ -490,7 +574,8 @@ async function routeSession(id, attempt) {
     engine.clearNotice();
     win.__megafloydMode = 'app';
     log.info('deep link session', { session: id, owner });
-    void win.loadURL(target.toString());
+    void win.loadURL(target);
+    await rememberWindow(win, target);
     return;
   }
 
@@ -506,16 +591,32 @@ async function routeSession(id, attempt) {
   openHome(win);
 }
 
-function routeWorkspace(win, dir) {
+function routeWorkspace(win, dir, context = {}) {
   if (typeof dir !== 'string' || !path.isAbsolute(dir)) {
     openHome(win);
     return;
   }
-  engine.workspace = dir;
-  log.info('deep link workspace', { dir });
+  const state = engine.snapshot();
+  const next = { cwd: dir, host: context.host || state.runtime?.host || engine.goHost, data_dir: context.data_dir };
+  const sameWorkspace = state.status === 'ready' && path.resolve(state.runtime?.cwd || engine.workspace) === path.resolve(dir) && (!next.host || next.host === state.runtime?.host) && (!next.data_dir || next.data_dir === state.runtime?.data_dir);
+  applyEngineNavigation(next);
+  persistNavigation(next);
+  startupSession = null;
+  log.info('desktop workspace', { dir });
   win.show();
   win.focus();
-  void engine.restart();
+  if (sameWorkspace) loadApp(win);
+  else void engine.switchWorkspace().catch(reportHandoffError);
+}
+
+function canonicalAppPath() {
+  const bundled = path.resolve(process.resourcesPath, '..', '..');
+  const release = path.dirname(bundled);
+  if (path.basename(path.dirname(release)) === 'releases') {
+    const stable = path.join(path.dirname(path.dirname(release)), 'MEGAFLOYD.app');
+    try { if (fs.realpathSync(stable) === fs.realpathSync(bundled)) return stable; } catch {}
+  }
+  return bundled;
 }
 
 function readProvenance() {
@@ -526,8 +627,40 @@ function readProvenance() {
   }
 }
 
+let updateCheckRunning = false;
+
+async function checkForUpdates() {
+  if (updateCheckRunning) return;
+  updateCheckRunning = true;
+  try {
+    const result = await checkPackageUpdate(process.resourcesPath);
+    if (!result.update_available) {
+      await dialog.showMessageBox({ type: 'info', title: 'MegaFloyd Updates', message: 'MegaFloyd is up to date.' });
+      return;
+    }
+    const choice = await dialog.showMessageBox({
+      type: 'info', title: 'MegaFloyd Updates',
+      message: 'A complete MegaFloyd update is available.',
+      detail: `${result.available}\nYour current session continues while the update installs.`,
+      buttons: ['Install Update', 'Later'], defaultId: 0, cancelId: 1,
+    });
+    if (choice.response !== 0) return;
+    await installPackageUpdate(process.resourcesPath);
+    await dialog.showMessageBox({
+      type: 'info', title: 'MegaFloyd Updated',
+      message: 'The complete update is installed.',
+      detail: 'Finish your current work, then quit and reopen MegaFloyd to use it.',
+    });
+  } catch (error) {
+    dialog.showErrorBox('MegaFloyd Update', String(error?.message ?? error));
+  } finally {
+    updateCheckRunning = false;
+  }
+}
+
 function createMenu() {
   const menu = buildMenu(Menu, {
+    checkUpdates: () => void checkForUpdates(),
     showStatus: () => {
       const win = firstWindow() ?? createWindow();
       win.__megafloydMode = 'home';
@@ -545,27 +678,16 @@ function createMenu() {
         properties: ['openDirectory', 'createDirectory'],
       });
       if (result.canceled || result.filePaths.length === 0) return;
-      clipboard.writeText(result.filePaths[0]);
-      if (Notification.isSupported()) {
-        new Notification({ title: 'Workspace path copied', body: result.filePaths[0] }).show();
-      }
-      const target = firstWindow();
-      target?.show();
-      target?.focus();
+      routeWorkspace(win ?? showWindow(), result.filePaths[0]);
     },
     copyUrl: () => {
-      const state = engine.snapshot();
-      if (state.url) {
-        clipboard.writeText(state.url);
-        if (Notification.isSupported()) {
-          new Notification({ title: 'Local URL copied', body: state.url }).show();
-        }
-      }
+      const url = activeURL();
+      if (url) clipboard.writeText(url);
     },
-    openInBrowser: () => {
-      const state = engine.snapshot();
-      if (state.url) void shell.openExternal(state.url);
-    },
+    openInBrowser: () => void handoff('web').catch(reportHandoffError),
+    openInTerminal: () => void handoff('tui').catch(reportHandoffError),
+    driveAccessSettings: () => void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'),
+    revealApp: () => { const file = canonicalAppPath(); clipboard.writeText(file); shell.showItemInFolder(file); },
     reload: () => firstWindow()?.webContents.reload(),
     openLogs: () => void shell.openPath(LOGS_DIR),
     revealHome: () => void shell.openPath(HOME_DIR),
@@ -601,7 +723,7 @@ function refreshTray() {
       { label: APP_NAME, enabled: false },
       { label, enabled: false },
       { type: 'separator' },
-      { label: 'Show MEGAFLOYD', click: () => { const win = firstWindow() ?? createWindow(); win.show(); win.focus(); } },
+      { label: 'Show MegaFloyd', click: () => { const win = firstWindow() ?? createWindow(); win.show(); win.focus(); } },
       { label: 'Restart Engine', click: () => void engine.restart() },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() },
@@ -711,7 +833,14 @@ ipcMain.handle('megafloyd:choose-workspace', async (event) => {
     title: 'Open workspace',
     properties: ['openDirectory', 'createDirectory'],
   });
-  return result.canceled ? null : result.filePaths[0] ?? null;
+  const dir = result.canceled ? null : result.filePaths[0] ?? null;
+  if (dir) routeWorkspace(win, dir);
+  return dir;
+});
+
+ipcMain.handle('megafloyd:handoff', async (event, target) => {
+  if (!trusted(event)) return null;
+  return handoff(target, BrowserWindow.fromWebContents(event.sender));
 });
 
 /**

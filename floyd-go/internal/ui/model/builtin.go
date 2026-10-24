@@ -35,7 +35,7 @@ import (
 )
 
 // feedbackURL is the documented issue tracker for this fork (see root.go).
-const feedbackURL = "https://github.com/legacy-ai/floyd/issues/new?template=bug.yml"
+const feedbackURL = "https://github.com/CaptainPhantasy/MEGAFLOYD/issues/new"
 
 // builtinHandlerID identifies the concrete handler behind a registered
 // slash command. Tests enumerate commands.Builtins and assert every name
@@ -84,6 +84,8 @@ const (
 	handlerReload
 	handlerReloadTUI
 	handlerWeb
+	handlerDesktop
+	handlerTUI
 	handlerRemoteControl
 )
 
@@ -170,6 +172,10 @@ func builtinHandlerFor(name string) builtinHandlerID {
 		return handlerReloadTUI
 	case "web":
 		return handlerWeb
+	case "desktop":
+		return handlerDesktop
+	case "tui":
+		return handlerTUI
 	case "remote-control":
 		return handlerRemoteControl
 	default:
@@ -381,7 +387,7 @@ func (m *UI) runBuiltin(name, args string, fromPalette bool) tea.Cmd {
 
 	case handlerVersion:
 		return m.showInfo("Version", fmt.Sprintf(
-			"Floyd %s\nCommit: %s\nBuild: %s",
+			"MegaFloyd %s\nCommit: %s\nBuild: %s",
 			version.Version, version.Commit, version.BuildID,
 		))
 
@@ -408,7 +414,13 @@ func (m *UI) runBuiltin(name, args string, fromPalette bool) tea.Cmd {
 		}
 
 	case handlerWeb:
-		return m.runWebHandoff(false)
+		return m.runInterfaceHandoff("web")
+	case handlerDesktop:
+		return m.runInterfaceHandoff("desktop")
+	case handlerTUI:
+		return func() tea.Msg {
+			return builtinResultMsg{Title: "Terminal", Body: "This terminal is already attached to the current workspace and session."}
+		}
 
 	case handlerRemoteControl:
 		return m.runWebHandoff(true)
@@ -679,7 +691,7 @@ func buildStatusReport(
 	queued int,
 ) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Floyd %s (commit %s)\n", version.Version, version.Commit)
+	fmt.Fprintf(&b, "MegaFloyd %s (commit %s)\n", version.Version, version.Commit)
 
 	sessionID, title := "(none)", "(none)"
 	if sess != nil {
@@ -825,10 +837,10 @@ func mustJSON(v any) []byte {
 }
 
 func resolveExportPath(arg, workDir, sessionID, ext string) string {
-	name := fmt.Sprintf("floyd-export-%s-%s.%s",
+	name := fmt.Sprintf("megafloyd-export-%s-%s.%s",
 		shortID(sessionID), time.Now().Format("20060102-150405"), ext)
 	if ext == "zip" {
-		name = fmt.Sprintf("floyd-debug-%s-%s.zip",
+		name = fmt.Sprintf("megafloyd-debug-%s-%s.zip",
 			shortID(sessionID), time.Now().Format("20060102-150405"))
 	}
 	if arg = strings.TrimSpace(arg); arg != "" {
@@ -1524,6 +1536,26 @@ func (m *UI) reapplyTUI() {
 	m.updateLayoutAndSize()
 }
 
+// runInterfaceHandoff opens another client through the authoritative server.
+func (m *UI) runInterfaceHandoff(target string) tea.Cmd {
+	current := m.com.Workspace
+	sid := ""
+	if m.session != nil {
+		sid = m.session.ID
+	}
+	return func() tea.Msg {
+		result, err := workspace.Handoff(context.Background(), current, sid, target)
+		if err != nil {
+			return builtinResultMsg{Err: err}
+		}
+		body := "Opened " + target + " for the current workspace and session."
+		if result.WebURL != "" {
+			body += "\n" + result.WebURL
+		}
+		return builtinResultMsg{Title: "MegaFloyd", Body: body}
+	}
+}
+
 // runWebHandoff starts or reuses the Node web server and reports the URL
 // that opens the current workspace. The engine owns the port, executable,
 // bundle, and environment defaults; the UI supplies the workspace and the
@@ -1531,7 +1563,9 @@ func (m *UI) reapplyTUI() {
 // Update.
 func (m *UI) runWebHandoff(remote bool) tea.Cmd {
 	opts := megafloydweb.Options{
-		CWD: m.com.Workspace.WorkingDir(),
+		CWD:       m.com.Workspace.WorkingDir(),
+		GoHost:    workspace.ServerHost(m.com.Workspace),
+		GoDataDir: m.com.Workspace.Config().Options.DataDirectory,
 	}
 	if m.session != nil {
 		opts.SessionID = m.session.ID

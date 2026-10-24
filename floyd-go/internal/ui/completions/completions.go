@@ -2,6 +2,7 @@ package completions
 
 import (
 	"cmp"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -418,7 +419,11 @@ func loadFiles(depth, limit int) []FileCompletionValue {
 
 func loadMCPResources() []ResourceCompletionValue {
 	var resources []ResourceCompletionValue
-	for mcpName, mcpResources := range mcp.Resources() {
+	directory, err := os.Getwd()
+	if err != nil {
+		return resources
+	}
+	for mcpName, mcpResources := range mcp.ResourcesForWorkspace(directory) {
 		for _, r := range mcpResources {
 			resources = append(resources, ResourceCompletionValue{
 				MCPName:  mcpName,

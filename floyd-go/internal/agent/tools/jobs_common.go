@@ -7,6 +7,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/legacy-ai/floyd/internal/jobs"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"github.com/legacy-ai/floyd/internal/permission"
 )
 
@@ -15,7 +16,7 @@ func jobsDataDirectory(dataDir, workingDir string) string {
 	if dataDir != "" {
 		return dataDir
 	}
-	return filepath.Join(workingDir, ".floyd")
+	return filepath.Join(workingDir, megafloyd.ProjectDirName())
 }
 
 // requestJobsPermission routes a job-record mutation through the same

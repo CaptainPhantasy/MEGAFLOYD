@@ -3,12 +3,12 @@ package session
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
-
 	"github.com/legacy-ai/floyd/internal/db"
+	"github.com/legacy-ai/floyd/internal/history"
 	"github.com/legacy-ai/floyd/internal/pubsub"
 )
 
@@ -19,16 +19,11 @@ type ForkResult struct {
 	ForkMarkerID string
 }
 
-// Forker is implemented by session services that support forking a
-// session's history into a new session. It is intentionally not part of
-// the Service interface because several Service implementations (client
-// workspaces, test doubles) cannot fork locally.
+// Forker is optional because remote workspaces cannot fork their DB locally.
 type Forker interface {
-	Fork(ctx context.Context, sourceSessionID string, upToMessage int) (*ForkResult, error)
+	Fork(context.Context, string, int) (*ForkResult, error)
 }
 
-// Fork forks the given session through svc when the underlying service
-// supports forking.
 func Fork(ctx context.Context, svc Service, sourceSessionID string, upToMessage int) (*ForkResult, error) {
 	forker, ok := svc.(Forker)
 	if !ok {
@@ -37,111 +32,106 @@ func Fork(ctx context.Context, svc Service, sourceSessionID string, upToMessage 
 	return forker.Fork(ctx, sourceSessionID, upToMessage)
 }
 
-// Fork creates a new session that is a copy of the source session up to
-// (and including) the specified message index (0-based). The new session
-// inherits the source session as its parent and receives a system message
-// marking the fork point.
-//
-// upToMessage of -1 means copy all messages. upToMessage of 0 means
-// copy only the system messages (no user messages).
-func (s *service) Fork(ctx context.Context, sourceSessionID string, upToMessage int) (*ForkResult, error) {
-	// 1. Validate the source session exists
-	sourceDB, err := s.q.GetSessionByID(ctx, sourceSessionID)
-	if err != nil {
-		return nil, fmt.Errorf("source session %s: %w", sourceSessionID, err)
-	}
-
-	// 2. Get all messages from the source session
-	sourceMsgs, err := s.q.ListMessagesBySession(ctx, sourceSessionID)
-	if err != nil {
-		return nil, fmt.Errorf("listing messages for session %s: %w", sourceSessionID, err)
-	}
-
-	// 3. Determine which messages to copy
-	msgsToCopy := sourceMsgs
-	if upToMessage >= 0 && upToMessage < len(sourceMsgs) {
-		msgsToCopy = sourceMsgs[:upToMessage+1]
-	} else if upToMessage >= 0 && upToMessage >= len(sourceMsgs) {
-		// upToMessage exceeds available messages — copy all
-		msgsToCopy = sourceMsgs
-	}
-
-	// 4. Create the forked session in a transaction
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin fork transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	qtx := s.q.WithTx(tx)
-
-	newID := uuid.New().String()
-	forkTitle := fmt.Sprintf("Fork of %s", sourceDB.Title)
-
-	dbSession, err := qtx.CreateSession(ctx, db.CreateSessionParams{
-		ID:              newID,
-		ParentSessionID: sql.NullString{String: sourceSessionID, Valid: true},
-		Title:           forkTitle,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("creating fork session: %w", err)
-	}
-
-	// 5. Copy messages
-	for _, msg := range msgsToCopy {
-		_, err := qtx.CreateMessage(ctx, db.CreateMessageParams{
-			ID:               uuid.New().String(),
-			SessionID:        newID,
-			Role:             msg.Role,
-			Parts:            msg.Parts,
-			Model:            msg.Model,
-			Provider:         msg.Provider,
-			IsSummaryMessage: msg.IsSummaryMessage,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("copying message %s to fork: %w", msg.ID, err)
-		}
-	}
-
-	// 6. Insert a fork marker system message
-	markerContent := fmt.Sprintf(
-		"[Fork] This session was forked from session %s at message index %d. Original title: %s",
-		sourceSessionID, len(msgsToCopy)-1, sourceDB.Title,
-	)
-	markerParts := marshalForkMarker(markerContent)
-
-	markerMsg, err := qtx.CreateMessage(ctx, db.CreateMessageParams{
-		ID:               uuid.New().String(),
-		SessionID:        newID,
-		Role:             "system",
-		Parts:            markerParts,
-		IsSummaryMessage: 0,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("inserting fork marker: %w", err)
-	}
-
-	// 7. Commit
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("committing fork transaction: %w", err)
-	}
-
-	// 8. Publish event
-	session := s.fromDBItem(dbSession)
-	s.Publish(pubsub.CreatedEvent, session)
-
-	return &ForkResult{
-		NewSession:   session,
-		CopiedCount:  len(msgsToCopy),
-		ForkMarkerID: markerMsg.ID,
-	}, nil
+// Fork copies through the inclusive zero-based message index; -1 copies all.
+func (s *service) Fork(ctx context.Context, sourceID string, upToMessage int) (*ForkResult, error) {
+	return s.clone(ctx, sourceID, upToMessage, nil, nil, false)
 }
 
-// marshalForkMarker creates a JSON parts array containing the fork marker
-// as a text part. The format matches the message Parts column schema.
+// Clone creates either a full transcript fork or an empty child branch.
+func (s *service) Clone(ctx context.Context, sourceID string, title *string, metadata map[string]any, branch bool) (Session, error) {
+	result, err := s.clone(ctx, sourceID, -1, title, metadata, branch)
+	if err != nil {
+		return Session{}, err
+	}
+	return result.NewSession, nil
+}
+
+func (s *service) clone(ctx context.Context, sourceID string, upToMessage int, title *string, patch map[string]any, branch bool) (*ForkResult, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	qtx := s.q.WithTx(tx)
+	source, err := qtx.GetSessionByID(ctx, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("source session: %w", err)
+	}
+	metadata := make(map[string]any)
+	if !branch {
+		if err := json.Unmarshal([]byte(source.Metadata), &metadata); err != nil {
+			return nil, err
+		}
+	}
+	for key, value := range patch {
+		metadata[key] = value
+	}
+	// Goals own execution IDs and consumed budgets; a new conversation does not inherit an active run.
+	delete(metadata, "goal")
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, err
+	}
+	name := "Fork of " + source.Title
+	if branch {
+		name = "Branch of " + source.Title
+	}
+	if title != nil {
+		name = *title
+	}
+	newID := uuid.NewString()
+	if _, err := qtx.CreateSession(ctx, db.CreateSessionParams{ID: newID, ParentSessionID: sql.NullString{String: sourceID, Valid: true}, Title: name}); err != nil {
+		return nil, err
+	}
+	if err := qtx.MarkSessionBranch(ctx, db.MarkSessionBranchParams{ID: newID, Metadata: string(encoded)}); err != nil {
+		return nil, err
+	}
+	result := &ForkResult{}
+	if !branch {
+		messages, err := qtx.ListMessagesBySession(ctx, sourceID)
+		if err != nil {
+			return nil, err
+		}
+		if upToMessage >= 0 && upToMessage < len(messages) {
+			messages = messages[:upToMessage+1]
+		}
+		ids := make(map[string]string, len(messages))
+		for _, msg := range messages {
+			id := uuid.NewString()
+			_, err := qtx.CopySessionMessage(ctx, db.CopySessionMessageParams{ID: id, SessionID: newID, Role: msg.Role, Parts: msg.Parts, Model: msg.Model, Provider: msg.Provider, IsSummaryMessage: msg.IsSummaryMessage, CreatedAt: msg.CreatedAt, UpdatedAt: msg.UpdatedAt, FinishedAt: msg.FinishedAt})
+			if err != nil {
+				return nil, err
+			}
+			ids[msg.ID] = id
+		}
+		if err := history.CloneTurns(ctx, qtx, sourceID, newID, ids); err != nil {
+			return nil, err
+		}
+		summaryID := ids[source.SummaryMessageID.String]
+		if _, err := qtx.UpdateSession(ctx, db.UpdateSessionParams{ID: newID, Title: name, SummaryMessageID: sql.NullString{String: summaryID, Valid: summaryID != ""}, Todos: source.Todos}); err != nil {
+			return nil, err
+		}
+		marker := fmt.Sprintf("[Fork] This session was forked from session %s at message index %d. Original title: %s", sourceID, len(messages)-1, source.Title)
+		saved, err := qtx.CreateMessage(ctx, db.CreateMessageParams{ID: uuid.NewString(), SessionID: newID, Role: "system", Parts: marshalForkMarker(marker)})
+		if err != nil {
+			return nil, err
+		}
+		result.CopiedCount = len(messages)
+		result.ForkMarkerID = saved.ID
+	}
+	stored, err := qtx.GetSessionByID(ctx, newID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	result.NewSession = s.fromDBItem(stored)
+	s.Publish(pubsub.CreatedEvent, result.NewSession)
+	return result, nil
+}
+
 func marshalForkMarker(content string) string {
-	escaped := strings.ReplaceAll(content, `\`, `\\`)
-	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	escaped = strings.ReplaceAll(escaped, "\n", `\n`)
-	return fmt.Sprintf(`[{"type":"text","text":"%s"}]`, escaped)
+	encoded, _ := json.Marshal([]map[string]any{{"type": "text", "data": map[string]string{"text": content}}})
+	return string(encoded)
 }

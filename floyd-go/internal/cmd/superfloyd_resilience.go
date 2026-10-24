@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"hash/crc32"
 	"os"
@@ -13,11 +12,11 @@ import (
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/db"
 	"github.com/legacy-ai/floyd/internal/paranoia"
+	"github.com/legacy-ai/floyd/internal/runhealth"
 	"github.com/legacy-ai/floyd/internal/ui/model"
 )
 
-// runtimeProfile distinguishes the plain Floyd binary lane from the
-// SuperFloyd resilience lane.
+// runtimeProfile distinguishes canonical MEGAFLOYD from the legacy lanes.
 //
 // TODO(port-wave4): the donor exposes this through
 // config.RuntimeProfile with an options.runtime_profile config surface;
@@ -27,6 +26,7 @@ type runtimeProfile string
 
 const (
 	runtimeProfileFloyd      runtimeProfile = "floyd"
+	runtimeProfileMegafloyd  runtimeProfile = "megafloyd"
 	runtimeProfileSuperFloyd runtimeProfile = "superfloyd"
 )
 
@@ -34,6 +34,8 @@ const (
 // lanes, defaulting to the plain Floyd lane.
 func normalizeRuntimeProfile(v string) runtimeProfile {
 	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "megafloyd":
+		return runtimeProfileMegafloyd
 	case "superfloyd", "beast", "balanced", "balance", "safe", "sf":
 		return runtimeProfileSuperFloyd
 	default:
@@ -49,16 +51,9 @@ type runQualityGateStatus struct {
 	Violations []string
 }
 
-type runtimeFailure struct {
-	Hash      string `json:"hash"`
-	Message   string `json:"message"`
-	Occurred  int64  `json:"occurred"`
-	ExitClass string `json:"exit_class"`
-}
+type runtimeFailure = runhealth.Failure
 
-type runtimeHealthState struct {
-	Failures []runtimeFailure `json:"failures"`
-}
+type runtimeHealthState = runhealth.State
 
 func qualityGatesEnabled() bool {
 	v := strings.TrimSpace(strings.ToLower(os.Getenv("SUPERFLOYD_QUALITY_GATES")))
@@ -94,10 +89,13 @@ func autoStabilizeEnabled() bool {
 
 func isSuperFloydBinary() bool {
 	name := strings.ToLower(strings.TrimSpace(filepathBase(os.Args[0])))
-	return profileFromBinaryName(name) == runtimeProfileSuperFloyd
+	return resolveRuntimeProfile(name) == runtimeProfileSuperFloyd
 }
 
 func profileFromBinaryName(name string) runtimeProfile {
+	if strings.Contains(strings.ToLower(strings.TrimSpace(name)), "megafloyd") {
+		return runtimeProfileMegafloyd
+	}
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "beast", "balanced", "balance", "safe", "sf":
 		return runtimeProfileSuperFloyd
@@ -389,82 +387,8 @@ func shouldStabilizeFromBenchmarks(ctx context.Context, cfg *config.ConfigStore)
 	return false
 }
 
-func enforceRetryBudget(dataDir string) error {
-	if !isSuperFloydBinary() || !degradationControlsEnabled() {
-		return nil
-	}
-	state, _ := loadRuntimeHealth(dataDir)
-	now := time.Now().Unix()
-	state.Failures = keepRecentFailures(state.Failures, now-3600)
-	if len(state.Failures) >= 6 {
-		return fmt.Errorf("retry budget exceeded: %d failures in last hour; stabilize before retrying", len(state.Failures))
-	}
-	return nil
-}
-
-func maybeTripCircuitBreaker(dataDir string, runErr error) error {
-	if runErr == nil || !isSuperFloydBinary() || !degradationControlsEnabled() {
-		return runErr
-	}
-
-	state, _ := loadRuntimeHealth(dataDir)
-	now := time.Now().Unix()
-	state.Failures = keepRecentFailures(state.Failures, now-600)
-
-	msg := strings.TrimSpace(runErr.Error())
-	hash := failureHash(msg)
-	state.Failures = append(state.Failures, runtimeFailure{
-		Hash:      hash,
-		Message:   msg,
-		Occurred:  now,
-		ExitClass: "run",
-	})
-	_ = saveRuntimeHealth(dataDir, state)
-
-	hits := 0
-	for _, f := range state.Failures {
-		if f.Hash == hash {
-			hits++
-		}
-	}
-	if hits >= 2 {
-		return fmt.Errorf("circuit breaker engaged for repeated run failure (%s). gather new observation before retry", hash)
-	}
-	return runErr
-}
-
-func recordRunSuccess(dataDir string) {
-	state, _ := loadRuntimeHealth(dataDir)
-	state.Failures = nil
-	_ = saveRuntimeHealth(dataDir, state)
-}
-
 func loadRuntimeHealth(dataDir string) (runtimeHealthState, error) {
-	path := filepath.Join(dataDir, "runtime_health.json")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return runtimeHealthState{}, nil
-		}
-		return runtimeHealthState{}, err
-	}
-	var st runtimeHealthState
-	if err := json.Unmarshal(b, &st); err != nil {
-		return runtimeHealthState{}, nil
-	}
-	return st, nil
-}
-
-func saveRuntimeHealth(dataDir string, st runtimeHealthState) error {
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return err
-	}
-	path := filepath.Join(dataDir, "runtime_health.json")
-	b, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, b, 0o600)
+	return runhealth.Load(dataDir)
 }
 
 func keepRecentFailures(items []runtimeFailure, cutoff int64) []runtimeFailure {
@@ -475,11 +399,6 @@ func keepRecentFailures(items []runtimeFailure, cutoff int64) []runtimeFailure {
 		}
 	}
 	return out
-}
-
-func failureHash(msg string) string {
-	h := crc32.ChecksumIEEE([]byte(strings.ToLower(strings.TrimSpace(msg))))
-	return fmt.Sprintf("%08x", h)
 }
 
 func filepathBase(path string) string {

@@ -1,9 +1,9 @@
 ---
 name: floyd-hooks
-description: Use when the user wants to add, write, debug, or configure a Floyd hook — gating or blocking tool calls, approving or rewriting tool input before execution, injecting context into tool results, or troubleshooting hook behavior in floyd.json.
+description: Use when the user wants to add, write, debug, or configure a MegaFloyd hook — gating or blocking tool calls, approving or rewriting tool input before execution, injecting context into tool results, or troubleshooting hook behavior in floyd.json.
 ---
 
-# Floyd Hooks
+# MegaFloyd Hooks
 
 Hooks are user-defined commands in `floyd.json` that fire at specific points
 during execution, giving deterministic control over tool behavior. They run
@@ -196,14 +196,14 @@ preserved.
 ## Debugging
 
 - Timeouts kill the hook silently and the tool call proceeds. Bump `timeout` if needed.
-- Non-zero exit codes other than 2/49 are logged but don't block — check Floyd logs.
+- Non-zero exit codes other than 2/49 are logged but don't block — check MegaFloyd logs.
 - Use `echo "debug info" >&2` for logging without corrupting stdout JSON.
 - `matcher` is a regex against the tool name. Use `^bash$` (not `bash`) if you
   don't also want to match `mcp_something_bash`.
 
 ## Claude Code Compatibility
 
-Floyd also accepts Claude Code's `hookSpecificOutput` envelope. One intentional
-divergence: Floyd treats `updated_input` as shallow-merge, Claude Code replaces.
+MegaFloyd also accepts Claude Code's `hookSpecificOutput` envelope. One intentional
+divergence: MegaFloyd treats `updated_input` as shallow-merge, Claude Code replaces.
 Existing Claude Code hooks work without modification for the matcher/decision
 parts; revisit any that relied on `updatedInput` fully replacing tool input.

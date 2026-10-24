@@ -34,9 +34,9 @@ type Engine struct {
 }
 
 // NewEngine creates a new workflow engine
-func NewEngine(workingDir string) *Engine {
+func NewEngine(workingDir string, selected ...string) *Engine {
 	return &Engine{
-		checkpoints: NewCheckpointService(workingDir),
+		checkpoints: NewCheckpointService(workingDir, selected...),
 		executor:    NewDefaultStepExecutor(),
 		broker:      pubsub.NewBroker[Checkpoint](),
 		workingDir:  workingDir,

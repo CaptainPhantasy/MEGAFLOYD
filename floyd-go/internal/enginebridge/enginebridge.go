@@ -1,6 +1,6 @@
 // Package enginebridge reads sessions produced by the Floyd Code web engine
 // (kap-server) so the Go CLI can list and import them. It is strictly
-// read-only against the engine store: nothing here writes to ~/.floyd-code.
+// read-only against the canonical MEGAFLOYD engine store.
 package enginebridge
 
 import (
@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"github.com/legacy-ai/floyd/internal/message"
 )
 
@@ -25,23 +26,14 @@ type Session struct {
 	UpdatedAt time.Time
 }
 
-// Home resolves the engine home. FLOYD_CODE_HOME wins; otherwise the first
-// candidate that contains a session index.
+// Home resolves the canonical web store. Parent harness homes are never
+// discovered implicitly; an explicit MEGAFLOYD_WEB_DATA override wins.
 func Home() string {
-	if v := os.Getenv("FLOYD_CODE_HOME"); v != "" {
-		return v
+	if dir := strings.TrimSpace(os.Getenv("MEGAFLOYD_WEB_DATA")); dir != "" {
+		return dir
 	}
-	userHome, _ := os.UserHomeDir()
-	candidates := []string{
-		filepath.Join(userHome, ".floyd-code"),
-		filepath.Join(userHome, ".megafloyd", "web"),
-	}
-	for _, candidate := range candidates {
-		if _, err := os.Stat(filepath.Join(candidate, "session_index.jsonl")); err == nil {
-			return candidate
-		}
-	}
-	return candidates[0]
+	home, _ := megafloyd.HomeDir()
+	return filepath.Join(home, "web")
 }
 
 type indexEntry struct {

@@ -110,7 +110,7 @@ func (b *OSCBackend) sendOSC99(n Notification) tea.Cmd {
 	b.notifySeq++
 	id := fmt.Sprintf("floyd-%d", b.notifySeq)
 
-	appName := "Floyd"
+	appName := "MegaFloyd"
 	notificationType := "floyd-notification"
 
 	sb.WriteString(ansi.DesktopNotification(n.Title, "i="+id, "d=0", "p=title", "a="+appName, "t="+notificationType))

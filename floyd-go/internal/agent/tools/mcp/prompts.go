@@ -15,8 +15,8 @@ type Prompt = mcp.Prompt
 var allPrompts = csync.NewMap[string, []*Prompt]()
 
 // Prompts returns all available MCP prompts.
-func Prompts() iter.Seq2[string, []*Prompt] {
-	return allPrompts.Seq2()
+func Prompts(scope ...WorkspaceScope) iter.Seq2[string, []*Prompt] {
+	return scopedEntries(allPrompts.Seq2(), scope...)
 }
 
 // GetPromptMessages retrieves the content of an MCP prompt with the given arguments.
@@ -47,7 +47,12 @@ func GetPromptMessages(ctx context.Context, cfg *config.ConfigStore, clientName,
 
 // RefreshPrompts gets the updated list of prompts from the MCP and updates the
 // global state.
-func RefreshPrompts(ctx context.Context, name string) {
+func RefreshPrompts(ctx context.Context, name string, scope ...WorkspaceScope) {
+	var owner WorkspaceScope
+	if len(scope) > 0 {
+		owner = scope[0]
+	}
+	name = registryName(owner, name)
 	// Serialize with session renewal so the registered session can't be
 	// swapped between the Get and the state update below — a stale error
 	// transition would otherwise tear down the healthy replacement.

@@ -26,7 +26,10 @@ type authRuntime struct {
 var authRuntimeFactory = buildAuthRuntime
 
 func buildAuthRuntime() (*authRuntime, error) {
-	cfg := megafloydauth.FromEnv(nil)
+	cfg, err := megafloydauth.WithStoredEndpoints(megafloydauth.FromEnv(nil))
+	if err != nil {
+		return nil, err
+	}
 	if cfg.Version == "" {
 		cfg.Version = version.Version
 	}
@@ -50,11 +53,11 @@ func buildAuthRuntime() (*authRuntime, error) {
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
-	Short: "Manage the megafloyd device login",
-	Long: `Manage the device-code login for the megafloyd inference server.
+	Short: "Manage the MegaFloyd device login",
+	Long: `Manage the device-code login for the company inference server.
 
-Tokens are stored under the megafloyd home (MEGAFLOYD_HOME, default
-~/.megafloyd), never under the f7 CLI's ~/.floyd7 home.`,
+Tokens are stored under the MegaFloyd home (MEGAFLOYD_HOME, default
+~/.megafloyd).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return cmd.Help()
@@ -66,7 +69,7 @@ var authLoginCmd = &cobra.Command{
 	Short: "Log in with a device code",
 	Long: `Request a device code, print the approval URL, and store the token.
 
-The token is written with mode 0600 under the megafloyd credentials
+The token is written with mode 0600 under the MegaFloyd credentials
 directory. Nothing is sent to a browser automatically.`,
 	Args: cobra.NoArgs,
 	RunE: runAuthLogin,
@@ -96,7 +99,7 @@ var authTokenCmd = &cobra.Command{
 	Long: `Print the stored access token to standard output.
 
 This command exists for provider credential templates such as
-$(floyd auth token). It prints a secret; do not run it where the output is
+$(megafloyd auth token). It prints a secret; do not run it where the output is
 recorded.`,
 	Args: cobra.NoArgs,
 	RunE: runAuthToken,

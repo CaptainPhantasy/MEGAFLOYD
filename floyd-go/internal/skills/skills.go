@@ -47,6 +47,7 @@ type Skill struct {
 	Path                   string            `yaml:"-" json:"path"`
 	SkillFilePath          string            `yaml:"-" json:"skill_file_path"`
 	Builtin                bool              `yaml:"-" json:"builtin"`
+	Runtime                *Runtime          `yaml:"runtime,omitempty" json:"runtime,omitempty"`
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.
@@ -249,7 +250,29 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 				addState("", path, StateError, err)
 				return nil
 			}
-			if d.IsDir() || d.Name() != SkillFileName {
+			if d.IsDir() {
+				return nil
+			}
+			if d.Name() == "skills.yaml" {
+				executable, parseErr := parseExecutableIndex(path)
+				if parseErr != nil {
+					addState("", path, StateError, parseErr)
+					return nil
+				}
+				mu.Lock()
+				if seen[path] {
+					mu.Unlock()
+					return nil
+				}
+				seen[path] = true
+				skills = append(skills, executable...)
+				mu.Unlock()
+				for _, skill := range executable {
+					addState(skill.Name, path, StateNormal, nil)
+				}
+				return nil
+			}
+			if d.Name() != SkillFileName {
 				return nil
 			}
 			mu.Lock()
@@ -288,7 +311,10 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 		if c := strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path)); c != 0 {
 			return c
 		}
-		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+		if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
+			return c
+		}
+		return strings.Compare(strings.ToLower(a.SkillFilePath), strings.ToLower(b.SkillFilePath))
 	})
 
 	return skills, states
@@ -312,6 +338,9 @@ func ToPromptXML(skills []*Skill) string {
 		fmt.Fprintf(&sb, "    <name>%s</name>\n", escape(s.Name))
 		fmt.Fprintf(&sb, "    <description>%s</description>\n", escape(s.Description))
 		fmt.Fprintf(&sb, "    <location>%s</location>\n", escape(s.SkillFilePath))
+		if s.Runtime != nil {
+			fmt.Fprintf(&sb, "    <execute>run_skill name=%q</execute>\n", escape(s.Name))
+		}
 		if s.Builtin {
 			sb.WriteString("    <type>builtin</type>\n")
 		}
@@ -330,6 +359,9 @@ func (s *Skill) FormatInvocation() string {
 	fmt.Fprintf(&sb, "  <location>%s</location>\n", escape(s.SkillFilePath))
 	sb.WriteString("  <instructions>\n")
 	sb.WriteString(escape(s.Instructions))
+	if s.Runtime != nil {
+		fmt.Fprintf(&sb, "\nExecute using run_skill with name %q.", escape(s.Name))
+	}
 	sb.WriteString("\n  </instructions>\n")
 	sb.WriteString("</loaded_skill>")
 	return sb.String()

@@ -12,8 +12,8 @@ import (
 
 var scoreboardCmd = &cobra.Command{
 	Use:   "scoreboard",
-	Short: "Show SuperFloyd benchmark scoreboard",
-	Long:  "Print a compact benchmark scoreboard from local Floyd session data.",
+	Short: "Show MegaFloyd benchmark scoreboard",
+	Long:  "Print a compact benchmark scoreboard from local MegaFloyd session data.",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		dataDir, _ := cmd.Flags().GetString("data-dir")
 		ctx := cmd.Context()
@@ -53,7 +53,7 @@ var scoreboardCmd = &cobra.Command{
 
 		avgLatencySec := stats.AvgResponseTimeMs / 1000.0
 		fmt.Println("╔══════════════════════════════════════════════════════╗")
-		fmt.Println("║               SUPERFLOYD SCOREBOARD                 ║")
+		fmt.Println("║               MegaFloyd SCOREBOARD                 ║")
 		fmt.Println("╠══════════════════════════════════════════════════════╣")
 		fmt.Printf("║ Sessions                : %-27d ║\n", stats.Total.TotalSessions)
 		fmt.Printf("║ Messages                : %-27d ║\n", stats.Total.TotalMessages)

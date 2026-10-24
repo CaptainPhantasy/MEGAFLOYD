@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 )
 
 // ErrStale reports that the existing checkpoint is newer than the one being
@@ -25,6 +27,9 @@ type Writer struct {
 	// CWD is the project working directory. Relative paths resolve against
 	// the process working directory.
 	CWD string
+
+	// DataDir is the resolved, account-owned workspace store.
+	DataDir string
 	// Now supplies the checkpoint timestamp. Nil means time.Now.
 	Now func() time.Time
 	// GitTimeout bounds the git summary probe. Zero means
@@ -65,7 +70,11 @@ func (w Writer) Write(ctx context.Context, cp Checkpoint) error {
 	}
 	cp.Timestamp = cp.Timestamp.UTC()
 
-	path := Path(cwd)
+	dataDir, err := megafloyd.PersonalDataDir(cwd, w.DataDir)
+	if err != nil {
+		return fmt.Errorf("memory: resolve personal data: %w", err)
+	}
+	path := filepath.Join(dataDir, FileName)
 	if newer, err := existingNewer(path, cp.Timestamp); err == nil && newer {
 		return ErrStale
 	}
@@ -217,7 +226,7 @@ func encode(cp Checkpoint, limit int) ([]byte, error) {
 // checkpoint.
 func writeAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("memory: create directory: %w", err)
 	}
 

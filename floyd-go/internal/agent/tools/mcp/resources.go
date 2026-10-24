@@ -19,12 +19,13 @@ type ResourceContents = mcp.ResourceContents
 var allResources = csync.NewMap[string, []*Resource]()
 
 // Resources returns all available MCP resources.
-func Resources() iter.Seq2[string, []*Resource] {
-	return allResources.Seq2()
+func Resources(scope ...WorkspaceScope) iter.Seq2[string, []*Resource] {
+	return scopedEntries(allResources.Seq2(), scope...)
 }
 
 // ListResources returns the current resources for an MCP server.
 func ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([]*Resource, error) {
+	name = registryName(cfg, name)
 	session, err := getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return nil, err
@@ -57,7 +58,12 @@ func ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string
 
 // RefreshResources gets the updated list of resources from the MCP and updates the
 // global state.
-func RefreshResources(ctx context.Context, name string) {
+func RefreshResources(ctx context.Context, name string, scope ...WorkspaceScope) {
+	var owner WorkspaceScope
+	if len(scope) > 0 {
+		owner = scope[0]
+	}
+	name = registryName(owner, name)
 	// Serialize with session renewal so the registered session can't be
 	// swapped between the Get and the state update below — a stale error
 	// transition would otherwise tear down the healthy replacement.

@@ -17,7 +17,7 @@ const (
 	// EnvPrefix is prepended to the upper-cased flag id.
 	EnvPrefix = "FLOYD_EXPERIMENTAL_"
 
-	// GhostText gates the inline prompt-history suggestion in the editor.
+	// GhostText gates inline AI suggestions and prompt-history completions.
 	GhostText = "ghost_text"
 )
 
@@ -50,7 +50,7 @@ var flags = []Flag{
 	{
 		ID:          GhostText,
 		Title:       "Ghost-text suggestions",
-		Description: "Show inline prompt suggestions from history while typing",
+		Description: "Suggest a follow-up with the small model after replies; use history while typing",
 		Default:     true,
 	},
 }

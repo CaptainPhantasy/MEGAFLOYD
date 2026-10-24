@@ -44,7 +44,7 @@ func TestBuildChildEnvDedupesHosts(t *testing.T) {
 		"MAC-MINI.tail58d565.ts.net,100.91.82.106",
 		LookupEnv(env, allowedHostsEnv),
 	)
-	require.Empty(t, LookupEnv(env, codeHomeEnv))
+	require.Equal(t, DataDir(nil, HomeDir()), LookupEnv(env, codeHomeEnv))
 }
 
 func TestBuildChildEnvReplacesEmptyCodeHome(t *testing.T) {
@@ -57,14 +57,19 @@ func TestBuildChildEnvReplacesEmptyCodeHome(t *testing.T) {
 	require.Equal(t, 1, entryCount(env, codeHomeEnv), "one code home entry")
 }
 
-func TestBuildChildEnvKeepsExistingCodeHome(t *testing.T) {
+func TestBuildChildEnvIgnoresParentCodeHome(t *testing.T) {
 	t.Parallel()
 
 	base := []string{"FLOYD_CODE_HOME=/tmp/floyd-code-home"}
-	env := BuildChildEnv(base, Tailscale{}, "/ignored")
+	env := BuildChildEnv(base, Tailscale{}, "/megafloyd/web")
 
-	require.Equal(t, "/tmp/floyd-code-home", LookupEnv(env, codeHomeEnv))
-	require.Equal(t, "/tmp/floyd-code-home", DataDir(base, "/home"))
+	require.Equal(t, "/megafloyd/web", LookupEnv(env, codeHomeEnv))
+	require.Equal(t, "/home/web", DataDir(base, "/home"))
+	require.Equal(t, "/explicit-web", DataDir(append(base, "MEGAFLOYD_WEB_DATA=/explicit-web"), "/home"))
+	require.Equal(t, "/explicit-web", LookupEnv(BuildChildEnv(append(base,
+		"MEGAFLOYD_WEB_DATA=/explicit-web", "HOME=/real/user",
+	), Tailscale{}, ""), codeHomeEnv))
+	require.Contains(t, BuildChildEnv([]string{"HOME=/real/user"}, Tailscale{}, "/megafloyd/web"), "HOME=/real/user")
 }
 
 func TestAllowedHostsSplitsTheMergedValue(t *testing.T) {

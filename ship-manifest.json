@@ -1,10 +1,28 @@
 {
-  "version": 1,
-  "updated": "2026-10-16",
-  "note": "Explicit ship set for the merged MEGAFLOYD build (PLAN.md P5). Paths are relative to the repository root. Company-platform inclusion is decision D-1 (docs/DECISIONS.md); its egress review is enforced by EgressReview in floyd-code/services/company-platform/test_platform.py, not by prose.",
+  "version": 2,
+  "updated": "2026-10-24",
+  "release_id": "2026.10.24-megafloyd-20261024T232028Z",
+  "note": "Complete canonical MEGAFLOYD package: the installed launcher, bundled Go engine, web assets, and desktop shell. Existing company services remain external shared services.",
   "ship_set": [
-    { "path": "floyd-code/apps/floyd-code/dist", "kind": "cli-bundle", "note": "built CLI/TUI entrypoint" },
-    { "path": "floyd-code/apps/floyd-code/dist-web", "kind": "web-assets", "decision": "D-5", "note": "committed prebuilt console bundle" },
-    { "path": "floyd-code/services/company-platform", "kind": "service", "decision": "D-1", "egress_reviewed": true, "note": "Python console backend + member SPA" }
+    {
+      "path": "bin/megafloyd",
+      "kind": "installed-package-launcher"
+    },
+    {
+      "path": "releases/2026.10.24-megafloyd-20261024T232028Z/MEGAFLOYD.app",
+      "kind": "desktop-with-go-web"
+    },
+    {
+      "path": "dist/releases/2026.10.24-megafloyd-20261024T232028Z/manifest.json",
+      "kind": "release-manifest"
+    },
+    {
+      "path": "dist/releases/2026.10.24-megafloyd-20261024T232028Z/megafloyd-darwin-arm64.tar.gz",
+      "kind": "complete-package"
+    },
+    {
+      "path": "dist/releases/2026.10.24-megafloyd-20261024T232028Z/install.sh",
+      "kind": "explicit-prefix-installer"
+    }
   ]
 }

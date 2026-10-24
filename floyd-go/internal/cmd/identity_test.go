@@ -70,10 +70,10 @@ floyd --data-dir /path/to/custom/.floyd
 		if cmd.Use != "megafloyd [command]" {
 			t.Fatalf("Use = %q, want %q", cmd.Use, "megafloyd [command]")
 		}
-		if got := cmd.PersistentFlags().Lookup("data-dir").Usage; got != "Custom megafloyd data directory" {
+		if got := cmd.PersistentFlags().Lookup("data-dir").Usage; got != "Custom MegaFloyd data directory" {
 			t.Fatalf("data-dir usage = %q", got)
 		}
-		if got := cmd.PersistentFlags().Lookup("host").Usage; got != "Connect to a specific megafloyd server host (for advanced users)" {
+		if got := cmd.PersistentFlags().Lookup("host").Usage; got != "Connect to a specific MegaFloyd server host (for advanced users)" {
 			t.Fatalf("host usage = %q", got)
 		}
 		for _, want := range []string{
@@ -117,7 +117,7 @@ func TestVersionLineUsesCLIName(t *testing.T) {
 		cliName string
 		want    string
 	}{
-		{"megafloyd", megafloydBinaryName, "megafloyd version 1.2.3\n"},
+		{"megafloyd", megafloydBinaryName, "MegaFloyd version 1.2.3\n"},
 		{"floyd", floydBinaryName, "floyd version 1.2.3\n"},
 	}
 
@@ -154,7 +154,7 @@ func TestDefaultVersionTemplateUsesCLIName(t *testing.T) {
 		cliName string
 		want    string
 	}{
-		{"megafloyd", megafloydBinaryName, "megafloyd version 1.2.3\n"},
+		{"megafloyd", megafloydBinaryName, "MegaFloyd version 1.2.3\n"},
 		{"floyd", floydBinaryName, "floyd version 1.2.3\n"},
 	}
 

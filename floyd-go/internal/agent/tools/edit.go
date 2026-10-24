@@ -248,6 +248,9 @@ func notFoundError(content, old string) error {
 // and records the read in the file tracker. Callers must convert line endings
 // before calling this function.
 func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string) error {
+	if err := history.CaptureBefore(edit.ctx, edit.files, filePath); err != nil {
+		return fmt.Errorf("capture file history: %w", err)
+	}
 	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}

@@ -1,4 +1,5 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { findOwnedListener } from './process-owner.mjs';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -15,28 +16,30 @@ import {
   megafloydBinaryCandidates,
   nodeWrapperCandidates,
 } from './config.mjs';
-import { fetchMeta, tokenFromUrl } from './meta.mjs';
+import { fetchMeta, fetchRuntime, handoffUrlFromLine, tokenFromUrl } from './meta.mjs';
 import { redactSecrets } from './redact.mjs';
+import { requestHandoff, sessionFromURL } from './navigation.mjs';
 
-const URL_PATTERN = /(http:\/\/127\.0\.0\.1:(\d+)\/[^\s]*#token=[A-Za-z0-9_-]+)/;
 const MAX_AUTO_RESTARTS = 3;
 const RESTART_WINDOW_MS = 5 * 60 * 1000;
 const HEALTH_INTERVAL_MS = 10_000;
 const HEALTH_FAILURES = 3;
 
 /**
- * Owns the MEGAFLOYD engine.
+ * Owns the MegaFloyd engine.
  *
  * The engine is the platform binary itself: `megafloyd --web` performs the
  * platform's own handoff (resolve Node, resolve the committed web bundle,
- * spawn the detached server, print the tokenised URL). The desktop never
+ * spawn the detached server, print the ready URL). The desktop never
  * reimplements that contract; it launches it and supervises the result.
  */
 export class Engine extends EventEmitter {
-  constructor({ homeDir = HOME_DIR, workspace, log }) {
+  constructor({ homeDir = HOME_DIR, workspace, goHost, dataDir, log }) {
     super();
     this.homeDir = homeDir;
     this.workspace = workspace || process.env.MEGAFLOYD_WORKSPACE || os.homedir();
+    this.goHost = goHost || process.env.MEGAFLOYD_GO_HOST || null;
+    this.dataDir = dataDir || process.env.MEGAFLOYD_GO_DATA_DIR || null;
     this.log = log;
     this.child = null;
     this.stopping = false;
@@ -66,6 +69,7 @@ export class Engine extends EventEmitter {
       platformCommit: null,
       capabilities: null,
       metaWarnings: [],
+      runtime: null,
       notice: null,
     };
   }
@@ -125,7 +129,7 @@ export class Engine extends EventEmitter {
       this.log.error('megafloyd binary not found');
       this.setState({
         status: 'missing',
-        detail: 'MEGAFLOYD engine not found',
+        detail: 'MegaFloyd engine not found',
         error: 'No megafloyd binary found. Set MEGAFLOYD_BIN or install the platform.',
       });
       return;
@@ -135,13 +139,13 @@ export class Engine extends EventEmitter {
       this.log.error('web server missing', { path: WEB_SCRIPT });
       this.setState({
         status: 'missing',
-        detail: 'MEGAFLOYD web engine not found',
+        detail: 'MegaFloyd web engine not found',
         error: `Expected the platform web server at ${WEB_SCRIPT}.`,
       });
       return;
     }
 
-    const port = await pickPort(DEFAULT_PORT);
+    let port = await pickPort(DEFAULT_PORT);
     if (port === null) {
       this.setState({
         status: 'failed',
@@ -154,7 +158,7 @@ export class Engine extends EventEmitter {
     const node = this.resolveNode();
     this.setState({
       status: 'starting',
-      detail: 'Starting MEGAFLOYD engine…',
+      detail: 'Starting MegaFloyd engine…',
       entry: binary.file,
       source: binary.source,
       port,
@@ -167,6 +171,7 @@ export class Engine extends EventEmitter {
       platformCommit: null,
       capabilities: null,
       metaWarnings: [],
+      runtime: null,
       notice: null,
     });
     this.handshakePending = false;
@@ -175,6 +180,9 @@ export class Engine extends EventEmitter {
     const env = {
       ...process.env,
       MEGAFLOYD_HOME: this.homeDir,
+      // Resolve the MEGAFLOYD-owned web store before setting the engine mirror.
+      MEGAFLOYD_WEB_DATA: process.env.MEGAFLOYD_WEB_DATA || path.join(this.homeDir, 'web'),
+      FLOYD_CODE_HOME: process.env.MEGAFLOYD_WEB_DATA || path.join(this.homeDir, 'web'),
       MEGAFLOYD_WEB_PORT: String(port),
       MEGAFLOYD_WEB_SCRIPT: WEB_SCRIPT,
       MEGAFLOYD_WEB_BUNDLE: WEB_BUNDLE_DIR,
@@ -184,7 +192,10 @@ export class Engine extends EventEmitter {
     };
     if (node) env.MEGAFLOYD_WEB_NODE = node;
 
-    const child = spawn(binary.file, ['--web'], {
+    const args = ['--web'];
+    if (this.goHost) args.push('--host', this.goHost);
+    if (this.dataDir) args.push('--data-dir', this.dataDir);
+    const child = spawn(binary.file, args, {
       cwd: this.workspace,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -199,6 +210,8 @@ export class Engine extends EventEmitter {
     const becomeReady = async (url) => {
       if (settled) return;
       settled = true;
+      port = Number(new URL(url).port) || port;
+      this.serverPort = port;
       clearTimeout(this.startTimer);
       this.startTimer = null;
 
@@ -207,6 +220,13 @@ export class Engine extends EventEmitter {
       let meta;
       try {
         meta = await fetchMeta({ port, token: tokenFromUrl(url) });
+        if (meta.ok) {
+          const target = await requestHandoff(url, sessionFromURL(url));
+          if (path.resolve(target.cwd) !== path.resolve(this.workspace)) throw new Error('Handoff selected a different workspace');
+          if (this.dataDir && path.resolve(target.data_dir || '') !== path.resolve(this.dataDir)) throw new Error('Handoff selected a different workspace store');
+          if (this.goHost && target.host !== this.goHost) throw new Error('Handoff selected a different Go host');
+          meta.handoff = target;
+        }
       } catch (error) {
         meta = { ok: false, error: `meta probe failed: ${error?.message ?? error}` };
       }
@@ -218,6 +238,8 @@ export class Engine extends EventEmitter {
         platformCommit: meta.platformCommit ?? null,
         capabilities: meta.capabilities ?? null,
         metaWarnings: meta.warnings ?? [],
+        runtime: meta.runtime ?? null,
+        handoff: meta.handoff ?? null,
       });
 
       if (!meta.ok) {
@@ -230,16 +252,8 @@ export class Engine extends EventEmitter {
           pid: null,
         });
         this.stopHealthMonitor();
-        // Refuse the UI and leave no orphan listener behind.
+        // An unverified listener is not ours to stop; only stop our handoff child.
         this.stopping = true;
-        const childPid = this.listenerPid(port);
-        if (childPid) {
-          try {
-            process.kill(childPid, 'SIGTERM');
-          } catch {
-            // Already gone.
-          }
-        }
         if (this.child) this.stopChild(this.child);
         return;
       }
@@ -260,6 +274,7 @@ export class Engine extends EventEmitter {
       });
       for (const warning of meta.warnings) this.log.warn('engine meta warning', { warning });
       this.startHealthMonitor();
+      void this.refreshListenerPid(port);
     };
 
     const bufferLines = (stream, level) => {
@@ -273,8 +288,8 @@ export class Engine extends EventEmitter {
           buffer = buffer.slice(index + 1);
           if (line.length === 0) continue;
           this.log.write(level, `engine: ${redactSecrets(line)}`);
-          const match = URL_PATTERN.exec(line);
-          if (match) becomeReady(match[1]);
+          const readyUrl = handoffUrlFromLine(line);
+          if (readyUrl) void becomeReady(readyUrl);
           if (line.startsWith('Log:')) {
             this.setState({ webLog: line.slice(4).trim() });
           }
@@ -304,6 +319,7 @@ export class Engine extends EventEmitter {
     });
 
     child.once('exit', (code, signal) => {
+      if (this.child !== child) return;
       clearTimeout(this.startTimer);
       this.startTimer = null;
       this.child = null;
@@ -316,13 +332,13 @@ export class Engine extends EventEmitter {
       }
       if (this.handshakePending) {
         this.log.info('handoff process exited during meta handshake', { code, signal });
-        this.setState({ pid: this.listenerPid(port) });
+        this.setState({ pid: null });
         return;
       }
       if (settled && this.state.status === 'ready') {
         // `megafloyd --web` exits after the detached server is healthy.
         this.log.info('handoff process exited; server stays up', { code, signal });
-        this.setState({ pid: this.listenerPid(port) });
+        if (this.state.pid === child.pid) this.setState({ pid: null });
         return;
       }
       this.log.warn('engine exited before ready', { code, signal });
@@ -385,6 +401,28 @@ export class Engine extends EventEmitter {
     this.restartTimer = setTimeout(() => void this.start(), delay);
   }
 
+  release() {
+    this.stopping = true;
+    clearTimeout(this.restartTimer);
+    clearTimeout(this.startTimer);
+    this.restartTimer = null;
+    this.startTimer = null;
+    this.stopHealthMonitor();
+    if (this.state.status !== 'ready') {
+      this.forceStop();
+      return;
+    }
+    this.child?.unref?.();
+    this.child = null;
+    this.serverPort = null;
+    this.setState({ status: 'released', detail: 'Shared runtime continues independently', url: null, pid: null });
+  }
+
+  async switchWorkspace() {
+    this.release();
+    await this.start();
+  }
+
   async restart() {
     this.restartTimes = [];
     this.setState({ restarts: 0 });
@@ -401,7 +439,7 @@ export class Engine extends EventEmitter {
     this.stopHealthMonitor();
 
     const child = this.child;
-    const pid = this.listenerPid(this.serverPort);
+    const pid = await this.listenerPid(this.serverPort);
     if (child) this.stopChild(child);
     if (pid) {
       this.log.info('stopping web server', { pid, port: this.serverPort });
@@ -411,11 +449,11 @@ export class Engine extends EventEmitter {
         // Already gone.
       }
       const deadline = Date.now() + ENGINE_STOP_TIMEOUT_MS;
-      while (Date.now() < deadline && this.listenerPid(this.serverPort)) {
+      while (Date.now() < deadline && await this.listenerPid(this.serverPort) === pid) {
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
-      const remaining = this.listenerPid(this.serverPort);
-      if (remaining) {
+      const remaining = await this.listenerPid(this.serverPort);
+      if (remaining === pid) {
         try {
           process.kill(remaining, 'SIGKILL');
         } catch {
@@ -438,14 +476,6 @@ export class Engine extends EventEmitter {
   forceStop() {
     this.stopping = true;
     if (this.child) this.stopChild(this.child);
-    const pid = this.listenerPid(this.serverPort);
-    if (pid) {
-      try {
-        process.kill(pid, 'SIGTERM');
-      } catch {
-        // Already gone.
-      }
-    }
   }
 
   writePid(pid) {
@@ -457,24 +487,29 @@ export class Engine extends EventEmitter {
     }
   }
 
-  listenerPid(port) {
-    if (!port) return null;
-    try {
-      const out = execFileSync('lsof', ['-tiTCP:' + port, '-sTCP:LISTEN'], { encoding: 'utf8' }).trim();
-      const pid = Number(out.split('\n')[0]);
-      return Number.isInteger(pid) && pid > 0 ? pid : null;
-    } catch {
-      return null;
+  async refreshListenerPid(port) {
+    const pid = await this.listenerPid(port);
+    if (!this.stopping && this.serverPort === port && this.state.status === 'ready') {
+      this.setState({ pid });
     }
   }
 
+  async listenerPid(port) {
+    return findOwnedListener({ port, verifyRuntime: () => this.health(port) });
+  }
+
   async health(port) {
-    if (!port) return false;
+    const host = this.state.handoff?.host || this.goHost;
+    if (!port || !host) return false;
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/v1/meta`, {
-        signal: AbortSignal.timeout(2000),
+      const runtime = await fetchRuntime({
+        port,
+        token: tokenFromUrl(this.state.url),
+        host,
+        attempts: 1,
+        timeoutMs: 1000,
       });
-      return response.status < 500;
+      return runtime.ok;
     } catch {
       return false;
     }

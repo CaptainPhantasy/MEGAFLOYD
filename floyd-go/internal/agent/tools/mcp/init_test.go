@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/env"
@@ -922,4 +924,51 @@ func TestCreateSession_Sessionless(t *testing.T) {
 		require.Contains(t, err.Error(), "session not found")
 		require.GreaterOrEqual(t, listenTotal.Load(), int64(1), "expected the listen stream attempt")
 	})
+}
+
+func TestMCPRuntimeSettings(t *testing.T) {
+	const name = "canonical-runtime-settings"
+	directory := t.TempDir()
+	var serverConfig config.MCPConfig
+	encoded, err := json.Marshal(map[string]any{"type": "stdio", "command": os.Args[0], "args": []string{"-test.run=^TestMCPRuntimeFixtureProcess$"}, "env": map[string]string{"MEGAFLOYD_MCP_FIXTURE": "1"}, "cwd": directory, "startup_timeout_ms": 2000, "tool_timeout_ms": 70})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(encoded, &serverConfig))
+	cfg := config.NewTestStoreWithWorkingDir(&config.Config{MCP: config.MCPs{name: serverConfig}}, t.TempDir())
+	t.Cleanup(func() { removeServer(registryName(cfg, name)) })
+	require.NoError(t, InitializeSingle(t.Context(), name, cfg))
+	result, err := RunTool(t.Context(), cfg, name, "directory", `{}`)
+	require.NoError(t, err)
+	want, err := filepath.EvalSymlinks(directory)
+	require.NoError(t, err)
+	require.Equal(t, want, result.Content)
+	started := time.Now()
+	_, err = RunTool(t.Context(), cfg, name, "wait", `{}`)
+	require.Error(t, err)
+	require.Less(t, time.Since(started), 400*time.Millisecond)
+}
+
+func TestMCPRuntimeFixtureProcess(t *testing.T) {
+	if os.Getenv("MEGAFLOYD_MCP_FIXTURE") != "1" {
+		t.Skip("MCP stdio fixture subprocess")
+	}
+	directory, err := os.Getwd()
+	if err != nil {
+		os.Exit(2)
+	}
+	server := mcp.NewServer(&mcp.Implementation{Name: "canonical-fixture", Version: "1"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "directory", Description: directory}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: directory}}}, nil, nil
+	})
+	mcp.AddTool(server, &mcp.Tool{Name: "wait", Description: "Wait for cancellation"}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-time.After(700 * time.Millisecond):
+			return &mcp.CallToolResult{}, nil, nil
+		}
+	})
+	if server.Run(context.Background(), &mcp.StdioTransport{}) != nil {
+		os.Exit(3)
+	}
+	os.Exit(0)
 }

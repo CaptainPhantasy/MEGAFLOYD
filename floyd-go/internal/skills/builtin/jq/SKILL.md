@@ -5,7 +5,7 @@ description: Use when the user needs to query, filter, reshape, extract, create,
 
 # jq — Built-in JSON Processor
 
-Floyd ships a built-in `jq` command (via `github.com/itchyny/gojq`) available
+MegaFloyd ships a built-in `jq` command (via `github.com/itchyny/gojq`) available
 in the bash tool. No external binary is required.
 
 ## Supported Flags

@@ -26,6 +26,7 @@ func ChassisEnv(d Dirs) map[string]string {
 		ChassisGlobalConfigEnv: d.Config,
 		ChassisGlobalDataEnv:   d.Data,
 		ChassisCacheDirEnv:     d.Cache,
+		ChassisIdentityEnv:     DisplayName,
 	}
 	for _, pair := range [][2]string{
 		{IdentityEnv, ChassisIdentityEnv},
@@ -54,7 +55,8 @@ func ApplyChassisEnv(d Dirs) []string {
 	}
 	var applied []string
 	for name, value := range ChassisEnv(d) {
-		if _, exists := os.LookupEnv(name); exists && !explicit[name] {
+		pathOrIdentity := name == ChassisGlobalConfigEnv || name == ChassisGlobalDataEnv || name == ChassisCacheDirEnv || name == ChassisIdentityEnv
+		if _, exists := os.LookupEnv(name); exists && !explicit[name] && !pathOrIdentity {
 			continue
 		}
 		if err := os.Setenv(name, value); err != nil {

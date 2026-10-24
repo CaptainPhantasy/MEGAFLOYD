@@ -57,6 +57,8 @@ type fileSnapshot struct {
 // disk. They are applied on top of the loaded Config and survive only for
 // the lifetime of the process (or workspace).
 type RuntimeOverrides struct {
+	AdditionalDirs []string
+
 	SkipPermissionRequests bool
 	// EnabledChannels lists the MCP servers opted in as channels for this
 	// session (via the --channels flag). A server present in MCP config only
@@ -517,7 +519,16 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 // UpdateAgentModel).
 func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
 	return s.update(scope, func(c *Config) map[string]any {
-		return s.updatePreferredModelFields(c, modelType, model)
+		model = modelSelectionForChange(c, modelType, model)
+		fields := s.updatePreferredModelFields(c, modelType, model)
+		// Explicit zero values prevent a workspace selection from inheriting
+		// the previous global model's token/thinking settings when reloaded.
+		fields[fmt.Sprintf("models.%s", modelType)] = persistedModelSelection{
+			SelectedModel: model, MaxTokens: model.MaxTokens,
+			ReasoningEffort: model.ReasoningEffort, Think: model.Think,
+			ProviderOptions: model.ProviderOptions,
+		}
+		return fields
 	})
 }
 
@@ -993,6 +1004,14 @@ func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
 	}
 }
 
+// NewTestStoreWithWorkingDir constructs an in-memory test store for code that
+// executes workspace-scoped hooks or tools. It does not load providers or files.
+func NewTestStoreWithWorkingDir(cfg *Config, workingDir string) *ConfigStore {
+	store := NewTestStore(cfg)
+	store.workingDir = workingDir
+	return store
+}
+
 // ImportCopilot attempts to import a GitHub Copilot token from disk.
 func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 	if s.HasConfigField(ScopeGlobal, "providers.copilot.api_key") || s.HasConfigField(ScopeGlobal, "providers.copilot.oauth") {
@@ -1231,6 +1250,11 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// mid-session. An external edit to the config still takes effect for any
 	// model type this instance never chose.
 	maps.Copy(cfg.Models, overrides.Models)
+	for _, dir := range overrides.AdditionalDirs {
+		if !slices.Contains(cfg.Options.AdditionalDirs, dir) {
+			cfg.Options.AdditionalDirs = append(cfg.Options.AdditionalDirs, dir)
+		}
+	}
 
 	// Reconfigure providers
 	env := env.New()

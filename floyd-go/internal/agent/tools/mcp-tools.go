@@ -23,7 +23,7 @@ var whitelistDockerTools = []string{
 // GetMCPTools gets all the currently available MCP tools.
 func GetMCPTools(permissions permission.Service, cfg *config.ConfigStore, wd string) []*Tool {
 	var result []*Tool
-	for mcpName, tools := range mcp.Tools() {
+	for mcpName, tools := range mcp.Tools(cfg) {
 		for _, tool := range tools {
 			result = append(result, &Tool{
 				mcpName:     mcpName,

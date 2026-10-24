@@ -63,6 +63,6 @@ WHEN mode=BUILD:
 - WHEN cached state conflicts with observation: observation wins. Update the cache.
 
 ## CONTINUITY
-- WHEN completing a task: write findings to `.floyd/.supercache`.
-- WHEN switching modes: checkpoint current state to `.floyd/.supercache`.
+- WHEN completing a task: write findings to `.megafloyd/.supercache`.
+- WHEN switching modes: checkpoint current state to `.megafloyd/.supercache`.
 - WHEN editing files: persist what changed and why.

@@ -76,8 +76,8 @@ func TestRunWaitsForMCPOnlyWhenNonInteractive(t *testing.T) {
 
 		// Arm the gate and never complete initialization, standing in for an
 		// MCP server that is still connecting.
-		mcp.ArmInit()
-		t.Cleanup(mcp.DisarmInit)
+		mcp.ArmInit(coord.cfg)
+		t.Cleanup(func() { mcp.DisarmInit(coord.cfg) })
 
 		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancel()
@@ -90,8 +90,8 @@ func TestRunWaitsForMCPOnlyWhenNonInteractive(t *testing.T) {
 	t.Run("interactive does not wait", func(t *testing.T) {
 		coord := newGateTestCoordinator(t, true)
 
-		mcp.ArmInit()
-		t.Cleanup(mcp.DisarmInit)
+		mcp.ArmInit(coord.cfg)
+		t.Cleanup(func() { mcp.DisarmInit(coord.cfg) })
 
 		done := make(chan error, 1)
 		go func() {

@@ -37,25 +37,19 @@ func HomeDir() (string, error) {
 }
 
 // ConfigDir returns the global configuration directory. Precedence:
-// MEGAFLOYD_CONFIG_DIR, then an existing FLOYD_GLOBAL_CONFIG, then
+// MEGAFLOYD_CONFIG_DIR, then
 // $MEGAFLOYD_HOME/config.
 func ConfigDir(home string) string {
 	if dir := os.Getenv(ConfigEnv); dir != "" {
-		return mustExpand(dir)
-	}
-	if dir := os.Getenv(ChassisGlobalConfigEnv); dir != "" {
 		return mustExpand(dir)
 	}
 	return filepath.Join(home, "config")
 }
 
 // DataDir returns the global data directory. Precedence: MEGAFLOYD_DATA_DIR,
-// then an existing FLOYD_GLOBAL_DATA, then $MEGAFLOYD_HOME/data.
+// then $MEGAFLOYD_HOME/data.
 func DataDir(home string) string {
 	if dir := os.Getenv(DataEnv); dir != "" {
-		return mustExpand(dir)
-	}
-	if dir := os.Getenv(ChassisGlobalDataEnv); dir != "" {
 		return mustExpand(dir)
 	}
 	return filepath.Join(home, "data")
@@ -65,9 +59,6 @@ func DataDir(home string) string {
 // an existing FLOYD_CACHE_DIR, then $MEGAFLOYD_HOME/cache.
 func CacheDir(home string) string {
 	if dir := os.Getenv(CacheEnv); dir != "" {
-		return mustExpand(dir)
-	}
-	if dir := os.Getenv(ChassisCacheDirEnv); dir != "" {
 		return mustExpand(dir)
 	}
 	return filepath.Join(home, "cache")

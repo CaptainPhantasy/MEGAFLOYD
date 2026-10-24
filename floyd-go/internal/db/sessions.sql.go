@@ -10,6 +10,33 @@ import (
 	"database/sql"
 )
 
+const addSessionUsage = `-- name: AddSessionUsage :exec
+UPDATE sessions
+SET
+    prompt_tokens = prompt_tokens + ?,
+    completion_tokens = completion_tokens + ?,
+    cost = cost + ?,
+    updated_at = strftime('%s', 'now')
+WHERE id = ?
+`
+
+type AddSessionUsageParams struct {
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	Cost             float64 `json:"cost"`
+	ID               string  `json:"id"`
+}
+
+func (q *Queries) AddSessionUsage(ctx context.Context, arg AddSessionUsageParams) error {
+	_, err := q.exec(ctx, q.addSessionUsageStmt, addSessionUsage,
+		arg.PromptTokens,
+		arg.CompletionTokens,
+		arg.Cost,
+		arg.ID,
+	)
+	return err
+}
+
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (
     id,
@@ -33,7 +60,7 @@ INSERT INTO sessions (
     null,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+) RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, metadata, archived_at, is_branch
 `
 
 type CreateSessionParams struct {
@@ -69,6 +96,9 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.Metadata,
+		&i.ArchivedAt,
+		&i.IsBranch,
 	)
 	return i, err
 }
@@ -84,7 +114,7 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 }
 
 const getLastSession = `-- name: GetLastSession :one
-SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, metadata, archived_at, is_branch
 FROM sessions
 ORDER BY updated_at DESC
 LIMIT 1
@@ -105,12 +135,15 @@ func (q *Queries) GetLastSession(ctx context.Context) (Session, error) {
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.Metadata,
+		&i.ArchivedAt,
+		&i.IsBranch,
 	)
 	return i, err
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, metadata, archived_at, is_branch
 FROM sessions
 WHERE id = ? LIMIT 1
 `
@@ -130,14 +163,17 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.Metadata,
+		&i.ArchivedAt,
+		&i.IsBranch,
 	)
 	return i, err
 }
 
 const listSessions = `-- name: ListSessions :many
-SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, metadata, archived_at, is_branch
 FROM sessions
-WHERE parent_session_id is NULL
+WHERE parent_session_id is NULL OR is_branch = 1
 ORDER BY updated_at DESC
 `
 
@@ -162,6 +198,9 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 			&i.CreatedAt,
 			&i.SummaryMessageID,
 			&i.Todos,
+			&i.Metadata,
+			&i.ArchivedAt,
+			&i.IsBranch,
 		); err != nil {
 			return nil, err
 		}
@@ -203,7 +242,7 @@ SET
     cost = ?,
     todos = ?
 WHERE id = ?
-RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, metadata, archived_at, is_branch
 `
 
 type UpdateSessionParams struct {
@@ -239,6 +278,9 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.Metadata,
+		&i.ArchivedAt,
+		&i.IsBranch,
 	)
 	return i, err
 }

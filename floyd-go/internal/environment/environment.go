@@ -1,4 +1,4 @@
-// Package environment provides Floyd ecosystem environment state discovery and caching.
+// Package environment provides MegaFloyd ecosystem environment state discovery and caching.
 package environment
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/home"
 )
 
-// ComponentState represents the state of a Floyd ecosystem component.
+// ComponentState represents the state of a MegaFloyd ecosystem component.
 type ComponentState string
 
 const (
@@ -29,7 +29,7 @@ const (
 	ComponentNotFound ComponentState = "not_found"
 )
 
-// Component represents a Floyd ecosystem component with its state and metadata.
+// Component represents a MegaFloyd ecosystem component with its state and metadata.
 type Component struct {
 	Name        string         `json:"name"`
 	Type        string         `json:"type"` // cli, desktop, harness, chrome, mobile, mcp
@@ -40,7 +40,7 @@ type Component struct {
 	Description string         `json:"description,omitempty"`
 }
 
-// EnvironmentState represents the complete Floyd ecosystem environment.
+// EnvironmentState represents the complete MegaFloyd ecosystem environment.
 type EnvironmentState struct {
 	Timestamp        string               `json:"timestamp"`
 	Version          string               `json:"version"`
@@ -52,11 +52,11 @@ type EnvironmentState struct {
 	ActiveComponents int                  `json:"active_components"`
 }
 
-// Discover performs environment discovery to find all Floyd components.
+// Discover performs environment discovery to find all MegaFloyd components.
 // The working directory is passed directly because the host config exposes
 // it on the config store, not on config.Config.
 func Discover(workingDir string) *EnvironmentState {
-	slog.Info("Discovering Floyd ecosystem environment")
+	slog.Info("Discovering MegaFloyd ecosystem environment")
 
 	state := &EnvironmentState{
 		Timestamp:        time.Now().Format(time.RFC3339),
@@ -265,7 +265,7 @@ func discoverMCPServers(state *EnvironmentState, mcpDir string) {
 // discoverActiveMCPs adds currently connected MCP servers from the runtime.
 func discoverActiveMCPs(state *EnvironmentState) {
 	// Get currently connected MCP servers
-	mcpStates := mcp.GetStates()
+	mcpStates := mcp.GetStatesForWorkspace(state.WorkingDirectory)
 	for name, info := range mcpStates {
 		if info.State == mcp.StateConnected {
 			// Add or update the server info

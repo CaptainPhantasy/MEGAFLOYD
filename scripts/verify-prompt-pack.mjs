@@ -34,7 +34,7 @@ function sha256(file) {
 function listTemplates(dir) {
   if (!existsSync(dir)) return null;
   return readdirSync(dir)
-    .filter((f) => statSync(join(dir, f)).isFile())
+    .filter((f) => statSync(join(dir, f)).isFile() && !f.includes('.bak-') && !f.includes('.bak.'))
     .sort();
 }
 
@@ -58,8 +58,14 @@ for (const dir of DERIVED_DIRS) {
   }
   for (const name of canonicalFiles) {
     if (!files.includes(name)) {
-      console.error(`FAIL  ${label} is missing ${name}`);
-      drifted += 1;
+      if (sync) {
+        writeFileSync(join(dir, name), readFileSync(join(CANONICAL_DIR, name)));
+        console.log(`SYNC  ${label}/${name}`);
+        synced += 1;
+      } else {
+        console.error(`FAIL  ${label} is missing ${name}`);
+        drifted += 1;
+      }
       continue;
     }
     const want = canonical.get(name);

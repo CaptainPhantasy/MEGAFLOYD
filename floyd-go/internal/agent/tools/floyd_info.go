@@ -46,7 +46,7 @@ func buildFloydInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills 
 	writeModels(&b, cfg)
 	writeProviders(&b, cfg)
 	writeLSP(&b, lspManager, cfg)
-	writeMCP(&b, mcp.GetStates(), cfg)
+	writeMCP(&b, mcp.GetStates(cfg), cfg)
 	writeSkills(&b, allSkills, activeSkills, skillTracker, cfg)
 	writeHooks(&b, cfg)
 	writePermissions(&b, cfg)

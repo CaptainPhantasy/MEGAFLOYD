@@ -4,7 +4,6 @@ package logo
 import (
 	"fmt"
 	"image/color"
-	"math/rand/v2"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -40,54 +39,17 @@ type Opts struct {
 // The compact argument determines whether it renders compact for the sidebar
 // or wider for the main pane.
 func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
-	label := "megafloyd"
-	if !o.Hyper {
-		label = " " + label
-	}
-
+	label := "MegaFloyd"
 	fg := func(c color.Color, s string) string {
 		return lipgloss.NewStyle().Foreground(c).Render(s)
 	}
+	// The visible wordmark is independent of the model provider.
+	floyd := "MegaFloyd"
 
-	// Title.
-	const spacing = 1
-	var hyperLetterforms []letterform
-	if o.Hyper {
-		hyperLetterforms = []letterform{
-			LetterH,
-			LetterYAlt,
-			LetterP,
-			LetterE,
-			LetterR,
-		}
-	}
-	floydLetterforms := []letterform{
-		LetterF,
-		LetterL,
-		LetterO,
-		LetterY,
-		LetterD,
-	}
-	if o.Hyper && !compact {
-		floydLetterforms = append(hyperLetterforms, floydLetterforms...)
-	}
-
-	stretchIndex := -1 // -1 means no stretching.
-	if !compact && !o.Unstable {
-		// Always stretch the same letterform, which is picked once at random.
-		stretchIndex = cachedRandN(len(floydLetterforms))
-	} else if !compact && o.Unstable {
-		// Stretch a random letterform on every render.
-		stretchIndex = rand.IntN(len(floydLetterforms))
-	}
-	floyd := renderWord(spacing, stretchIndex, floydLetterforms...)
-	if o.Hyper && compact {
-		floyd = renderWord(spacing, stretchIndex, hyperLetterforms...) + "\n" + floyd
-	}
-	floydWidth := lipgloss.Width(floyd)
+	floydWidth := max(24, lipgloss.Width(floyd))
 	b := new(strings.Builder)
 	for r := range strings.SplitSeq(floyd, "\n") {
-		fmt.Fprintln(b, styles.ApplyForegroundGrad(base, r, o.TitleColorA, o.TitleColorB))
+		fmt.Fprintln(b, styles.ApplyBoldForegroundGrad(base, r, o.TitleColorA, o.TitleColorB))
 	}
 	floyd = b.String()
 
@@ -95,9 +57,7 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	metaRowGap := 1
 	maxVersionWidth := floydWidth - lipgloss.Width(label) - metaRowGap
 	version = ansi.Truncate(version, maxVersionWidth, "…") // truncate version if too long.
-	if o.Hyper && compact {
-		version += " "
-	}
+
 	gap := max(0, floydWidth-lipgloss.Width(label)-lipgloss.Width(version))
 	metaRow := fg(o.CharmColor, label) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
 
@@ -149,10 +109,7 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 // SmallRender renders a smaller version of the Floyd logo, suitable for
 // smaller windows or sidebar usage.
 func SmallRender(t *styles.Styles, width int, o Opts) string {
-	name := "megafloyd"
-	if o.Hyper {
-		name = "HYPERFLOYD"
-	}
+	name := "MegaFloyd"
 	title := t.Logo.SmallCharm.Render(name)
 	remainingWidth := width - lipgloss.Width(title) - 1 // 1 for the space after the name
 	if remainingWidth > 0 {

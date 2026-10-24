@@ -137,6 +137,9 @@ func NewWriteTool(
 				return resp, nil
 			}
 
+			if err := history.CaptureBefore(ctx, files, filePath); err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("capture file history: %w", err)
+			}
 			err = os.WriteFile(filePath, []byte(params.Content), 0o644)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error writing file: %w", err)

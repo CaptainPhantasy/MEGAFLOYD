@@ -25,16 +25,20 @@ func (b *Backend) AnswerQuestion(workspaceID string, req proto.QuestionAnswer) (
 		}
 	}
 
-	return ws.Questions.Answer(responses), nil
+	return ws.Questions.AnswerRequest(req.BatchRequestID, responses), nil
 }
 
 // CancelQuestion cancels the pending question for a workspace.
 // Returns true if a question was cancelled, false if none was
 // pending.
 func (b *Backend) CancelQuestion(workspaceID string) (bool, error) {
+	return b.CancelQuestionRequest(workspaceID, "")
+}
+
+func (b *Backend) CancelQuestionRequest(workspaceID, requestID string) (bool, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return false, err
 	}
-	return ws.Questions.Cancel(), nil
+	return ws.Questions.CancelRequest(requestID), nil
 }

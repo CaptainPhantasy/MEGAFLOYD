@@ -58,7 +58,11 @@ func applyCLIName(cmd *cobra.Command, name string) {
 	cmd.Example = exampleCommandLine.ReplaceAllStringFunc(cmd.Example, func(line string) string {
 		return strings.Replace(line, floydBinaryName, name, 1)
 	})
+	cmd.SetVersionTemplate(defaultVersionTemplate)
 	renameFloydFlagUsage(cmd, name)
+	for _, child := range cmd.Commands() {
+		applyCLIName(child, name)
+	}
 }
 
 // renameFloydFlagUsage updates the two persistent flag descriptions that
@@ -67,11 +71,11 @@ func renameFloydFlagUsage(cmd *cobra.Command, name string) {
 	updates := map[string][2]string{
 		"data-dir": {
 			"Custom floyd data directory",
-			"Custom " + name + " data directory",
+			"Custom MegaFloyd data directory",
 		},
 		"host": {
 			"Connect to a specific floyd server host (for advanced users)",
-			"Connect to a specific " + name + " server host (for advanced users)",
+			"Connect to a specific MegaFloyd server host (for advanced users)",
 		},
 	}
 	for flag, texts := range updates {

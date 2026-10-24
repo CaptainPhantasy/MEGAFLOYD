@@ -1,8 +1,8 @@
-# Floyd Development Guide
+# MegaFloyd Development Guide
 
 ## Project Overview
 
-Floyd is a terminal-based AI coding assistant written in Go. It connects to
+MegaFloyd is a terminal-based AI coding assistant written in Go. It connects to
 LLMs and gives them tools to read, write, and execute code. It supports many
 providers (Anthropic, OpenAI, Gemini, Bedrock, Copilot, Hyper, MiniMax,
 Vercel, and more via OpenAI-/Anthropic-compatible APIs), integrates with LSPs
@@ -25,22 +25,27 @@ Key facts:
 - Active branch: `floyd-v6`.
 - SQLite persistence via `ncruces/go-sqlite3` / `sqlc`; no CGO.
 
-### Rebrand conventions
+### Canonical product identity
 
-A repo-wide sweep renamed user-facing identifiers from Crush to Floyd. When
-touching user-facing strings, env vars, file names, or docs, keep the Floyd
-naming and respect the established aliases:
-
-- Env vars: `FLOYD_*` (e.g. `FLOYD_GLOBAL_CONFIG`, `FLOYD_GLOBAL_DATA`,
-  `FLOYD_PROFILE`, `FLOYD_IDENTITY`). `CRUSH_*` names are kept as
-  compatibility mirrors; check the allow-list in the config package before
-  adding or removing mirrors.
-- Files and paths: `floydrc`, `.floydrc`, `FLOYD.md`,
-  `~/.config/floyd/`, `floyd.db`, `floyd.log`.
-- Identity: `FLOYD_IDENTITY` env var > `agent_name` option > "Floyd".
-  System-prompt overrides can be placed in `~/.config/floyd/prompts/`.
-- One cassette-bound test (`TestCoderAgent`) is currently skipped pending a
-  cassette re-record after the rebrand.
+- The product displayed to people is **MegaFloyd**. Keep this spelling in UI,
+  notifications, help, native prompts, and newly generated product labels.
+- The executable remains `megafloyd` (with the installed `megafloid` alias).
+  Do not rename Go module/import paths or provider/model/tool protocol IDs.
+- The canonical home is `~/.megafloyd`, overridden by `MEGAFLOYD_HOME`.
+  `MEGAFLOYD_*` settings are mirrored into the `FLOYD_*` chassis environment
+  where required. The mirror names are internal compatibility contracts.
+- Native configuration files still use their actual supported names such as
+  `floyd.json`, `floydrc`, and `floyd.db`; do not advertise nonexistent files.
+  Canonical project guidance uses `AGENTS.md` and `MEGAFLOYD.md`.
+- The default agent display identity is `MegaFloyd`. Preserve an explicit
+  `MEGAFLOYD_IDENTITY`/configured persona selected by the user.
+- macOS keeps the stable physical `MEGAFLOYD.app`/`MacOS/MEGAFLOYD` paths and
+  `ai.legacy.megafloyd` bundle ID. Its displayed name is `MegaFloyd`.
+- Personal runtime data defaults to the current account's home under
+  `data/workspaces/<canonical-working-directory-hash>`; explicit per-account
+  legacy bindings preserve existing sessions without cross-account discovery.
+- One cassette-bound test (`TestCoderAgent`) is skipped pending a cassette
+  re-record; never invoke live providers merely for branding validation.
 
 ## Architecture
 
@@ -126,7 +131,7 @@ internal/
   `.md` (or `.md.tpl`) description file in `internal/agent/tools/`.
 - **System prompts are Go templates**: `internal/agent/templates/*.md.tpl`
   with runtime data injected.
-- **Context files**: Floyd reads `AGENTS.md`, `FLOYD.md`, `CLAUDE.md`,
+- **Context files**: MegaFloyd reads `AGENTS.md`, `FLOYD.md`, `CLAUDE.md`,
   `GEMINI.md` (and `.local` variants) from the working directory, plus global
   context from `~/.config/floyd/FLOYD.md` and `~/.config/AGENTS.md` by
   default. Project initialization writes `AGENTS.md` (configurable via
@@ -246,8 +251,8 @@ Use [go-task](https://taskfile.dev) (`task`) or raw `go` commands.
 - ALWAYS use semantic commits (`fix:`, `feat:`, `chore:`, `refactor:`,
   `docs:`, `sec:`, etc).
 - Keep commits to one line unless additional context is truly necessary.
-- Never push to `origin` — it points at the upstream Charm repository. This
-  fork is private.
+- `origin` is the canonical private MegaFloyd repository. Use the owner-requested
+  branch and pull-request workflow.
 
 ## Working on the TUI (UI)
 
@@ -296,7 +301,7 @@ overrides), then wire it into `ThemeForProvider`.
 ## Security Considerations
 
 - **Config is trusted code**: `floydrc` runs in a full shell, and any
-  `$(...)` in `floyd.json` is expanded at load time. Never point Floyd at a
+  `$(...)` in `floyd.json` is expanded at load time. Never point MegaFloyd at a
   directory whose config you haven't reviewed, and never `source` untrusted
   files from config.
 - **Hooks run arbitrary shell commands** on hook events. Treat hook inputs
@@ -317,7 +322,7 @@ overrides), then wire it into `ThemeForProvider`.
 - `docs/config/` — the `floydrc` format, versioning, and legacy JSON.
 - `docs/hooks/` — the hook protocol and examples (Claude Code-compatible).
 - `internal/ui/AGENTS.md` — TUI-specific development rules.
-- `.agents/skills/` — repo-shipped guidance for agents working on Floyd
+- `.agents/skills/` — repo-shipped guidance for agents working on MegaFloyd
   itself (builtin skills and shell builtins).
 - `schema.json` — generated JSON schema for `floyd.json` (run `task schema`
   after config struct changes).

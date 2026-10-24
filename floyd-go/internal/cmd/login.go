@@ -20,8 +20,8 @@ import (
 var loginCmd = &cobra.Command{
 	Aliases: []string{"auth"},
 	Use:     "login [platform]",
-	Short:   "Login Floyd to a platform",
-	Long: `Login Floyd to a specified platform.
+	Short:   "Login MegaFloyd to a platform",
+	Long: `Login MegaFloyd to a specified platform.
 The platform should be provided as an argument.
 Available platforms are: hyper, copilot.`,
 	Example: `

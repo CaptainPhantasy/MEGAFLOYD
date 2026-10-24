@@ -51,6 +51,7 @@ var defaultIgnorePatterns = []string{
 	"build",
 	".git",
 	".floyd",
+	".megafloyd",
 	".vscode",
 	".idea",
 	"coverage",

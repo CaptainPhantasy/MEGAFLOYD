@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -43,7 +44,9 @@ func useCompanyExecutable(t *testing.T, path string) {
 }
 
 func companyAuthConfig() *config.Config {
-	cfg := &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}
+	cfg := &config.Config{Providers: csync.NewMap[string, config.ProviderConfig](), Models: map[config.SelectedModelType]config.SelectedModel{
+		config.SelectedModelTypeLarge: {Provider: "company"}, config.SelectedModelTypeSmall: {Provider: "company-anthropic"},
+	}}
 	cfg.Providers.Set("company", config.ProviderConfig{
 		ID:     "company",
 		Type:   catwalk.Type("openai"),
@@ -66,7 +69,7 @@ func TestApplyCompanyAuthCredentialsNoPlaceholders(t *testing.T) {
 	source := &fakeCompanyTokenSource{token: "unused"}
 	useCompanyTokenSource(t, source)
 	useCompanyExecutable(t, "/opt/floyd")
-	cfg := &config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}
+	cfg := &config.Config{Providers: csync.NewMap[string, config.ProviderConfig](), Models: map[config.SelectedModelType]config.SelectedModel{config.SelectedModelTypeLarge: {Provider: "real"}}}
 	cfg.Providers.Set("real", config.ProviderConfig{ID: "real", APIKey: "sk-real"})
 
 	require.NoError(t, applyCompanyAuthCredentials(t.Context(), config.NewTestStore(cfg)))
@@ -218,3 +221,28 @@ var (
 	_ companyTokenSource = (*fakeCompanyTokenSource)(nil)
 	_ companyTokenSource = (*managerTokenSource)(nil)
 )
+
+func TestCanonicalUnusedAccountDoesNotBlockBeam(t *testing.T) {
+	for _, withoutSelection := range []bool{false, true} {
+		t.Run(fmt.Sprint(withoutSelection), func(t *testing.T) {
+			source := &fakeCompanyTokenSource{err: megafloydauth.ErrNotLoggedIn}
+			useCompanyTokenSource(t, source)
+			cfg := companyAuthConfig()
+			selected := config.SelectedModel{Provider: "opencode-go", Model: "beam-free", MaxTokens: 131072, ReasoningEffort: "medium"}
+			cfg.Models = map[config.SelectedModelType]config.SelectedModel{config.SelectedModelTypeLarge: selected}
+			cfg.Providers.Set("opencode-go", config.ProviderConfig{ID: "opencode-go", APIKey: "unchanged-beam-fixture"})
+			if withoutSelection {
+				cfg.Models = nil
+			}
+			require.NoError(t, applyCompanyAuthCredentials(t.Context(), config.NewTestStore(cfg)))
+			require.Zero(t, source.calls, "an unused logged-out account must not be consulted")
+			beam, _ := cfg.Providers.Get("opencode-go")
+			require.Equal(t, "unchanged-beam-fixture", beam.APIKey)
+			company, _ := cfg.Providers.Get("company")
+			require.Equal(t, config.CompanyAuthAPIKeyScheme+"default", company.APIKey)
+			if !withoutSelection {
+				require.Equal(t, selected, cfg.Models[config.SelectedModelTypeLarge])
+			}
+		})
+	}
+}

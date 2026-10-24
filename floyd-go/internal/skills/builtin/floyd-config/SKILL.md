@@ -1,13 +1,13 @@
 ---
 name: floyd-config
-description: Use when the user needs help configuring Floyd — writing floydrc (the Bash config format) or floyd.json, setting up providers, models, LSPs, MCP servers, hooks, skills, permissions, or changing Floyd behavior.
+description: Use when the user needs help configuring MegaFloyd — writing floydrc (the Bash config format) or floyd.json, setting up providers, models, LSPs, MCP servers, hooks, skills, permissions, or changing MegaFloyd behavior.
 ---
 
-# Floyd Configuration
+# MegaFloyd Configuration
 
-Floyd supports two config formats:
+MegaFloyd supports two config formats:
 
-- **`floydrc`** — a Bash script that builds config by calling Floyd builtins.
+- **`floydrc`** — a Bash script that builds config by calling MegaFloyd builtins.
   **Preferred.** Because it is real Bash you get includes, secrets,
   conditionals, and variables for free.
 - **`floyd.json`** — static JSON. Fully supported; see
@@ -22,11 +22,11 @@ Both are discovered together and deep-merged. Priority (highest to lowest):
    `%USERPROFILE%\.config\floyd\floydrc` on Windows)
 
 Data directories (`~/.local/share/floyd` and `%LOCALAPPDATA%\floyd`) contain
-machine-owned JSON state only; Floyd does not discover or execute a `floydrc`
+machine-owned JSON state only; MegaFloyd does not discover or execute a `floydrc`
 from those locations.
 
 If a directory has both `floydrc` and `floyd.json`, they merge (`floydrc` wins
-on conflicts) and Floyd logs a warning.
+on conflicts) and MegaFloyd logs a warning.
 
 ## floydrc at a glance
 
@@ -54,7 +54,7 @@ Values are ordinary Bash — quote and expand normally (`"$VAR"`, `$(cmd)`,
 `${VAR:?required}`). A failing `$(command)` aborts the load.
 
 `FLOYD_VERSION` is exported into the script so you can feature-detect the
-running Floyd (it is the literal `devel` for local builds):
+running MegaFloyd (it is the literal `devel` for local builds):
 
 ```bash
 [[ "$FLOYD_VERSION" != devel ]] && lsp add gopls --command gopls
@@ -275,7 +275,7 @@ Event names are case-insensitive and accept snake_case: `PreToolUse`,
 
 ### Claude Code compatibility
 
-Floyd also accepts the Claude Code hook output format, so existing hooks work
+MegaFloyd also accepts the Claude Code hook output format, so existing hooks work
 unchanged:
 
 ```json
@@ -373,5 +373,5 @@ the request.
 
 Both formats are trusted code. `floydrc` runs entirely, and any `$(...)` in
 `floyd.json` runs at load time, with the invoking user's shell privileges,
-before the UI appears. Don't launch Floyd in a directory whose config you
+before the UI appears. Don't launch MegaFloyd in a directory whose config you
 haven't reviewed.

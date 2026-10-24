@@ -1,4 +1,4 @@
-// Package version provides version information and changelog for Floyd.
+// Package version provides version information and changelog for MegaFloyd.
 package version
 
 import (
@@ -56,7 +56,7 @@ func DefaultChangelog() *Changelog {
 			{
 				Version:     "v1.8",
 				Type:        "feature",
-				Title:       "Browser Control via Floyd TTY",
+				Title:       "Browser Control via MegaFloyd TTY",
 				Description: "Added browser automation commands: floyd_navigate, floyd_analyze_page, floyd_type, floyd_click, floyd_ui_audit. Requires 'source /usr/local/share/floyd/floyd-tools.sh' at session start.",
 				Category:    "tools",
 				Date:        "2026-03-10",
@@ -65,7 +65,7 @@ func DefaultChangelog() *Changelog {
 				Version:     "v1.8",
 				Type:        "feature",
 				Title:       "Skill and Agent Packager Agent",
-				Description: "New global agent for converting any idea/document into properly formatted Floyd skills or agents. Trigger: 'package'. Writes directly to correct disk locations.",
+				Description: "New global agent for converting any idea/document into properly formatted MegaFloyd skills or agents. Trigger: 'package'. Writes directly to correct disk locations.",
 				Category:    "agent",
 				Date:        "2026-03-10",
 			},
@@ -246,7 +246,7 @@ func DefaultChangelog() *Changelog {
 				Version:     "v4.0.0",
 				Type:        "feature",
 				Title:       "Environment State Caching",
-				Description: "Floyd ecosystem components (CLI, Desktop, Harness, Chrome Extension, Mobile) are automatically discovered at boot. Agent knows all component paths without guidance.",
+				Description: "MegaFloyd ecosystem components (CLI, Desktop, Harness, Chrome Extension, Mobile) are automatically discovered at boot. Agent knows all component paths without guidance.",
 				Category:    "agent",
 				Date:        "2026-02-22",
 				RelatedDocs: []string{"internal/environment/environment.go"},
@@ -377,7 +377,7 @@ func FormatForBoot() string {
 	changelog := GetChangelog()
 
 	var summary strings.Builder
-	summary.WriteString(fmt.Sprintf("Floyd %s - New Features:\n", changelog.CurrentVersion))
+	summary.WriteString(fmt.Sprintf("MegaFloyd %s - New Features:\n", changelog.CurrentVersion))
 
 	// Group by category
 	categories := make(map[string][]ChangelogEntry)
@@ -438,5 +438,5 @@ func GetJSON() (string, error) {
 
 // LogBoot logs the changelog at boot time.
 func LogBoot() {
-	slog.Info("Floyd changelog", "version", Version, "features", FormatCompact())
+	slog.Info("MegaFloyd changelog", "version", Version, "features", FormatCompact())
 }

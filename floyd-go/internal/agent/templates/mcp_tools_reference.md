@@ -99,7 +99,7 @@
 | `read_file` | Reading file contents | Supports line ranges, chunking | No syntax highlighting |
 | `list_symbols` | Navigating files | Extracts classes, functions, interfaces | Regex-based, not full AST |
 | `smart_replace` | Surgical edits | Validates uniqueness before replacing | Throws on multiple matches |
-| `manage_scratchpad` | Planning/workflow | Persistent scratchpad at `.floyd/scratchpad.md` | File-based, no versioning |
+| `manage_scratchpad` | Planning/workflow | Persistent scratchpad at `.megafloyd/scratchpad.md` | File-based, no versioning |
 
 **Default Ignore Patterns:** node_modules, .git, dist, build, .floyd
 
@@ -167,9 +167,9 @@
 | `refactoring_orchestrator` | Code restructuring | Safe refactoring coordination |
 | `semantic_diff_validator` | Change validation | Semantic diff analysis |
 
-**Note:** Project memory is stored locally in `.floyd/.supercache` — do NOT use any external cache server.
+**Note:** Project memory is stored locally in `.megafloyd/.supercache` — do NOT use any external cache server.
 
-**Storage Path:** `~/.floyd/supercache/{tier}/{key}.json`
+**Storage Path:** `~/.megafloyd/supercache/{tier}/{key}.json`
 
 ---
 
@@ -419,7 +419,7 @@ Need type error diagnosis?                 → floyd-devtools/typescript_semanti
 Need to find breaking commit?              → floyd-devtools/git_bisect
 Need to check git status?                  → floyd-git/git_status
 Need to commit changes?                    → floyd-git/git_commit
-Need to save reasoning for later?          → Write to .floyd/.supercache (local project file)
+Need to save reasoning for later?          → Write to .megafloyd/.supercache (local project file)
 Need to analyze screenshot?                → 4_5v_mcp/analyze_image
 ```
 
@@ -431,7 +431,7 @@ Need to analyze screenshot?                → 4_5v_mcp/analyze_image
 4. typescript_semantic_analyzer → Find type errors
 5. git_bisect → Find when error was introduced
 6. monorepo_dependency_analyzer → Check blast radius
-7. Write findings to .floyd/.supercache
+7. Write findings to .megafloyd/.supercache
 ```
 
 ---

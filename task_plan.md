@@ -1,3 +1,13 @@
+<!-- owner-final-release-hold-20261024:start -->
+**Owner release hold — recorded 20261024T231641Z (UTC).**
+
+Final build, package assembly, publication, installation, and runtime activation are held. The owner requires an advance alert before final build/packaging. Resume only after the coordinating root agent confirms the required advance notice was given, the artwork is ready, and this hold is lifted. Source edits, intermediate compilation, and focused read-only checks remain allowed.
+
+The current installed and last-verified running release is `megafloyd-20261024T230715Z` (version `2026.10.24`). Preserve its app, session history, credentials, and current DeepSeek V4.1 Flash settings (384,000 maximum output tokens, High reasoning). Do not quit/restart the app or bootstrap the staged login job during this hold.
+
+Candidate `megafloyd-20261024T231400Z` has intermediate native/main compilation outputs only. It has not been assembled, published, installed, or activated. Concurrent wordmark/branding work must be coordinated into the final source state before any authorized final package. Existing worker notes and historical verification entries below remain intact; their earlier completion statements do not lift this later hold.
+<!-- owner-final-release-hold-20261024:end -->
+
 # task_plan.md — MEGAFLOYD: land the merge, then make it the tool
 
 > Master plan. Supersedes the P0/P1-only framing. Kept in git so it travels with the project.
@@ -152,3 +162,71 @@ Spec: `docs/README-SPEC.md`; decision `docs/DECISIONS.md` D-7.
    layouts — desktop, iPad, iPhone 16 Pro — not one layout with breakpoints.
 6. **Budget context.** This build will spend real money in cloud build spaces on the Flash model.
    Gates and evidence exist to keep that spend honest, not to slow it down.
+
+
+<!-- owner-repair-plan-20261024:start -->
+
+# MegaFloyd repair plan — 24 October 2026
+
+The canonical project is /Volumes/SanDisk1Tb/MEGAFLOYD on the Mac mini.
+
+Work down this numbered list. User clarifications supplement this plan. Keep the working Storage and SanDisk versions as the baseline, retain completed work, and fix demonstrated connection or ownership problems. Use old projects as references for feature behavior. Repurpose useful assets and retire old platforms when that saves time; legacy compatibility is not a requirement. Test only what directly establishes the canonical MegaFloyd result.
+
+Intermediate builds are authorized. The owner has supplied the behavior examples and directed us to inspect the remaining dependencies ourselves. Finish the integrations and direct verification, then produce the final canonical build; no further inventory reply is pending.
+
+1. **Confirm the working baseline — recorded.**
+   Canonical executable: /Volumes/SanDisk1Tb/MEGAFLOYD/bin/megafloyd.
+   Canonical desktop: /Volumes/SanDisk1Tb/MEGAFLOYD/desktop/MEGAFLOYD.app.
+   Alternate working desktop: /Volumes/Storage/MEGAFLOYD-DESKTOP/MEGAFLOYD.app.
+   Existing desktop/UI changes are preserved. At the initial baseline, all three inspected Go executables reported “devel”, so version text alone could not distinguish their contents. The final release now has a version, unique BuildID, executable hashes and verified running paths, recorded in item 8.
+
+2. **Finish MegaFloyd’s state separation — implemented; focused checks and live runtime identity passed.**
+   Canonical home/configuration, workspace .megafloyd data, session database, cache, skills/roles, scratchpad, checkpoints, jobs and desktop lookup now resolve independently of inherited parent-harness paths. Existing donor histories and credentials have not been imported. Focused isolation checks passed.
+
+3. **Finish SSH and inference gateway access — verified through the intermediate canonical agent.**
+   SSH uses the normal Bash permission path. Canonical MCP configuration uses SSH stdio to inference. The rebuilt agent exposed eight gateway tools, obtained separate normal approvals, returned SSH hostname `inference`, and live-checked `environment-ecosystem`: reachable, 10 tools. Late discovery and MCP permission decoding defects were repaired and directly checked. See megafloyd-canonical-verification.json and megafloyd-mcp-onboarding.md.
+
+4. **Finish the intelligence wiring — implemented with focused checks; live suggestion passed.**
+   Role selection, fresh per-run context, tiered compaction, executable shell skills, persistent resilience and bounded AI suggestions have direct checks. The first live suggestion request failed on an expired Hyper token; native OAuth refresh succeeded, then the one bounded follow-up returned HTTP 200 in 3.395 seconds. Main model: opencode-go / beam-free. Suggestion model: hyper / deepseek-v4.1-flash. See megafloyd-intelligence-evidence.md for direct evidence. The owner authorized the current Beam session configuration for completion work. The temporary saved test overrides have been removed: 131,072 maximum output tokens and medium reasoning are restored. Future tests bound their own duration without changing saved model settings.
+
+5. **Finish terminal/web handoff and controls — implemented; focused and live runtime checks passed.**
+   The actual terminal and browser use the same Go coordinator, workspace, database and session. A real web-submitted SSH turn completed and appeared in both interfaces. Presence counted two clients together, then one after browser closure. Browser completion and normal permission projection were corrected and directly checked. The owner instructed: “Don't record them as limits. Record the steps necessary to make them a possibility and do it.” Complete these steps within this item:
+
+   5a. **Implemented; direct SQLite/file/HTTP checks passed.** Add Go-owned archive/unarchive, undo, fork/branch and per-turn file-history operations. Use existing session/message/history primitives; preserve earlier state before destructive changes. Wire the exact existing web contracts to those operations. Verified real state transitions, transcript recovery, and recorded file content. Undo matches the reference application: it rewinds conversation turns and leaves workspace files unchanged.
+
+   5b. **Implemented; focused fixtures passed; live workspace identity passed.** Add workspace registration/selection, extra workspace roots and attachment upload/consumption. Store uploads under MegaFloyd's own workspace data and pass real files/content into the same Go agent. The direct fixtures cover path handling, isolation and attachment round trips; the live adapter preserved existing preferences and did not initialize historical workspaces while listing them.
+
+   5c. **Implemented; direct control/queue/subagent/goal checks passed.** Expose and wire background task controls, queued prompts, subagent views/profiles, plans, swarm and goals through the existing Go execution paths. Persist their state within the canonical workspace. Verify creation, updates, cancellation and shared terminal/web observation without starting another agent engine.
+
+   5d. **Implemented; direct checks passed.** Connect provider credentials/configuration, MCP configuration/reload, plugin management and admin controls. Web and native account access now use one MEGAFLOYD credential slot. MCP connections and events are isolated per workspace. Reuse existing validated Go config operations and pure management helpers. Apply plugin skills/prompts/MCP contributions to the Go coordinator and use the identified company assets deliberately. Verify persistence and actual runtime reload.
+
+   **Model defaults corrected and verified.** A changed model now uses its own catalog maximum-output default and resets the previous model's provider options. Reasoning defaults to high when supported, otherwise the highest advertised effort; models with a simple reasoning switch default to on, and models without reasoning omit reasoning parameters. Explicit choices for the same model remain usable. Terminal reasoning off/on choices survive actual configuration reload, and the web status, session profile, snapshot and configuration consistently display an explicit off choice. The canonical Go reload/provider checks and focused web round-trip checks passed without generation. The final installed package preserves the existing Beam 131,072/medium and small-model 262,144/high settings.
+
+   5e. **Implemented; direct checks passed.** Implement all three visible approval policies, including Ask When Needed, in the Go permission path. Keep UI labels, actual policy and shared state consistent. Verify routine versus approval-requiring calls and normal grant/deny behavior.
+
+   5f. **Go D and matching web bundle built; actual browser/terminal workflow passed.** Browser D2 performed SSH and gateway health through two ordinary UI approvals in 13.311 seconds and two assistant steps. The attached Go TUI displayed the same tool results and final response. The earlier browser attempt was canceled by the test guard at JSON-string MCP arguments after SSH succeeded; the adapter decoding was fixed and directly checked before D2. Cancellation also exposed a stale TUI approval dialog: the native terminal-notification fix now passes its focused regression and is included in the final build. The existing prebuilt UI and mascot were preserved. Final installed desktop and terminal verification is recorded in item 8.
+
+6. **Run minimal intermediate checks — passed; receipts retained.**
+   Build the changed canonical Go and web components into intermediate output paths.
+   Verify canonical runtime identity, state location, gateway tool availability/execution, SSH, the bounded suggestion call, and terminal/web session continuity.
+   Fix observed failures and repeat only the affected check.
+   Use bounded test concurrency and observe open-file usage following the Mac incident.
+   Record evidence separately from implementation claims.
+   Eight reversible live control checks passed without a model call: plan editing, bounded swarm settings, per-session prompt/tools/MCP settings, manual shell history, fork/branch, archive/restore, undo, and idle queue/goal views. The three disposable sessions were removed. After the two authorized browser attempts, the original ten messages remain byte-equivalent by their content hash within the same 19-message session. Main/small model selections and provider configuration are unchanged. The browser submission's persisted default manual policy was removed through the native config API, restoring the original workspace config bytes. No further model calls are needed for final package verification.
+
+7. **Incorporate the remaining inventory — complete for the supplied behavior brief and retained company integrations.**
+   Verified path list: megafloyd-mac-verified-paths.txt.
+   F7, Floyd7 and merge/export items explain intended feature behavior; they are not a literal import list.
+   Several recent Floyd7 features already exist in canonical source, so copying those projects would duplicate work.
+   Existing admin/CDN/MCP Room hosting is running. The CDN's current /code installer targets Floyd7 state. MEGAFLOYD's complete-package release/installer is now published under /megafloyd on the same hosting; the canonical installation and the installed updater's no-update check passed over HTTPS. The existing company marketplace was verified and its two official ZIP links repaired in place. See megafloyd-admin-cdn-inventory.md; existing hosting is reused without creating replacement services.
+   Company account and marketplace URLs are now explicit keys in MEGAFLOYD's own config. Only those keys changed; model selections, provider credentials, and the native credential file were read back unchanged. Evaluate only relevant behavior gaps and explicitly retained company admin/CDN/gateway assets.
+   One subsequent explicit SignIn on the installed release linked 18 assigned company models through the existing native account slot at https://inference.tail58d565.ts.net:8446/v1. This added only providers.managed:floyd-code with the company-auth placeholder; all earlier provider objects, selected models, credential bytes and 19 session messages remained unchanged. No model generation was performed during this link check.
+   Feed any additional required changes back through the relevant numbered item without restarting this plan.
+
+8. **Produce and verify the final build — complete; actual installed desktop, terminal and shared session passed.**
+   Release 2026.10.24, BuildID megafloyd-20261024T212517Z is installed under /Volumes/SanDisk1Tb/MEGAFLOYD/releases, with current pointing to that immutable release. The actual native /v1/version response and loaded Go/Electron executable paths match the release; the installed launcher and desktop use its embedded web assets. Go SHA256: af294d89974585c5be3f55e7d49f98e16c9344d8d17d88083b76927b1fd56f9c. Web SHA256: 19a8bc69dcfd0a48d3bc6a982a84a2fa89ec8face4fe96908aa746a25076139b.
+   The canonical app opened through normal macOS LaunchServices with a cold megafloyd://session link. Its actual window displayed the preserved successful SSH/gateway reply, the message input and Send control, Always Ask, and Beam Free · Medium without the startup alert or welcome overlay. The latest installed terminal attached to that same Go coordinator and session, displayed the same saved results, and counted two clients together. It then closed normally with exit 0, leaving the desktop as one idle client. No generation was used for these final package checks.
+   At the final check, desktop PID 6456, Go PID 6510 and web PID 6522 were running from the final release. The desktop is left open at http://127.0.0.1:58627/sessions/41cffa2c-231a-46d8-b609-a729e74d78a8. All 19 messages, their content hash, the canonical workspace path and data directory, current model settings, protected configuration bytes and native credential bytes were preserved. The Go restart created a new transient workspace handle, 63188c39-3715-44a0-ab2f-4882ee792905; the current desktop and terminal shared that handle. The session UUID and stored workspace data did not change.
+   The owner closed the old Storage desktop before canonical GUI verification. Earlier release and intermediate receipts remain historical evidence. Normal cold launching exposed an actual BrowserWindow-before-ready error; the handler now waits for desktop initialization and engine readiness, its focused lifecycle regression passed, and the final cold launch directly verified the fix. The model-default, explicit reasoning-toggle persistence and web off-display corrections are included in this final package and have their focused checks recorded under item 5d.
+
+<!-- owner-repair-plan-20261024:end -->

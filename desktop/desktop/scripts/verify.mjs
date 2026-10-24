@@ -33,7 +33,7 @@ check('bundle identity', () => {
   const plist = path.join(CONTENTS, 'Info.plist');
   const expected = {
     CFBundleName: 'MEGAFLOYD',
-    CFBundleDisplayName: 'MEGAFLOYD',
+    CFBundleDisplayName: 'MegaFloyd',
     CFBundleExecutable: 'MEGAFLOYD',
     CFBundleIdentifier: 'ai.legacy.megafloyd',
     CFBundleShortVersionString: '1.0.0',

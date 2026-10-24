@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('megafloyd', {
   openExternal: (url) => ipcRenderer.invoke('megafloyd:open-external', String(url)),
   copy: (text) => ipcRenderer.invoke('megafloyd:copy', String(text)),
   chooseWorkspace: () => ipcRenderer.invoke('megafloyd:choose-workspace'),
+  handoff: (target) => ipcRenderer.invoke('megafloyd:handoff', String(target)),
   setBadge: (value) => ipcRenderer.invoke('megafloyd:set-badge', value),
   notify: (payload) => ipcRenderer.invoke('megafloyd:notify', payload),
 });

@@ -48,6 +48,9 @@ func HasIncompleteTodos(todos []Todo) bool {
 }
 
 type Session struct {
+	Metadata         map[string]any
+	Archived         bool
+	ArchivedAt       *int64
 	ID               string
 	ParentSessionID  string
 	Title            string
@@ -72,6 +75,7 @@ type Service interface {
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
+	AddUsage(ctx context.Context, sessionID string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
 
@@ -300,7 +304,18 @@ func (s *service) fromDBItem(item db.Session) Session {
 	if err != nil {
 		slog.Error("Failed to unmarshal todos", "session_id", item.ID, "error", err)
 	}
+	metadata := make(map[string]any)
+	if err := json.Unmarshal([]byte(item.Metadata), &metadata); err != nil {
+		slog.Error("Failed to unmarshal session metadata", "session_id", item.ID, "error", err)
+	}
+	var archivedAt *int64
+	if item.ArchivedAt.Valid {
+		archivedAt = &item.ArchivedAt.Int64
+	}
 	return Session{
+		Metadata:         metadata,
+		Archived:         item.ArchivedAt.Valid,
+		ArchivedAt:       archivedAt,
 		ID:               item.ID,
 		ParentSessionID:  item.ParentSessionID.String,
 		Title:            item.Title,
@@ -365,4 +380,15 @@ func (s *service) ParseAgentToolSessionID(sessionID string) (messageID string, t
 func (s *service) IsAgentToolSession(sessionID string) bool {
 	_, _, ok := s.ParseAgentToolSessionID(sessionID)
 	return ok
+}
+
+// AddUsage accumulates auxiliary model usage without overwriting conversation state.
+func (s *service) AddUsage(ctx context.Context, sessionID string, promptTokens, completionTokens int64, cost float64) error {
+	if err := s.q.AddSessionUsage(ctx, db.AddSessionUsageParams{
+		ID: sessionID, PromptTokens: promptTokens, CompletionTokens: completionTokens, Cost: cost,
+	}); err != nil {
+		return err
+	}
+	s.publishSessionUpdate(ctx, sessionID)
+	return nil
 }

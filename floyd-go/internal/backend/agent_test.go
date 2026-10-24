@@ -162,3 +162,7 @@ func TestSendMessage_SuccessIncrementsRunWG(t *testing.T) {
 		t.Fatal("runWG.Wait did not complete after the run returned")
 	}
 }
+
+func (c *blockingCoordinator) SuggestPrompt(context.Context, string, string) (string, error) {
+	return "", nil
+}

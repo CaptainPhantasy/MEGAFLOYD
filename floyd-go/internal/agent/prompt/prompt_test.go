@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -56,7 +57,9 @@ func TestPromptDataOmitsPluginXMLWithoutPaths(t *testing.T) {
 
 func TestPromptDataPopulatesMCPXML(t *testing.T) {
 	original := mcpPromptXML
-	mcpPromptXML = func() string { return "<available_mcp_tools><server name=\"fake\"/></available_mcp_tools>" }
+	mcpPromptXML = func(...mcp.WorkspaceScope) string {
+		return "<available_mcp_tools><server name=\"fake\"/></available_mcp_tools>"
+	}
 	t.Cleanup(func() { mcpPromptXML = original })
 
 	p, store := newTestPrompt(t, "<mcp>{{.AvailMCPXML}}</mcp>", t.TempDir(), &config.Options{})

@@ -4,9 +4,8 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/legacy-ai/floyd/internal/permission"
@@ -66,15 +65,9 @@ func NewApplyPatchTool(permissions permission.Service, wd string) fantasy.AgentT
 				return fantasy.NewTextErrorResponse("patch binary not found in $PATH. Please install GNU patch or apply the diff manually."), nil
 			}
 
-			patchFile := filepath.Join(wd, ".floyd", "temp.patch")
-			os.MkdirAll(filepath.Dir(patchFile), 0o755)
-
-			if err := os.WriteFile(patchFile, []byte(params.Patch), 0o644); err != nil {
-				return fantasy.NewTextResponse(err.Error()), nil
-			}
-			defer os.Remove(patchFile)
-
-			cmd := exec.CommandContext(ctx, patchBin, "-p1", "-i", patchFile)
+			// Feed the approved patch directly; no project-shared scratch file.
+			cmd := exec.CommandContext(ctx, patchBin, "-p1")
+			cmd.Stdin = strings.NewReader(params.Patch)
 			cmd.Dir = wd
 			out, err := cmd.CombinedOutput()
 			if err != nil {

@@ -12,11 +12,14 @@
 package megafloyd
 
 const (
-	// Name is the command and product name.
+	// Name is the executable command name.
 	Name = "megafloyd"
 
+	// DisplayName is the product name shown to people.
+	DisplayName = "MegaFloyd"
+
 	// EnvPrefix is the canonical environment namespace.
-	EnvPrefix = Name + "_"
+	EnvPrefix = "MEGAFLOYD_"
 
 	// HomeEnv overrides the megafloyd home directory.
 	HomeEnv = EnvPrefix + "HOME"

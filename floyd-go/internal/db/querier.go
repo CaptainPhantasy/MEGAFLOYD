@@ -9,9 +9,15 @@ import (
 )
 
 type Querier interface {
+	AddSessionUsage(ctx context.Context, arg AddSessionUsageParams) error
+	ClearSessionSummary(ctx context.Context, id string) error
+	CompleteSessionTurn(ctx context.Context, arg CompleteSessionTurnParams) error
+	CompleteTurnFile(ctx context.Context, arg CompleteTurnFileParams) error
+	CopySessionMessage(ctx context.Context, arg CopySessionMessageParams) (Message, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	CreateSessionTurn(ctx context.Context, arg CreateSessionTurnParams) error
 	DeleteFile(ctx context.Context, id string) error
 	DeleteMessage(ctx context.Context, id string) error
 	DeleteSession(ctx context.Context, id string) error
@@ -27,12 +33,17 @@ type Querier interface {
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
+	GetSessionTurn(ctx context.Context, arg GetSessionTurnParams) (SessionTurn, error)
+	GetSessionTurnByMessage(ctx context.Context, arg GetSessionTurnByMessageParams) (SessionTurn, error)
 	GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error)
 	GetTotalStats(ctx context.Context) (GetTotalStatsRow, error)
+	GetTurnFile(ctx context.Context, arg GetTurnFileParams) (TurnFileHistory, error)
 	GetUsageByDay(ctx context.Context) ([]GetUsageByDayRow, error)
 	GetUsageByDayOfWeek(ctx context.Context) ([]GetUsageByDayOfWeekRow, error)
 	GetUsageByHour(ctx context.Context) ([]GetUsageByHourRow, error)
 	GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error)
+	InsertSessionUndoRecord(ctx context.Context, arg InsertSessionUndoRecordParams) error
+	InsertTurnFile(ctx context.Context, arg InsertTurnFileParams) error
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
@@ -40,12 +51,17 @@ type Querier interface {
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListNewFiles(ctx context.Context) ([]File, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
+	ListSessionTurns(ctx context.Context, sessionID string) ([]SessionTurn, error)
 	ListSessions(ctx context.Context) ([]Session, error)
+	ListTurnFiles(ctx context.Context, arg ListTurnFilesParams) ([]TurnFileHistory, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
+	MarkSessionBranch(ctx context.Context, arg MarkSessionBranchParams) error
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
+	SetSessionArchived(ctx context.Context, arg SetSessionArchivedParams) (Session, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
+	UpdateSessionMetadata(ctx context.Context, arg UpdateSessionMetadataParams) error
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
 }
 

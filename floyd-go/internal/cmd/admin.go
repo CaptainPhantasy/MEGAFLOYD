@@ -54,7 +54,7 @@ func newAdminCommand() *cobra.Command {
 	admin := &cobra.Command{
 		Use:   "admin",
 		Short: "Manage company accounts and access",
-		Long: `Manage company accounts and access on the megafloyd admin plane.
+		Long: `Manage company accounts and access on the MegaFloyd admin interface.
 
 The default session mode mirrors the admin web app: it signs in with an
 administrator key, keeps the session cookie, and sends the CSRF token on

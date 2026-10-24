@@ -3,6 +3,7 @@ package prompt
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 )
 
 // CacheablePrompt contains the separated static and dynamic parts of a prompt.
@@ -50,6 +52,12 @@ func BuildCacheablePrompts(ctx context.Context, fullPrompt string, data PromptDa
 	}
 }
 
+// DynamicContext captures the current date, Git state, and project memory.
+// Call it once when a run starts, then retain that snapshot for its tool loop.
+func DynamicContext(ctx context.Context, workingDir string, cfg config.Config) string {
+	return buildDynamicContext(PromptDataForDynamic(ctx, workingDir, cfg))
+}
+
 // buildDynamicContext constructs the dynamic environment context string.
 // This content changes per-request and should NOT be cached.
 func buildDynamicContext(data PromptDat) string {
@@ -80,7 +88,7 @@ func buildDynamicContext(data PromptDat) string {
 	// Auto-inject .supercache content so the agent doesn't waste a tool call
 	// reading it on every boot. The supercache is a small JSON file with
 	// project identity and last-known state.
-	if supercache := readSupercache(data.WorkingDir); supercache != "" {
+	if supercache := readSupercache(data.WorkingDir, personalPromptDataDir(data.Config)); supercache != "" {
 		fmt.Fprintf(&sb, "\nProject state (.supercache): %s\n", supercache)
 	}
 
@@ -89,12 +97,25 @@ func buildDynamicContext(data PromptDat) string {
 	return sb.String()
 }
 
-// readSupercache reads the .floyd/.supercache file if it exists.
+// readSupercache reads only this distribution's project memory file.
 // Returns empty string if not found or on any error.
-func readSupercache(workingDir string) string {
-	path := filepath.Join(workingDir, ".floyd", ".supercache")
+func readSupercache(workingDir string, selected ...string) string {
+	var explicit string
+	if len(selected) > 0 {
+		explicit = selected[0]
+	}
+	dataDir, err := megafloyd.PersonalDataDir(workingDir, explicit)
+	if err != nil {
+		slog.Error("Cannot resolve personal prompt memory", "error", err)
+		return "[personal memory unavailable: " + err.Error() + "]"
+	}
+	path := filepath.Join(dataDir, ".supercache")
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Error("Cannot read personal prompt memory", "error", err)
+			return "[personal memory unavailable: " + err.Error() + "]"
+		}
 		return ""
 	}
 	content := strings.TrimSpace(string(data))
@@ -112,6 +133,7 @@ func PromptDataForDynamic(ctx context.Context, workingDir string, cfg config.Con
 	isGit := isGitRepo(workingDir)
 	data := PromptDat{
 		WorkingDir: workingDir,
+		Config:     cfg,
 		IsGitRepo:  isGit,
 		Platform:   runtime.GOOS,
 		Date:       time.Now().Format("1/2/2006"),
@@ -124,4 +146,11 @@ func PromptDataForDynamic(ctx context.Context, workingDir string, cfg config.Con
 	}
 
 	return data
+}
+
+func personalPromptDataDir(cfg config.Config) string {
+	if cfg.Options == nil {
+		return ""
+	}
+	return cfg.Options.DataDirectory
 }

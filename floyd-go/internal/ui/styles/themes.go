@@ -28,7 +28,7 @@ func ThemeNames() []ThemeInfo {
 	return []ThemeInfo{
 		{Name: ThemeAuto, Description: "Match the terminal background"},
 		{Name: ThemeDark, Description: "Charmtone Pantera (dark)"},
-		{Name: ThemeLight, Description: "Floyd Daylight (light)"},
+		{Name: ThemeLight, Description: "MegaFloyd Daylight (light)"},
 	}
 }
 

@@ -1,3 +1,4 @@
+import { startGoServer } from './goRuntime/server';
 import {
   bootstrap,
   drainQueryStoreDisposals,
@@ -141,6 +142,7 @@ const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 58627;
 
 export async function startServer(opts: ServerStartOptions): Promise<RunningServer> {
+  if ((opts.env ?? process.env)['MEGAFLOYD_GO_HOST']) return startGoServer(opts);
   const host = opts.host ?? DEFAULT_HOST;
   const port = opts.port ?? DEFAULT_PORT;
   const homeDir = resolveFloydHome(opts.homeDir);

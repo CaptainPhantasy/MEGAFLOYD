@@ -43,7 +43,7 @@ type ToolRegistry struct {
 }
 
 // BuildRegistry builds the complete tool registry from all available MCP tools.
-func BuildRegistry() *ToolRegistry {
+func BuildRegistry(scope ...mcp.WorkspaceScope) *ToolRegistry {
 	registry := &ToolRegistry{
 		ByServer:    make(map[string][]string),
 		ByCategory:  make(map[string][]string),
@@ -55,7 +55,7 @@ func BuildRegistry() *ToolRegistry {
 	serversSeen := make(map[string]bool)
 
 	// Iterate through all MCP tools
-	for mcpName, tools := range mcp.Tools() {
+	for mcpName, tools := range mcp.Tools(scope...) {
 		serversSeen[mcpName] = true
 		var serverTools []string
 
@@ -239,9 +239,9 @@ func contains(s, substr string) bool {
 
 // BootToolRegistry builds and returns the tool registry at boot time.
 // This should be called during agent initialization.
-func BootToolRegistry() (*ToolRegistry, error) {
+func BootToolRegistry(scope ...mcp.WorkspaceScope) (*ToolRegistry, error) {
 	slog.Info("Building tool registry at boot")
-	registry := BuildRegistry()
+	registry := BuildRegistry(scope...)
 	slog.Info("Tool registry built",
 		"total_tools", registry.TotalTools,
 		"total_servers", registry.TotalServers,
@@ -250,8 +250,8 @@ func BootToolRegistry() (*ToolRegistry, error) {
 }
 
 // BootToolRegistryJSON returns the tool registry as JSON.
-func BootToolRegistryJSON() (string, error) {
-	registry, err := BootToolRegistry()
+func BootToolRegistryJSON(scope ...mcp.WorkspaceScope) (string, error) {
+	registry, err := BootToolRegistry(scope...)
 	if err != nil {
 		return "", err
 	}
@@ -263,8 +263,8 @@ func BootToolRegistryJSON() (string, error) {
 }
 
 // BootSummary returns a one-line summary suitable for boot logging.
-func BootSummary() string {
-	registry, err := BootToolRegistry()
+func BootSummary(scope ...mcp.WorkspaceScope) string {
+	registry, err := BootToolRegistry(scope...)
 	if err != nil {
 		return fmt.Sprintf("Tool registry: unavailable (%v)", err)
 	}
@@ -272,27 +272,27 @@ func BootSummary() string {
 }
 
 // ListServers returns a list of all MCP servers that provided tools.
-func ListServers() []string {
+func ListServers(scope ...mcp.WorkspaceScope) []string {
 	var servers []string
-	for mcpName := range mcp.Tools() {
+	for mcpName := range mcp.Tools(scope...) {
 		servers = append(servers, mcpName)
 	}
 	return servers
 }
 
 // CountToolsByServer returns the count of tools for each server.
-func CountToolsByServer() map[string]int {
+func CountToolsByServer(scope ...mcp.WorkspaceScope) map[string]int {
 	counts := make(map[string]int)
-	for mcpName, tools := range mcp.Tools() {
+	for mcpName, tools := range mcp.Tools(scope...) {
 		counts[mcpName] = len(tools)
 	}
 	return counts
 }
 
 // GetToolNames returns all tool names in the format "server_tool".
-func GetToolNames() []string {
+func GetToolNames(scope ...mcp.WorkspaceScope) []string {
 	var names []string
-	for mcpName, tools := range mcp.Tools() {
+	for mcpName, tools := range mcp.Tools(scope...) {
 		for _, tool := range tools {
 			names = append(names, fmt.Sprintf("%s_%s", mcpName, tool.Name))
 		}
@@ -301,8 +301,8 @@ func GetToolNames() []string {
 }
 
 // IterateTools iterates over all tools, calling the provided function.
-func IterateTools(fn func(mcpName string, tool *mcp.Tool) bool) {
-	for mcpName, tools := range mcp.Tools() {
+func IterateTools(fn func(mcpName string, tool *mcp.Tool) bool, scope ...mcp.WorkspaceScope) {
+	for mcpName, tools := range mcp.Tools(scope...) {
 		for _, tool := range tools {
 			if !fn(mcpName, tool) {
 				return
@@ -312,18 +312,18 @@ func IterateTools(fn func(mcpName string, tool *mcp.Tool) bool) {
 }
 
 // ToolCount returns the total number of available tools.
-func ToolCount() int {
+func ToolCount(scope ...mcp.WorkspaceScope) int {
 	count := 0
-	for _, tools := range mcp.Tools() {
+	for _, tools := range mcp.Tools(scope...) {
 		count += len(tools)
 	}
 	return count
 }
 
 // ServerCount returns the number of MCP servers.
-func ServerCount() int {
+func ServerCount(scope ...mcp.WorkspaceScope) int {
 	count := 0
-	for range mcp.Tools() {
+	for range mcp.Tools(scope...) {
 		count++
 	}
 	return count
@@ -368,8 +368,8 @@ func BuiltinToolCount() int {
 
 // BuildUnifiedRegistry builds the complete registry including both
 // MCP tools and built-in tools.
-func BuildUnifiedRegistry() *ToolRegistry {
-	registry := BuildRegistry()
+func BuildUnifiedRegistry(scope ...mcp.WorkspaceScope) *ToolRegistry {
+	registry := BuildRegistry(scope...)
 
 	builtinMu.RLock()
 	defer builtinMu.RUnlock()

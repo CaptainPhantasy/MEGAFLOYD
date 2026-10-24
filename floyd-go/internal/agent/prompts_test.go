@@ -37,7 +37,7 @@ func TestRoleTemplateSelection(t *testing.T) {
 		want   string
 	}{
 		{"superfloyd profile", roleTemplateFor("superfloyd", "floyd"), "# SUPERFLOYD"},
-		{"megafloyd binary", roleTemplateFor("", "megafloyd"), "# SUPERFLOYD"},
+		{"megafloyd binary", roleTemplateFor("", "megafloyd"), "# MegaFloyd"},
 		{"superfloyd binary", roleTemplateFor("", "superfloyd"), "# SUPERFLOYD"},
 		{"general fallback", roleTemplateFor("", "floyd"), "# FLOYD"},
 	}

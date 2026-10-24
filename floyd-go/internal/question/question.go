@@ -185,10 +185,13 @@ type Service interface {
 
 	// Answer resolves the pending question with the given answers.
 	Answer(answers []Answer) bool
+	AnswerRequest(id string, answers []Answer) bool
+	Pending() []Request
 
 	// Cancel cancels the pending question. Returns false if no
 	// question is pending.
 	Cancel() bool
+	CancelRequest(id string) bool
 }
 
 type questionService struct {
@@ -198,6 +201,8 @@ type questionService struct {
 	pending            chan []Answer
 	cancelled          chan struct{}
 	pendingID          string
+	pendingRequest     *Request
+	askMu              sync.Mutex
 }
 
 // NewService creates a new question service.
@@ -244,10 +249,15 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 		return nil, err
 	}
 
+	s.askMu.Lock()
+	defer s.askMu.Unlock()
+	responseCh := make(chan []Answer, 1)
+	cancelCh := make(chan struct{})
 	s.mu.Lock()
-	s.pending = make(chan []Answer, 1)
-	s.cancelled = make(chan struct{})
+	s.pending = responseCh
+	s.cancelled = cancelCh
 	s.pendingID = req.ID
+	s.pendingRequest = &req
 	s.mu.Unlock()
 
 	defer func() {
@@ -255,6 +265,7 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 		s.pending = nil
 		s.cancelled = nil
 		s.pendingID = ""
+		s.pendingRequest = nil
 		s.mu.Unlock()
 	}()
 
@@ -263,9 +274,9 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.cancelled:
+	case <-cancelCh:
 		return nil, ErrCancelled
-	case answers := <-s.pending:
+	case answers := <-responseCh:
 		return answers, nil
 	}
 }
@@ -273,45 +284,43 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 // Answer resolves the pending question. Returns false if no
 // question is pending (already answered or cancelled).
 func (s *questionService) Answer(answers []Answer) bool {
-	s.mu.Lock()
-	batchID := s.pendingID
-	ch := s.pending
-	s.mu.Unlock()
+	return s.AnswerRequest("", answers)
+}
 
-	if ch == nil {
+// AnswerRequest resolves only the named pending request. Empty preserves the
+// existing in-process API; network clients should always provide the ID.
+func (s *questionService) AnswerRequest(id string, answers []Answer) bool {
+	s.mu.Lock()
+	if s.pending == nil || (id != "" && id != s.pendingID) {
+		s.mu.Unlock()
 		return false
 	}
+	batchID, ch := s.pendingID, s.pending
+	s.pending, s.cancelled, s.pendingRequest = nil, nil, nil
+	s.pendingID = ""
+	s.mu.Unlock()
 	ch <- answers
-
-	// Publish a notification so non-answering clients can dismiss
-	// their open question forms.
-	if batchID != "" {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{
-			BatchID: batchID,
-		})
-	}
+	s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{BatchID: batchID})
 	return true
 }
 
 // Cancel cancels the pending question. Returns false if no
 // question is pending.
 func (s *questionService) Cancel() bool {
-	s.mu.Lock()
-	batchID := s.pendingID
-	cancelCh := s.cancelled
-	s.mu.Unlock()
+	return s.CancelRequest("")
+}
 
-	if cancelCh == nil {
+func (s *questionService) CancelRequest(id string) bool {
+	s.mu.Lock()
+	if s.cancelled == nil || (id != "" && id != s.pendingID) {
+		s.mu.Unlock()
 		return false
 	}
+	batchID, cancelCh := s.pendingID, s.cancelled
+	s.pending, s.cancelled, s.pendingRequest = nil, nil, nil
+	s.pendingID = ""
+	s.mu.Unlock()
 	close(cancelCh)
-
-	// Publish a notification so non-answering clients can dismiss
-	// their open question forms.
-	if batchID != "" {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{
-			BatchID: batchID,
-		})
-	}
+	s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{BatchID: batchID})
 	return true
 }

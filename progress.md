@@ -1,3 +1,13 @@
+<!-- owner-final-release-hold-20261024:start -->
+**Owner release hold — recorded 20261024T231641Z (UTC).**
+
+Final build, package assembly, publication, installation, and runtime activation are held. The owner requires an advance alert before final build/packaging. Resume only after the coordinating root agent confirms the required advance notice was given, the artwork is ready, and this hold is lifted. Source edits, intermediate compilation, and focused read-only checks remain allowed.
+
+The current installed and last-verified running release is `megafloyd-20261024T230715Z` (version `2026.10.24`). Preserve its app, session history, credentials, and current DeepSeek V4.1 Flash settings (384,000 maximum output tokens, High reasoning). Do not quit/restart the app or bootstrap the staged login job during this hold.
+
+Candidate `megafloyd-20261024T231400Z` has intermediate native/main compilation outputs only. It has not been assembled, published, installed, or activated. Concurrent wordmark/branding work must be coordinated into the final source state before any authorized final package. Existing worker notes and historical verification entries below remain intact; their earlier completion statements do not lift this later hold.
+<!-- owner-final-release-hold-20261024:end -->
+
 # progress.md — MEGAFLOYD completion session log
 
 ## 2026-10-16 — session 1

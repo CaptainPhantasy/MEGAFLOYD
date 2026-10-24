@@ -86,7 +86,7 @@ func (hm *HealthMonitor) run(ctx context.Context) {
 
 // checkAll performs health checks on all connected MCP servers
 func (hm *HealthMonitor) checkAll(ctx context.Context) {
-	states := GetStates()
+	states := GetStates(hm.store)
 
 	for name, info := range states {
 		if info.State != StateConnected {
@@ -124,6 +124,7 @@ func (hm *HealthMonitor) checkAll(ctx context.Context) {
 
 // handleFailure handles a failed health check
 func (hm *HealthMonitor) handleFailure(ctx context.Context, name string, err error) {
+	key := registryName(hm.store, name)
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 
@@ -145,7 +146,7 @@ func (hm *HealthMonitor) handleFailure(ctx context.Context, name string, err err
 			"name", name,
 			"attempts", state.attempts,
 			"error", err)
-		updateState(name, StateError,
+		updateState(key, StateError,
 			fmt.Errorf("max restart attempts (%d) exceeded: %w", MaxRestartAttempts, err),
 			nil, Counts{})
 		return
@@ -168,36 +169,36 @@ func (hm *HealthMonitor) handleFailure(ctx context.Context, name string, err err
 		"backoff", state.backoff)
 
 	// Get current state for counts
-	currentState, _ := GetState(name)
+	currentState, _ := GetState(name, hm.store)
 
 	// Update state to starting
-	updateState(name, StateStarting, nil, nil, currentState.Counts)
+	updateState(key, StateStarting, nil, nil, currentState.Counts)
 
 	// Get config
 	cfg := hm.store.Config()
 	mcpConfig, exists := cfg.MCP[name]
 	if !exists {
-		updateState(name, StateError, fmt.Errorf("config not found"), nil, currentState.Counts)
+		updateState(key, StateError, fmt.Errorf("config not found"), nil, currentState.Counts)
 		return
 	}
 
 	// Tear down the failed session and rebuild it through the chassis
 	// connect path so generation guards, tool/prompt registration, and
 	// state transitions behave exactly like a config-change restart.
-	teardown(name)
+	teardown(key)
 	_, err = connectAndRegister(
 		ctx,
 		hm.store,
-		name,
+		key,
 		mcpConfig,
-		currentGen(name),
+		currentGen(key),
 		hm.store.Resolver(),
 		channelEnabled(hm.store.Overrides().EnabledChannels, name),
 	)
 	if err != nil {
 		// Increase backoff for next attempt
 		state.backoff = min(state.backoff*2, MaxRestartDelay)
-		updateState(name, StateError, err, nil, currentState.Counts)
+		updateState(key, StateError, err, nil, currentState.Counts)
 		return
 	}
 
@@ -232,18 +233,17 @@ func (hm *HealthMonitor) GetRestartState(name string) (attempts int, lastError e
 	return 0, nil
 }
 
-// Global health monitor instance
-var (
-	healthMonitor     *HealthMonitor
-	healthMonitorOnce sync.Once
-)
+var healthMonitorsMu sync.Mutex
+var healthMonitors = map[string]*HealthMonitor{}
 
-// GetHealthMonitor returns the singleton health monitor for the given
-// config store. The first caller's store wins; later calls with a different
-// store keep the original monitor.
 func GetHealthMonitor(store *config.ConfigStore) *HealthMonitor {
-	healthMonitorOnce.Do(func() {
-		healthMonitor = NewHealthMonitor(store)
-	})
-	return healthMonitor
+	key := scopePrefix(store)
+	healthMonitorsMu.Lock()
+	defer healthMonitorsMu.Unlock()
+	if monitor := healthMonitors[key]; monitor != nil {
+		return monitor
+	}
+	monitor := NewHealthMonitor(store)
+	healthMonitors[key] = monitor
+	return monitor
 }

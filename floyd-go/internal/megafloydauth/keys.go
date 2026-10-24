@@ -56,14 +56,14 @@ func StorageName(key string) (string, error) {
 	}
 	if name, ok := strings.CutPrefix(key, "oauth/"); ok && name != "" {
 		if strings.ContainsAny(name, "/\\") || strings.HasPrefix(name, ".") {
-			return "", fmt.Errorf("invalid Floyd OAuth token key: %q", key)
+			return "", fmt.Errorf("invalid MegaFloyd OAuth token key: %q", key)
 		}
 		return name, nil
 	}
 	if !strings.ContainsAny(key, "/\\") && !strings.HasPrefix(key, ".") {
 		return key, nil
 	}
-	return "", fmt.Errorf("invalid Floyd OAuth token key: %q", key)
+	return "", fmt.Errorf("invalid MegaFloyd OAuth token key: %q", key)
 }
 
 func normalizeEndpoint(value string) string {

@@ -12,7 +12,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/sahilm/fuzzy"
 
-	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/list"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
@@ -153,8 +152,8 @@ func (p *PluginsLibrary) loadPlugins() {
 
 	// Get live tool counts from MCP registry
 	toolCounts := make(map[string]int)
-	for name, tools := range mcp.Tools() {
-		toolCounts[name] = len(tools)
+	for name, state := range p.com.Workspace.MCPGetStates() {
+		toolCounts[name] = state.Counts.Tools
 	}
 
 	// 1. Load from configured MCP servers

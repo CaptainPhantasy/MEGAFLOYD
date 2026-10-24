@@ -37,7 +37,7 @@ LIMIT 1;
 -- name: ListSessions :many
 SELECT *
 FROM sessions
-WHERE parent_session_id is NULL
+WHERE parent_session_id is NULL OR is_branch = 1
 ORDER BY updated_at DESC;
 
 -- name: UpdateSession :one
@@ -71,4 +71,13 @@ WHERE id = ?;
 
 -- name: DeleteSession :exec
 DELETE FROM sessions
+WHERE id = ?;
+
+-- name: AddSessionUsage :exec
+UPDATE sessions
+SET
+    prompt_tokens = prompt_tokens + ?,
+    completion_tokens = completion_tokens + ?,
+    cost = cost + ?,
+    updated_at = strftime('%s', 'now')
 WHERE id = ?;

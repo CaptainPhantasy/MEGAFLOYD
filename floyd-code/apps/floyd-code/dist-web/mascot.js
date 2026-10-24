@@ -15,6 +15,295 @@
   var startedAt = Date.now();
   var root, faceEl, blinkTimer, idleTimer, moodTimer, scanQueued = false;
 
+  /* Each visible founder has its own resting pose and one-shot gestures.
+     Six CSS inches is an edge-to-edge 576px neighborhood at the current zoom. */
+  var FACE_SELECTOR = '.ch-logo, .brand-logo, .wi-face, .ws-mascot';
+  var FACE_POSES = [
+    { name: 'relaxed', row: 0, frame: 0, weight: 5 },
+    { name: 'smile', row: 0, frame: 5, weight: 4 },
+    { name: 'glance-up', row: 2, frame: 5, weight: 2 },
+    { name: 'glance-left', row: 5, frame: 3, weight: 2 },
+    { name: 'glance-right', row: 5, frame: 8, weight: 2 },
+    { name: 'thoughtful', row: 4, frame: 4, weight: 1 }
+  ];
+  var faceMedia = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var founderFaces = [], founderFrame = null, founderWake = null, founderScanQueued = false;
+  var lastFounderGesture = -Infinity;
+  var founderGeometryAt = 0, composerFounder = null, founderPointer = { active: false, x: 0, y: 0 };
+  var LOOK_YAW = [[5, 3], [5, 2], [5, 1], [0, 0], [5, 9], [5, 8], [5, 6]];
+  var LOOK_PITCH = [[4, 2], [4, 1], [0, 0], [4, 3], [4, 4], [4, 5]];
+
+  function faceRandom(min, max) { return min + Math.random() * (max - min); }
+
+  function faceVisible(el) {
+    var box = el.getBoundingClientRect(), style = getComputedStyle(el);
+    return el.isConnected && box.width > 0 && box.height > 0 && box.bottom > 0 && box.right > 0 &&
+      box.top < innerHeight && box.left < innerWidth && style.visibility !== 'hidden' && style.display !== 'none';
+  }
+
+  function facesNear(a, b) {
+    return faceDistance(a.box, b.box) < 576;
+  }
+
+  function faceDistance(x, y) {
+    if (!x || !y) return Infinity;
+    return Math.hypot(Math.max(0, x.left - y.right, y.left - x.right), Math.max(0, x.top - y.bottom, y.top - x.bottom));
+  }
+
+  function chooseComposerFounder() {
+    var composers = Array.from(document.querySelectorAll('.composer-card')).filter(faceVisible).map(function (el) { return el.getBoundingClientRect(); });
+    var candidate = founderFaces.find(function (state) { return state.visible && state.el.classList.contains('ws-mascot'); });
+    if (!candidate && composers.length) {
+      var nearest = 256;
+      founderFaces.forEach(function (state) {
+        if (!state.visible || !state.el.classList.contains('wi-face')) return;
+        var distance = Math.min.apply(null, composers.map(function (box) { return faceDistance(state.box, box); }));
+        if (distance < nearest) { candidate = state; nearest = distance; }
+      });
+    }
+    if (composerFounder !== candidate) {
+      if (composerFounder) {
+        composerFounder.el.classList.remove('mega-founder-follows');
+        composerFounder.el.style.removeProperty('--mega-founder-lean');
+        composerFounder.look = null;
+      }
+      composerFounder = candidate || null;
+    }
+    if (composerFounder) {
+      composerFounder.el.classList.add('mega-founder-follows');
+      if (founderPointer.active && !faceMedia.matches) beginFounderLook();
+    }
+  }
+
+  function beginFounderLook() {
+    if (!composerFounder || !composerFounder.visible) return;
+    composerFounder.motion = null;
+    if (!composerFounder.look) composerFounder.look = { x: 0, y: 0, at: performance.now(), axis: 'x' };
+  }
+
+  function moveFounderPointer(event) {
+    if (event.pointerType === 'touch' || faceMedia.matches || document.hidden) return;
+    founderPointer = { active: true, x: event.clientX, y: event.clientY };
+    beginFounderLook();
+    if (composerFounder && founderFrame === null) wakeFounders();
+  }
+
+  function releaseFounderPointer() {
+    founderPointer.active = false;
+    if (composerFounder && composerFounder.look) wakeFounders();
+  }
+
+  function tickFounderLook(state, now) {
+    var look = state.look, box = state.box;
+    var targetX = founderPointer.active ? Math.max(-1, Math.min(1, (founderPointer.x - box.left - box.width / 2) / 180)) : 0;
+    var targetY = founderPointer.active ? Math.max(-1, Math.min(1, (founderPointer.y - box.top - box.height / 2) / 160)) : 0;
+    var alpha = 1 - Math.exp(-Math.min(50, Math.max(0, now - look.at)) / 120);
+    look.at = now; look.x += (targetX - look.x) * alpha; look.y += (targetY - look.y) * alpha;
+    var moving = Math.abs(targetX - look.x) + Math.abs(targetY - look.y) > .006;
+    if (!moving) { look.x = targetX; look.y = targetY; }
+    if (Math.abs(look.y) > Math.abs(look.x) * 1.2) look.axis = 'y';
+    else if (Math.abs(look.x) > Math.abs(look.y) * 1.2) look.axis = 'x';
+    var cell = look.axis === 'x' ? LOOK_YAW[Math.round(look.x * 3) + 3] : LOOK_PITCH[look.y < 0 ? 2 + Math.round(look.y * 2) : 2 + Math.round(look.y * 3)];
+    state.pose = { name: 'follow-' + (look.axis === 'x' ? look.x < -.16 ? 'left' : look.x > .16 ? 'right' : 'center' : look.y < -.16 ? 'up' : look.y > .16 ? 'down' : 'center'), row: cell[0], frame: cell[1] };
+    /* Reserve the cursor's pose before reallocating a nearby held expression. */
+    state.row = cell[0]; state.frame = cell[1];
+    founderFaces.forEach(function (other) {
+      if (other !== state && other.visible && facesNear(state, other) && faceCellKey(other.row, other.frame) === faceCellKey(cell[0], cell[1])) settleFounder(other, chooseFounderPose(other), now);
+    });
+    paintFounder(state, cell[0], cell[1]);
+    state.el.style.setProperty('--mega-founder-lean', 'translate(' + (look.x * 1.5).toFixed(3) + 'px,' + (look.y * 1.2).toFixed(3) + 'px) rotate(' + (look.x * 2).toFixed(3) + 'deg)');
+    if (!founderPointer.active && !moving) {
+      state.look = null;
+      state.el.style.removeProperty('--mega-founder-lean');
+      settleFounder(state, FACE_POSES[0], now);
+    }
+    look.moving = moving;
+    return moving;
+  }
+
+  function faceCellKey(row, frame) {
+    return frame === 0 || frame === 11 ? 'rest' : row + ':' + frame;
+  }
+
+  function occupiedFace(state, row, frame) {
+    var key = faceCellKey(row, frame);
+    return founderFaces.some(function (other) {
+      return other !== state && other.visible && facesNear(state, other) &&
+        faceCellKey(other.row, other.frame) === key;
+    });
+  }
+
+  function paintFounder(state, row, frame) {
+    if (occupiedFace(state, row, frame)) return;
+    state.row = row; state.frame = frame;
+    state.el.style.setProperty('--floyd-face-x', (frame / 11 * 100) + '%');
+    state.el.style.setProperty('--floyd-face-y', (row / 5 * 100) + '%');
+    state.el.dataset.megafloydExpression = state.pose.name;
+  }
+
+  function chooseFounderPose(state) {
+    var neighbors = founderFaces.filter(function (other) { return other !== state && other.visible && other.pose && facesNear(state, other); });
+    var available = FACE_POSES.filter(function (pose) {
+      return !neighbors.some(function (other) { return other.pose.name === pose.name; }) && !occupiedFace(state, pose.row, pose.frame);
+    });
+    var distinct = available.filter(function (pose) { return !founderFaces.some(function (other) { return other !== state && other.visible && other.pose && other.pose.name === pose.name; }); });
+    var pool = distinct.length ? distinct : available;
+    var fresh = pool.filter(function (pose) { return state.history.indexOf(pose.name) === -1; });
+    var choices = fresh.length ? fresh : pool;
+    if (!choices.length) {
+      /* Extra simultaneously visible heads can use another existing, distinct
+         held cell instead of disappearing or waiting for a free pose forever. */
+      for (var row = 0; row < 6; row++) for (var frame = 2; frame < 10; frame++) {
+        if (!occupiedFace(state, row, frame)) return { name: 'detail-' + row + '-' + frame, row: row, frame: frame, weight: 1 };
+      }
+      return state.pose || FACE_POSES[0];
+    }
+    var total = choices.reduce(function (sum, pose) { return sum + pose.weight; }, 0), pick = Math.random() * total;
+    for (var i = 0; i < choices.length; i++) { pick -= choices[i].weight; if (pick <= 0) return choices[i]; }
+    return choices[choices.length - 1];
+  }
+
+  function settleFounder(state, pose, now) {
+    state.pose = pose; state.motion = null;
+    state.history = state.history.concat(pose.name).slice(-2);
+    paintFounder(state, pose.row, pose.frame);
+    state.nextAt = now + faceRandom(4200, 10800) * state.tempo;
+  }
+
+  function startFounderGesture(state, now) {
+    var previous = state.pose;
+    var next = now - state.changedAt > 14000 && Math.random() < .35 ? chooseFounderPose(state) : previous;
+    var cells = [];
+    function add(row, from, to) {
+      var direction = from <= to ? 1 : -1;
+      for (var frame = from; direction > 0 ? frame <= to : frame >= to; frame += direction) cells.push({ row: row, frame: frame });
+    }
+    if (next.name !== previous.name) {
+      add(state.row, state.frame, 11);
+      add(next.row, 0, next.frame);
+      state.changedAt = now;
+      state.history = state.history.concat(next.name).slice(-2);
+    } else if (previous.name === 'relaxed') {
+      add(3, 1, 6); add(3, 5, 1); cells.push({ row: 0, frame: 0 });
+    } else {
+      var excursion = Math.min(9, Math.max(2, previous.frame + (Math.random() < .5 ? -2 : 2)));
+      add(previous.row, previous.frame, excursion); add(previous.row, excursion, previous.frame);
+    }
+    state.pose = next;
+    var elapsed = 0;
+    cells.forEach(function (cell, index) {
+      var progress = cells.length > 1 ? index / (cells.length - 1) : 1;
+      var duration = previous.name === 'relaxed' && next === previous ? 23 + 12 * Math.abs(progress * 2 - 1) : 52 + 55 * Math.abs(progress * 2 - 1);
+      if (index === Math.floor(cells.length / 2)) duration += next === previous && previous.name === 'relaxed' ? 35 : faceRandom(100, 230);
+      elapsed += duration * state.tempo;
+      cell.until = elapsed;
+    });
+    state.motion = { startedAt: now, cells: cells, duration: elapsed };
+    lastFounderGesture = now;
+  }
+
+  function stopFounderClock() {
+    if (founderFrame !== null) cancelAnimationFrame(founderFrame);
+    clearTimeout(founderWake); founderFrame = null; founderWake = null;
+  }
+
+  function tickFounders(now) {
+    founderFrame = null;
+    if (document.hidden || faceMedia.matches) return;
+    var active = false, nextAt = Infinity;
+    if (composerFounder && composerFounder.look && now - founderGeometryAt > 250) {
+      founderFaces.forEach(function (state) { state.box = state.el.getBoundingClientRect(); });
+      founderGeometryAt = now;
+    }
+    founderFaces.forEach(function (state) {
+      if (!state.visible) return;
+      if (state.look) { active = tickFounderLook(state, now) || active; if (state.look) return; }
+      if (!state.motion && now >= state.nextAt) {
+        var nearbyMoving = founderFaces.some(function (other) { return other !== state && other.visible && (other.motion || (other.look && other.look.moving)) && facesNear(state, other); });
+        if (nearbyMoving || now - lastFounderGesture < 450) state.nextAt = now + faceRandom(650, 1600);
+        else startFounderGesture(state, now);
+      }
+      if (state.motion) {
+        var elapsed = now - state.motion.startedAt;
+        var cell = state.motion.cells.find(function (part) { return elapsed < part.until; });
+        if (cell) { paintFounder(state, cell.row, cell.frame); active = true; }
+        else settleFounder(state, state.pose, now);
+      }
+      nextAt = Math.min(nextAt, state.nextAt);
+    });
+    if (active) founderFrame = requestAnimationFrame(tickFounders);
+    else if (nextAt < Infinity) founderWake = setTimeout(function () { founderWake = null; founderFrame = requestAnimationFrame(tickFounders); }, Math.max(30, nextAt - performance.now()));
+  }
+
+  function scanFounderHeads() {
+    founderScanQueued = false;
+    var now = performance.now();
+    founderFaces = founderFaces.filter(function (state) { return state.el.isConnected; });
+    document.querySelectorAll(FACE_SELECTOR).forEach(function (el) {
+      if (el.classList.contains('brand-logo')) {
+        var size = parseFloat(el.style.width) || 64;
+        el.style.setProperty('--mega-founder-size', size * 2 + 'px');
+      }
+      if (!founderFaces.some(function (state) { return state.el === el; })) {
+        var state = { el: el, pose: null, row: -1, frame: -1, visible: false, history: [], tempo: faceRandom(.86, 1.18), nextAt: now, changedAt: now, motion: null };
+        founderFaces.push(state);
+        el.addEventListener('click', function () {
+          if (!faceMedia.matches && !document.hidden) { state.nextAt = performance.now() + faceRandom(80, 450); wakeFounders(); }
+        });
+      }
+    });
+    founderFaces.forEach(function (state) { state.box = state.el.getBoundingClientRect(); state.visible = faceVisible(state.el); });
+    founderGeometryAt = now;
+    chooseComposerFounder();
+    founderFaces.forEach(function (state) {
+      if (!state.visible) { state.motion = null; state.look = null; return; }
+      if (state.look) return;
+      if (!state.pose || occupiedFace(state, state.row, state.frame) || founderFaces.some(function (other) { return other !== state && other.visible && other.pose && state.pose && other.pose.name === state.pose.name && facesNear(state, other); })) {
+        settleFounder(state, chooseFounderPose(state), now);
+        state.nextAt = now + faceRandom(1100, 4300) * state.tempo;
+      }
+    });
+    wakeFounders();
+  }
+
+  function queueFounderScan() {
+    if (founderScanQueued) return;
+    founderScanQueued = true;
+    requestAnimationFrame(scanFounderHeads);
+  }
+
+  function wakeFounders() {
+    stopFounderClock();
+    if (!document.hidden && !faceMedia.matches) founderFrame = requestAnimationFrame(tickFounders);
+  }
+
+  function resetFounderMotion() {
+    stopFounderClock();
+    var now = performance.now();
+    founderPointer.active = false;
+    founderFaces.forEach(function (state) {
+      state.look = null; state.el.style.removeProperty('--mega-founder-lean');
+      if (state.pose) settleFounder(state, state.pose, now);
+      state.nextAt = now + faceRandom(1200, 4800) * state.tempo;
+    });
+    if (!document.hidden) queueFounderScan();
+  }
+
+  function startFounders() {
+    faceMedia.addEventListener('change', resetFounderMotion);
+    document.addEventListener('visibilitychange', resetFounderMotion);
+    window.addEventListener('pointermove', moveFounderPointer, { passive: true });
+    window.addEventListener('pointerout', function (event) { if (!event.relatedTarget) releaseFounderPointer(); }, { passive: true });
+    window.addEventListener('blur', releaseFounderPointer);
+    document.addEventListener('load', queueFounderScan, true);
+    if (document.fonts) document.fonts.ready.then(queueFounderScan);
+    window.addEventListener('resize', queueFounderScan, { passive: true });
+    window.addEventListener('scroll', queueFounderScan, { passive: true, capture: true });
+    window.addEventListener('pagehide', function () { releaseFounderPointer(); stopFounderClock(); });
+    window.addEventListener('pageshow', resetFounderMotion);
+    scanFounderHeads();
+  }
+
   function paint(mood) {
     if (!root || !faceEl) return;
     var base = mood.replace(':blink', '');
@@ -52,6 +341,7 @@
   }
 
   function queueScan() {
+    queueFounderScan();
     if (scanQueued) return;
     scanQueued = true;
     setTimeout(function () { scanQueued = false; scan(); }, 350);
@@ -101,36 +391,6 @@
     root.style.bottom = Math.round(bottom) + 'px';
   }
 
-  function initPeek() {
-    var host = document.querySelector('.ws-mascot');
-    if (!host) return false;
-    if (host.querySelector('.floyd-peek')) return true;
-    var el = document.createElement('div');
-    el.className = 'floyd-peek';
-    el.title = 'Floyd';
-    host.appendChild(el);
-    var row = 0, frame = 0, last = 0, shots = 0;
-    function tick(t) {
-      if (!host.isConnected) return;
-      if (t - last > 72) {
-        last = t;
-        frame += 1;
-        if (frame > 11) {
-          frame = 0;
-          if (shots > 0) { shots -= 1; if (shots === 0) row = 0; }
-        }
-        el.style.backgroundPosition = (-frame * 36) + 'px ' + (-row * 36) + 'px';
-      }
-      requestAnimationFrame(tick);
-    }
-    el.addEventListener('click', function () {
-      row = 1 + Math.floor(Math.random() * 5);
-      frame = 0; shots = 2;
-    });
-    requestAnimationFrame(tick);
-    return true;
-  }
-
   function start() {
     root = document.createElement('div');
     root.id = 'floyd-mascot';
@@ -154,9 +414,7 @@
     setInterval(place, 1500);
     setTimeout(function () { place(); scan(); }, 350);
     preload();
-    if (!initPeek()) {
-      var peekTimer = setInterval(function () { if (initPeek()) clearInterval(peekTimer); }, 1200);
-    }
+    startFounders();
     blinkTimer = setTimeout(blink, 2200);
     idleTimer = setTimeout(idle, 12000);
   }
@@ -166,6 +424,8 @@
                  'error','sleepy','success','warning','building','deploying','brainstorm','broken'];
     for (var i = 0; i < names.length; i++) {
       new Image().src = '/expressions/' + names[i] + '.webp';
+      // Success never blinks (see blink) and ships no -blink frame.
+      if (names[i] === 'success') continue;
       new Image().src = '/expressions/' + names[i] + '-blink.webp';
     }
   }

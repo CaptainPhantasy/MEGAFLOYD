@@ -22,7 +22,7 @@
         },
         "generated_with": {
           "type": "boolean",
-          "description": "Add Generated with Floyd line to commit messages and issues and PRs",
+          "description": "Add Generated with MegaFloyd line to commit messages and issues and PRs",
           "default": true
         }
       },
@@ -324,6 +324,22 @@
     },
     "MCPConfig": {
       "properties": {
+        "cwd": {
+          "type": "string",
+          "description": "Working directory for stdio MCP server"
+        },
+        "startup_timeout_ms": {
+          "type": "integer",
+          "description": "Connection startup timeout in milliseconds"
+        },
+        "tool_timeout_ms": {
+          "type": "integer",
+          "description": "Tool execution timeout in milliseconds"
+        },
+        "deferred": {
+          "type": "boolean",
+          "description": "Disclose MCP tools through search instead of the initial model tool list"
+        },
         "command": {
           "type": "string",
           "description": "Command to execute for stdio MCP servers",
@@ -400,7 +416,7 @@
         },
         "sessionless": {
           "type": "boolean",
-          "description": "Mark a sessionless MCP server (no Mcp-Session-Id) so Floyd skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP)",
+          "description": "Mark a sessionless MCP server (no Mcp-Session-Id) so MegaFloyd skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP)",
           "default": false
         },
         "headers": {
@@ -439,6 +455,44 @@
         "$ref": "#/$defs/MCPConfig"
       },
       "type": "object"
+    },
+    "ManagedAccount": {
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "base_url": {
+          "type": "string"
+        },
+        "oauth_host": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "client_id": {
+          "type": "string"
+        },
+        "token_path": {
+          "type": "string"
+        },
+        "authenticated": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "provider",
+        "base_url",
+        "oauth_host",
+        "region",
+        "authenticated",
+        "status"
+      ]
     },
     "Model": {
       "properties": {
@@ -547,6 +601,21 @@
     },
     "Options": {
       "properties": {
+        "plugin_runtime": {
+          "type": "object"
+        },
+        "company_platform_url": {
+          "type": "string"
+        },
+        "plugin_marketplace_url": {
+          "type": "string"
+        },
+        "managed_accounts": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ManagedAccount"
+          },
+          "type": "object"
+        },
         "context_paths": {
           "items": {
             "type": "string",
@@ -589,12 +658,12 @@
             ]
           },
           "type": "array",
-          "description": "Paths to directories containing Floyd plugins (folders with PLUGIN.md files)"
+          "description": "Paths to directories containing MegaFloyd plugins (folders with PLUGIN.md files)"
         },
         "agent_name": {
           "type": "string",
           "description": "Identity name injected into prompt templates (overridden by FLOYD_IDENTITY env)",
-          "default": "Floyd"
+          "default": "MegaFloyd"
         },
         "tui": {
           "$ref": "#/$defs/TUIOptions",
@@ -733,6 +802,15 @@
     },
     "Permissions": {
       "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "yolo",
+            "auto"
+          ],
+          "description": "Tool approval policy"
+        },
         "allowed_tools": {
           "items": {
             "type": "string",
@@ -781,6 +859,9 @@
     },
     "ProviderConfig": {
       "properties": {
+        "source": {
+          "type": "object"
+        },
         "id": {
           "type": "string",
           "description": "Unique identifier for the provider",
@@ -1014,7 +1095,7 @@
             "compact",
             "none"
           ],
-          "description": "Exit banner style after quitting Floyd",
+          "description": "Exit banner style after quitting MegaFloyd",
           "default": "default"
         },
         "prompt_quota": {

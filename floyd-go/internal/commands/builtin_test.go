@@ -14,15 +14,15 @@ var requiredBuiltins = []string{
 	"reload-tui", "compact", "goal", "init", "fork", "title", "usage",
 	"status", "undo", "editor", "theme", "login", "logout", "export-md",
 	"export-debug-zip", "copy", "exit", "version", "swarm", "btw",
-	"desktop", "feedback", "web", "remote-control",
+	"desktop", "tui", "feedback", "web", "remote-control",
 }
 
 func TestBuiltinRegistryCoversRequiredList(t *testing.T) {
 	t.Parallel()
 
-	require.Len(t, requiredBuiltins, 42, "the audited list now includes /web and /remote-control")
-	require.Len(t, builtinCommands, 41)
-	require.Len(t, BlockedBuiltin, 1)
+	require.Len(t, requiredBuiltins, 43, "all interface handoff commands are registered")
+	require.Len(t, builtinCommands, 43)
+	require.Empty(t, BlockedBuiltin)
 	require.Empty(t, ExcludedBuiltin)
 
 	registered := make(map[string]bool, len(builtinCommands))

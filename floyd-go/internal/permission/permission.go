@@ -78,6 +78,7 @@ type Service interface {
 	// already been resolved or is unknown.
 	Deny(permission PermissionRequest) bool
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
+	Pending() []PermissionRequest
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
@@ -113,6 +114,7 @@ type permissionService struct {
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
+	policyMode            atomic.Int32
 	allowedTools          []string
 
 	additionalDirsMu sync.RWMutex
@@ -197,6 +199,11 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
+	if s.policyMode.Load() == 1 && s.routineRequest(opts) {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{ToolCallID: opts.ToolCallID, Granted: true})
+		return true, nil
+	}
+
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action
 	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
@@ -278,13 +285,22 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
-	defer s.pendingRequests.Del(permission.ID)
+	defer func() {
+		s.pendingRequests.Del(permission.ID)
+		s.activeRequestMu.Lock()
+		if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
+			s.activeRequest = nil
+		}
+		s.activeRequestMu.Unlock()
+	}()
 
 	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)
 
 	select {
 	case <-ctx.Done():
+		// Resolve cancellation once so every attached UI closes this request.
+		s.resolve(permission, false, true, nil)
 		return false, ctx.Err()
 	case granted := <-respCh:
 		return granted, nil
@@ -302,6 +318,7 @@ func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan p
 }
 
 func (s *permissionService) SetSkipRequests(skip bool) {
+	s.policyMode.Store(0)
 	s.skip.Store(skip)
 }
 

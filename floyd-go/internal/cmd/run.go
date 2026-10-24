@@ -86,16 +86,9 @@ floyd run --continue "Follow up on your last response"
 			return err
 		}
 
-		// SuperFloyd lane guards (see superfloyd_resilience.go). These are
-		// no-ops outside the superfloyd binary lane. The gates must stay
-		// lane-gated: the chassis client path connects to (and spawns)
-		// the server only after this point, so an ungated gate would
-		// abort short prompts before the server ever comes up.
-		//
-		// TODO(port-wave4): enforceRetryBudget/maybeTripCircuitBreaker/
-		// recordRunSuccess need the resolved per-workspace data directory,
-		// which both chassis run paths construct only after this point;
-		// wire them when the guard layer can see the workspace.
+		// Legacy SuperFloyd startup controls remain lane-specific. Persistent
+		// MEGAFLOYD run health is enforced in shared agent execution,
+		// using the resolved workspace directory for every client.
 		SetupSuperFloydMode(filepath.Base(os.Args[0]))
 		prompt = applyAutoStabilizeIfNeeded(ctx, nil, prompt)
 		if isSuperFloydBinary() {
@@ -127,7 +120,7 @@ floyd run --continue "Follow up on your last response"
 			event.AppInitialized()
 
 			if !ws.Config.IsConfigured() {
-				return fmt.Errorf("no providers configured - please run 'floyd' to set up a provider interactively")
+				return fmt.Errorf("no providers configured - please run 'megafloyd' to set up a provider interactively")
 			}
 
 			clientWs := workspace.NewClientWorkspace(c, *ws)
@@ -159,7 +152,7 @@ floyd run --continue "Follow up on your last response"
 		event.AppInitialized()
 
 		if !ws.Config().IsConfigured() {
-			return fmt.Errorf("no providers configured - please run 'floyd' to set up a provider interactively")
+			return fmt.Errorf("no providers configured - please run 'megafloyd' to set up a provider interactively")
 		}
 
 		if verbose {
@@ -258,23 +251,31 @@ func runWebHandoffIfRequested(cmd *cobra.Command) (bool, error) {
 		sessionID, _ = cmd.Flags().GetString("session")
 	}
 
-	cwd, err := ResolveCwd(cmd)
+	sharedClient, sharedWorkspace, release, err := connectToServer(cmd)
 	if err != nil {
 		return true, err
 	}
-	executable, _ := os.Executable()
+	defer release()
+	if sessionID != "" {
+		ws := workspace.NewClientWorkspace(sharedClient, *sharedWorkspace)
+		session, resolveErr := resolveWorkspaceSessionID(cmd.Context(), ws, sessionID)
+		if resolveErr != nil {
+			return true, resolveErr
+		}
+		sessionID = session.ID
+	}
 
-	result, err := megafloydweb.StartWeb(cmd.Context(), megafloydweb.Options{
-		CWD:        cwd,
-		Executable: executable,
-		SessionID:  sessionID,
-	})
+	preferredPort := 0
+	if strings.TrimSpace(os.Getenv("MEGAFLOYD_WEB_PORT")) != "" {
+		preferredPort = megafloydweb.Port()
+	}
+	result, err := sharedClient.EnsureHandoffWeb(cmd.Context(), sharedWorkspace.ID, sessionID, preferredPort)
 	if err != nil {
 		return true, err
 	}
 
-	printWebHandoff(cmd, result)
-	return true, nil
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Web UI: %s\n", result.WebURL)
+	return true, err
 }
 
 // printWebHandoff writes the clickable URLs and the server state.

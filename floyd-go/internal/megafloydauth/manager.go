@@ -70,7 +70,7 @@ func (m *Manager) Login(
 	if err != nil {
 		return Token{}, err
 	}
-	if err := m.Store.Save(m.Name, token); err != nil {
+	if err := m.SaveToken(ctx, token); err != nil {
 		return Token{}, err
 	}
 	return token, nil
@@ -101,6 +101,11 @@ func (m *Manager) Token(ctx context.Context) (Token, error) {
 	// refresh performed by another goroutine is noticed.
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	release, err := m.lockSlot(ctx)
+	if err != nil {
+		return Token{}, err
+	}
+	defer release()
 
 	token, state, err = m.load()
 	if err != nil {
@@ -177,7 +182,7 @@ func (m *Manager) Logout() error {
 	if m == nil || m.Store == nil || m.Name == "" {
 		return fmt.Errorf("%w: manager has no token store", ErrNotConfigured)
 	}
-	return m.Store.Remove(m.Name)
+	return m.WithCredentialLock(context.Background(), func() error { return m.Store.Remove(m.Name) })
 }
 
 var _ TokenSource = (*Manager)(nil)

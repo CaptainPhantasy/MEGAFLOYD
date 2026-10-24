@@ -1,8 +1,8 @@
 // Package main is the entry point for the Floyd CLI.
 //
-//	@title			Floyd API
+//	@title			MegaFloyd API
 //	@version		1.0
-//	@description	Floyd is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.
+//	@description	MegaFloyd is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.
 //	@contact.name	Charm
 //	@contact.url	https://charm.sh
 //	@license.name	MIT

@@ -110,19 +110,25 @@ test('chassis lookup rejects a non-identifier session id', () => {
   assert.equal(result.status, 'unknown');
 });
 
-test('chassis candidates prefer the explicit data dir, then workspace, then home', () => {
-  const previous = process.env.MEGAFLOYD_DATA_DIR;
-  process.env.MEGAFLOYD_DATA_DIR = '/tmp/mf-data';
+test('chassis candidates isolate workspace state from inherited parent homes', () => {
+  const keys = ['MEGAFLOYD_DATA_DIR', 'FLOYD_DATA_DIR', 'FLOYD_GLOBAL_DATA'];
+  const previous = keys.map(key => process.env[key]);
+  keys.forEach(key => { process.env[key] = '/tmp/parent-state'; });
   try {
-    const candidates = chassisDbCandidates({ workspace: '/work/project', home: '/home/user' });
-    assert.deepEqual(candidates, [
-      '/tmp/mf-data/floyd.db',
-      '/work/project/.floyd/floyd.db',
-      '/home/user/.floyd/floyd.db',
-    ]);
+    assert.deepEqual(
+      chassisDbCandidates({ workspace: '/work/project', home: '/home/user' }),
+      [],
+    );
+    assert.deepEqual(
+      chassisDbCandidates({ workspace: '/work/project', dataDir: '/explicit/workspace-state' }),
+      ['/explicit/workspace-state/floyd.db'],
+    );
+    assert.deepEqual(chassisDbCandidates({ home: '/home/user' }), []);
   } finally {
-    if (previous === undefined) delete process.env.MEGAFLOYD_DATA_DIR;
-    else process.env.MEGAFLOYD_DATA_DIR = previous;
+    keys.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
   }
 });
 

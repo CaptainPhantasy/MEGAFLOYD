@@ -24,13 +24,14 @@ const (
 	LogFileName = "logs/web-server.log"
 
 	// DefaultDataDirName is the server's data directory under the
-	// megafloyd home when FLOYD_CODE_HOME is not already set.
+	// megafloyd home when MEGAFLOYD_WEB_DATA is not explicitly set.
 	DefaultDataDirName = "web"
 )
 
 const (
 	allowedHostsEnv = "FLOYD_CODE_ALLOWED_HOSTS"
 	codeHomeEnv     = "FLOYD_CODE_HOME"
+	webDataEnv      = "MEGAFLOYD_WEB_DATA"
 	rolePromptEnv   = "FLOYD_ROLE_ADDITIONAL"
 	homeEnv         = "MEGAFLOYD_HOME"
 	nodeEnv         = "MEGAFLOYD_WEB_NODE"
@@ -76,11 +77,10 @@ func Remote() bool {
 	return err == nil && value
 }
 
-// DataDir returns the Node server's data directory. An existing non-empty
-// FLOYD_CODE_HOME wins so the token path matches the server's own view;
-// otherwise the server gets an isolated directory under the megafloyd home.
+// DataDir returns the canonical web store. Only MEGAFLOYD_WEB_DATA can
+// override its default; inherited parent-harness homes are ignored.
 func DataDir(env []string, home string) string {
-	if dir := strings.TrimSpace(LookupEnv(env, codeHomeEnv)); dir != "" {
+	if dir := strings.TrimSpace(LookupEnv(env, webDataEnv)); dir != "" {
 		return dir
 	}
 	return filepath.Join(home, DefaultDataDirName)

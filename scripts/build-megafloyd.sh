@@ -17,13 +17,18 @@
 #   MEGAFLOYD_VERSION=v1.2.3 scripts/build-megafloyd.sh
 #
 # Environment:
+#   MEGAFLOYD_GOMODCACHE  Explicit module cache override; default is <repo>/.tmp/build-module-cache.
 #   MEGAFLOYD_VERSION   Version string stamped into the binary.
+#   MEGAFLOYD_BUILD_ID  Unique release build identity, shared with web/desktop.
 #   GOEXPERIMENT        Defaults to greenteagc (matches floyd-go/Taskfile.yaml).
 #
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
+# Resolve this project cache before even --host calls go env; shell-wide
+# GOMODCACHE may point at an unrelated external application volume.
+export GOMODCACHE="${MEGAFLOYD_GOMODCACHE:-$REPO_ROOT/.tmp/build-module-cache}"
 GO_DIR="$REPO_ROOT/floyd-go"
 DIST_DIR="$REPO_ROOT/dist"
 MODULE_PATH="github.com/legacy-ai/floyd"
@@ -31,6 +36,7 @@ DEFAULT_TARGETS=(darwin/arm64 darwin/amd64 linux/amd64 linux/arm64)
 
 targets=()
 version=""
+build_id=${MEGAFLOYD_BUILD_ID:-}
 dist_dir="$DIST_DIR"
 strip=true
 
@@ -49,6 +55,7 @@ Options:
   -o, --out DIR          Output directory. Default: <repo>/dist.
   -v, --version STRING   Version to stamp. Default: MEGAFLOYD_VERSION, then
                          git describe --tags --always --dirty, then "devel".
+      --build-id STRING  Shared release build identity (MEGAFLOYD_BUILD_ID).
       --no-strip         Keep debug symbols (omit -s -w from ldflags).
   -h, --help             Show this help.
 
@@ -90,6 +97,11 @@ while (($#)); do
 		version=$2
 		shift 2
 		;;
+	--build-id)
+		[[ $# -ge 2 ]] || die "--build-id needs a value"
+		build_id=$2
+		shift 2
+		;;
 	--no-strip)
 		strip=false
 		shift
@@ -129,9 +141,13 @@ fi
 [[ -n $version ]] || version=devel
 
 commit=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
+[[ -n $build_id ]] || build_id=$commit
+[[ $version =~ ^[A-Za-z0-9._+-]+$ ]] || die "version contains unsupported characters"
+[[ $build_id =~ ^[A-Za-z0-9._+-]+$ ]] || die "build ID contains unsupported characters"
 
 ldflags="-X ${MODULE_PATH}/internal/version.Version=${version}"
 ldflags+=" -X ${MODULE_PATH}/internal/version.Commit=${commit}"
+ldflags+=" -X ${MODULE_PATH}/internal/version.BuildID=${build_id}"
 if [[ $strip == true ]]; then
 	ldflags="-s -w $ldflags"
 fi
@@ -181,7 +197,19 @@ for artifact in "${artifacts[@]}"; do
 	printf '%s  %s\n' "$(sha256 "$artifact")" "$relative" >>"$checksums"
 done
 
-printf '\nversion: %s\ncommit:  %s\n' "$version" "$commit"
+receipt="$dist_dir/build-receipt.json"
+{
+	printf '{"version":"%s","commit":"%s","build_id":"%s","stripped":%s,"artifacts":[' "$version" "$commit" "$build_id" "$strip"
+	separator=""
+	for artifact in "${artifacts[@]}"; do
+		relative=${artifact#"$dist_dir"/}
+		printf '%s{"path":"%s","sha256":"%s"}' "$separator" "$relative" "$(sha256 "$artifact")"
+		separator=,
+	done
+	printf ']}\n'
+} >"$receipt"
+
+printf '\nversion: %s\ncommit:  %s\nbuild ID: %s\n' "$version" "$commit" "$build_id"
 printf 'artifacts:\n'
 for artifact in "${artifacts[@]}"; do
 	size=$(wc -c <"$artifact" | tr -d ' ')

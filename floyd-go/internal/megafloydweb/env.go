@@ -13,7 +13,7 @@ import (
 
 // BuildChildEnv returns base with FLOYD_CODE_ALLOWED_HOSTS extended by the
 // Tailscale DNS name and IPv4 address, with FLOYD_CODE_HOME pointing at
-// dataDir when the caller did not already set it, and with the authored
+// the canonical dataDir even when a parent home is inherited, with the authored
 // identity stack in FLOYD_ROLE_ADDITIONAL.
 //
 // Existing allowlist entries are preserved and come first. The result has
@@ -21,9 +21,14 @@ import (
 // duplicate-key resolution.
 func BuildChildEnv(base []string, info Tailscale, dataDir string) []string {
 	env := MergeAllowedHosts(base, info.DNSName, info.IPv4)
-	if dataDir != "" && strings.TrimSpace(LookupEnv(env, codeHomeEnv)) == "" {
-		env = setEnv(env, codeHomeEnv, dataDir)
+	if dataDir == "" {
+		home := LookupEnv(base, homeEnv)
+		if home == "" {
+			home = HomeDir()
+		}
+		dataDir = DataDir(base, home)
 	}
+	env = setEnv(env, codeHomeEnv, dataDir)
 	return withRolePrompt(env)
 }
 

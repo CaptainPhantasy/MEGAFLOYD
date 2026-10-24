@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -87,9 +88,9 @@ func FromSkillCatalog(entries []skills.CatalogEntry) []CustomCommand {
 }
 
 // LoadMCPPrompts loads custom commands from available MCP servers.
-func LoadMCPPrompts() ([]MCPPrompt, error) {
+func LoadMCPPrompts(scope ...mcp.WorkspaceScope) ([]MCPPrompt, error) {
 	var commands []MCPPrompt
-	for mcpName, prompts := range mcp.Prompts() {
+	for mcpName, prompts := range mcp.Prompts(scope...) {
 		for _, prompt := range prompts {
 			key := mcpName + ":" + prompt.Name
 			var args []Argument
@@ -119,6 +120,12 @@ func LoadMCPPrompts() ([]MCPPrompt, error) {
 }
 
 func buildCommandSources(cfg *config.Config) []commandSource {
+	if megafloyd.IsActive() {
+		return []commandSource{
+			{path: filepath.Join(filepath.Dir(config.GlobalConfig()), "commands"), prefix: userCommandPrefix},
+			{path: filepath.Join(cfg.Options.DataDirectory, "commands"), prefix: projectCommandPrefix},
+		}
+	}
 	return []commandSource{
 		{
 			path:   filepath.Join(home.Config(), "floyd", "commands"),

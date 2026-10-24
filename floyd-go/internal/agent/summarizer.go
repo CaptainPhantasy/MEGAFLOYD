@@ -25,13 +25,7 @@ func BuildTieredSummaryPrompt(todos string, tc *TieredContext) string {
 	// TIER 1 - PRESERVE
 	sb.WriteString("### TIER 1 - PRESERVE (Do NOT summarize these):\n")
 	for _, msg := range tc.Preserve {
-		text := msg.Content().Text
-		if len(text) > 500 {
-			text = text[:500] + "..."
-		}
-		sb.WriteString("- ")
-		sb.WriteString(text)
-		sb.WriteString("\n")
+		fmt.Fprintf(&sb, "- Message %s (%s): preserve the exact content from the transcript.\n", msg.ID, msg.Role)
 	}
 
 	// TIER 2 - COMPRESS guidelines
@@ -112,19 +106,13 @@ func BuildTieredSummaryPrompt(todos string, tc *TieredContext) string {
 // CompressToolResults creates a brief summary of tool results
 func CompressToolResults(toolName, content string, isError bool) string {
 	if isError {
-		return fmt.Sprintf("[ERROR] %s: failed", toolName)
+		content = "[ERROR] " + toolName + ": " + content
 	}
 
-	// Truncate long results
-	if len(content) > 200 {
-		// Try to find a good truncation point
-		lines := strings.Split(content, "\n")
-		if len(lines) > 0 && len(lines[0]) <= 200 {
-			return lines[0] + "..."
-		}
-		if len(content) > 200 {
-			return content[:197] + "..."
-		}
+	// Keep both ends of verbose output; failed commands retain their error.
+	runes := []rune(content)
+	if len(runes) > 1024 {
+		return string(runes[:768]) + "\n[...output compressed...]\n" + string(runes[len(runes)-256:])
 	}
 
 	return content

@@ -215,6 +215,9 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		return resp, nil
 	}
 
+	if err := history.CaptureBefore(edit.ctx, edit.files, params.FilePath); err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("capture file history: %w", err)
+	}
 	// Write the file
 	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
 	if err != nil {

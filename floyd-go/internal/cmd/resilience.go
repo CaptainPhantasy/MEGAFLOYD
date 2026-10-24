@@ -8,14 +8,15 @@ import (
 	"time"
 
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/runhealth"
 	"github.com/spf13/cobra"
 )
 
 const (
-	retryBudgetWindow   = time.Hour
-	retryBudgetFailures = 6
-	circuitWindow       = 10 * time.Minute
-	circuitHits         = 2
+	retryBudgetWindow   = runhealth.RetryBudgetWindow
+	retryBudgetFailures = runhealth.RetryBudgetFailures
+	circuitWindow       = runhealth.CircuitWindow
+	circuitHits         = runhealth.CircuitHits
 )
 
 type resilienceReport struct {
@@ -39,7 +40,7 @@ type resilienceReport struct {
 
 var resilienceCmd = &cobra.Command{
 	Use:   "resilience",
-	Short: "Show SuperFloyd resilience state",
+	Short: "Show MegaFloyd resilience state",
 	Long:  "Print the runtime lane, safety toggles, retry budget, circuit breaker, consistency lock, and recent failure state. Read-only.",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		asJSON, _ := cmd.Flags().GetBool("json")
@@ -54,7 +55,10 @@ var resilienceCmd = &cobra.Command{
 			return fmt.Errorf("failed to initialize config: %w", err)
 		}
 
-		report := collectResilienceReport(cfgStore, filepath.Base(os.Args[0]))
+		report, err := collectResilienceReport(cfgStore, filepath.Base(os.Args[0]))
+		if err != nil {
+			return err
+		}
 		if asJSON {
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
@@ -69,22 +73,27 @@ func init() {
 	resilienceCmd.Flags().Bool("json", false, "Print the report as JSON")
 }
 
-func collectResilienceReport(cfgStore *config.ConfigStore, binary string) resilienceReport {
+func collectResilienceReport(cfgStore *config.ConfigStore, binary string) (resilienceReport, error) {
 	cfg := cfgStore.Config()
 	now := time.Now()
+	profile := resolveRuntimeProfile(binary)
+	legacyControls := profile == runtimeProfileSuperFloyd
 
 	report := resilienceReport{
-		Profile:             string(resolveRuntimeProfile(binary)),
+		Profile:             string(profile),
 		Binary:              binary,
 		DataDir:             cfg.Options.DataDirectory,
-		QualityGates:        qualityGatesEnabled(),
-		DegradationControls: degradationControlsEnabled(),
-		ConsistencyLock:     consistencyLockEnabled(),
-		AutoStabilize:       autoStabilizeEnabled(),
+		QualityGates:        legacyControls && qualityGatesEnabled(),
+		DegradationControls: profile != runtimeProfileFloyd && degradationControlsEnabled(),
+		ConsistencyLock:     legacyControls && consistencyLockEnabled(),
+		AutoStabilize:       legacyControls && autoStabilizeEnabled(),
 		MaxParallelism:      getMaxParallelism(),
 	}
 
-	health, _ := loadRuntimeHealth(cfg.Options.DataDirectory)
+	health, err := loadRuntimeHealth(cfg.Options.DataDirectory)
+	if err != nil {
+		return resilienceReport{}, err
+	}
 	recent := keepRecentFailures(health.Failures, now.Add(-retryBudgetWindow).Unix())
 	report.FailuresLastHour = len(recent)
 	if len(recent) >= retryBudgetFailures {
@@ -96,7 +105,7 @@ func collectResilienceReport(cfgStore *config.ConfigStore, binary string) resili
 	circuit := keepRecentFailures(health.Failures, now.Add(-circuitWindow).Unix())
 	counts := map[string]int{}
 	for _, failure := range circuit {
-		counts[failure.Hash]++
+		counts[failure.Task+"\x00"+failure.Hash]++
 	}
 	report.CircuitBreaker = "clear"
 	for _, hits := range counts {
@@ -113,20 +122,22 @@ func collectResilienceReport(cfgStore *config.ConfigStore, binary string) resili
 		report.LastFailureMessage = last.Message
 	}
 
-	if err := enforceConsistencyLock(cfgStore); err != nil {
+	if !legacyControls {
+		report.ConsistencyCheck = "inactive"
+	} else if err := enforceConsistencyLock(cfgStore); err != nil {
 		report.ConsistencyCheck = "FAIL"
 		report.ConsistencyDetail = err.Error()
 	} else {
 		report.ConsistencyCheck = "PASS"
 	}
 
-	return report
+	return report, nil
 }
 
 func printResilienceReport(cmd *cobra.Command, report resilienceReport) {
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, "╔══════════════════════════════════════════════════════╗")
-	fmt.Fprintln(out, "║               SUPERFLOYD RESILIENCE                 ║")
+	fmt.Fprintln(out, "║               MegaFloyd RESILIENCE                 ║")
 	fmt.Fprintln(out, "╠══════════════════════════════════════════════════════╣")
 	fmt.Fprintf(out, "║ Profile                 : %-27s ║\n", report.Profile)
 	fmt.Fprintf(out, "║ Binary                  : %-27s ║\n", truncate(report.Binary, 27))
