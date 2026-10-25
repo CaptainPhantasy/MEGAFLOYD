@@ -16,7 +16,7 @@ export const workspaceSchema = z.object({
   name: z.string().min(1).max(100),
   created_at: isoDateTimeSchema,
   last_opened_at: isoDateTimeSchema,
-  session_count: z.number().int().nonnegative(),
+  session_count: z.number().int().nonnegative().nullable(),
 });
 
 export type Workspace = z.infer<typeof workspaceSchema>;

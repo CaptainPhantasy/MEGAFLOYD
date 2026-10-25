@@ -67,7 +67,7 @@ export function registerGoRoutes(app: FastifyInstance, runtime: GoRuntime, views
       const selected = await selectRuntime(runtime, views, req, options);
       const managed = await options.mcp.route(selected.runtime, decodeURIComponent(url.pathname.slice('/api/v2'.length)), req.method, object(req.body), url.searchParams);
       if (managed) return reply.send(envelope(managed.data, req.id));
-      if (req.method === 'GET' && url.pathname === '/api/v2/sessions') return reply.send(envelope(await listGoSessionsV2(runtime, views, url.searchParams, await options.workspaces.all()), req.id));
+      if (req.method === 'GET' && url.pathname === '/api/v2/sessions') return reply.send(envelope(await listGoSessionsV2(runtime, views, url.searchParams, await options.workspaces.all(url.searchParams.getAll('workspace.id'))), req.id));
       const batch = /^\/api\/v2\/sessions:(archive|restore|delete)$/.exec(url.pathname);
       if (req.method === 'POST' && batch) return reply.send(envelope(await batchSessions(async (id) => (await options.workspaces.session(id)).runtime, batch[1]!, object(req.body)), req.id));
       throw new GoRequestError(404, `No route for ${req.method} ${url.pathname}`);
@@ -105,7 +105,7 @@ async function dispatch(runtime: GoRuntime, views: LocalViews, req: FastifyReque
   if (get && path === '/providers') return { items: (await runtime.catalog()).providers };
   if (get && path.startsWith('/providers/')) { const provider = (await runtime.catalog()).providers.find((item) => item.id === path.slice(11)); if (!provider) throw new GoRequestError(404, 'Provider is not configured in the Go runtime'); return provider; }
   if (post && path.startsWith('/models/') && path.endsWith(':set_default')) { const model = path.slice(8, -12); await runtime.configure({ model }); return { default_model: model, model: (await runtime.catalog()).models.find((item) => item.model === model) }; }
-  if (get && path === '/workspaces') { const items = []; for (const entry of await options.workspaces.all()) items.push(await options.workspaces.wire(entry)); return { items }; }
+  if (get && path === '/workspaces') return { items: await options.workspaces.list() };
   if (/^\/workspaces\/[^/]+$/.test(path)) {
     const id = path.slice(12);
     if (get) return options.workspaces.wire(await options.workspaces.workspace(id));
