@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"log/slog"
 	"maps"
 	"os"
@@ -49,6 +50,12 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
 	}
 
+	if megafloyd.IsActive() && dataDir == "" {
+		dataDir, err = megafloyd.WorkspaceDataDir(workingDir)
+		if err != nil {
+			return nil, fmt.Errorf("resolve personal workspace data: %w", err)
+		}
+	}
 	cfg.setDefaults(workingDir, dataDir)
 
 	store := &ConfigStore{
@@ -587,8 +594,12 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.NormalizeOptions()
 	if len(c.Options.GlobalContextPaths) == 0 {
 		floydConfigDir := filepath.Dir(GlobalConfig())
+		contextName := "FLOYD.md"
+		if megafloyd.IsActive() {
+			contextName = "MEGAFLOYD.md"
+		}
 		c.Options.GlobalContextPaths = []string{
-			filepath.Join(floydConfigDir, "FLOYD.md"),
+			filepath.Join(floydConfigDir, contextName),
 			filepath.Join(filepath.Dir(floydConfigDir), "AGENTS.md"),
 		}
 	}
@@ -598,10 +609,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
-		if path, ok := fsext.LookupClosestBounded(workingDir, projectBoundary(workingDir), defaultDataDirectory); ok {
+		if path, ok := fsext.LookupClosestBounded(workingDir, projectBoundary(workingDir), megafloyd.ProjectDirName()); ok {
 			c.Options.DataDirectory = path
 		} else {
-			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
+			c.Options.DataDirectory = filepath.Join(workingDir, megafloyd.ProjectDirName())
 		}
 	}
 	c.Options.DataDirectory = filepath.Clean(filepathext.SmartJoin(workingDir, c.Options.DataDirectory))
@@ -632,7 +643,11 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.applyLSPDefaults()
 
 	// Add the default context paths if they are not already present
-	c.Options.ContextPaths = append(slices.Clone(defaultContextPaths), c.Options.ContextPaths...)
+	contextPaths := defaultContextPaths
+	if megafloyd.IsActive() {
+		contextPaths = []string{"AGENTS.md", "AGENTS.local.md", "MEGAFLOYD.md", "MEGAFLOYD.local.md"}
+	}
+	c.Options.ContextPaths = append(slices.Clone(contextPaths), c.Options.ContextPaths...)
 
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
@@ -772,7 +787,8 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			Provider:        string(p.ID),
 			Model:           defaultLargeModel.ID,
 			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
-			ReasoningEffort: defaultLargeModel.DefaultReasoningEffort,
+			ReasoningEffort: DefaultReasoningEffort(*defaultLargeModel),
+			Think:           defaultLargeModel.CanReason && len(defaultLargeModel.ReasoningLevels) == 0,
 		}
 
 		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
@@ -790,7 +806,8 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			Provider:        string(p.ID),
 			Model:           defaultSmallModel.ID,
 			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
-			ReasoningEffort: defaultSmallModel.DefaultReasoningEffort,
+			ReasoningEffort: DefaultReasoningEffort(*defaultSmallModel),
+			Think:           defaultSmallModel.CanReason && len(defaultSmallModel.ReasoningLevels) == 0,
 		}
 		return largeModel, smallModel, err
 	}
@@ -812,15 +829,19 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 	}
 	defaultLargeModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
 	largeModel = SelectedModel{
-		Provider:  providerConfig.ID,
-		Model:     defaultLargeModel.ID,
-		MaxTokens: defaultLargeModel.DefaultMaxTokens,
+		Provider:        providerConfig.ID,
+		Model:           defaultLargeModel.ID,
+		MaxTokens:       defaultLargeModel.DefaultMaxTokens,
+		ReasoningEffort: DefaultReasoningEffort(*defaultLargeModel),
+		Think:           defaultLargeModel.CanReason && len(defaultLargeModel.ReasoningLevels) == 0,
 	}
 	defaultSmallModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
 	smallModel = SelectedModel{
-		Provider:  providerConfig.ID,
-		Model:     defaultSmallModel.ID,
-		MaxTokens: defaultSmallModel.DefaultMaxTokens,
+		Provider:        providerConfig.ID,
+		Model:           defaultSmallModel.ID,
+		MaxTokens:       defaultSmallModel.DefaultMaxTokens,
+		ReasoningEffort: DefaultReasoningEffort(*defaultSmallModel),
+		Think:           defaultSmallModel.CanReason && len(defaultSmallModel.ReasoningLevels) == 0,
 	}
 	return largeModel, smallModel, err
 }
@@ -868,9 +889,9 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 			if largeModelSelected.ReasoningEffort != "" {
 				large.ReasoningEffort = largeModelSelected.ReasoningEffort
 			} else {
-				large.ReasoningEffort = model.DefaultReasoningEffort
+				large.ReasoningEffort = DefaultReasoningEffort(*model)
 			}
-			large.Think = largeModelSelected.Think
+			large.Think = model.CanReason && (largeModelSelected.Think || largeModelSelected.ReasoningEffort == "" && len(model.ReasoningLevels) == 0)
 			if largeModelSelected.Temperature != nil {
 				large.Temperature = largeModelSelected.Temperature
 			}
@@ -913,8 +934,9 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 			if smallModelSelected.ReasoningEffort != "" {
 				small.ReasoningEffort = smallModelSelected.ReasoningEffort
 			} else {
-				small.ReasoningEffort = model.DefaultReasoningEffort
+				small.ReasoningEffort = DefaultReasoningEffort(*model)
 			}
+			small.Think = model.CanReason && (smallModelSelected.Think || smallModelSelected.ReasoningEffort == "" && len(model.ReasoningLevels) == 0)
 			if smallModelSelected.Temperature != nil {
 				small.Temperature = smallModelSelected.Temperature
 			}
@@ -933,7 +955,6 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 			if smallModelSelected.ProviderOptions != nil {
 				small.ProviderOptions = maps.Clone(smallModelSelected.ProviderOptions)
 			}
-			small.Think = smallModelSelected.Think
 		}
 	}
 
@@ -967,12 +988,18 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 // up. Global user-level config locations are always included
 // regardless of the boundary.
 func lookupConfigs(cwd string) []string {
+	systemPath := systemConfigPath
+	projectName := appName
+	if megafloyd.IsActive() {
+		systemPath = "/etc/megafloyd/megafloyd.json"
+		projectName = "megafloyd"
+	}
 	// Prepend global user config and machine-owned data JSON. Only the user
 	// config directory contributes a floydrc; the data directory is writable
 	// machine state and must never be executed as Bash. Missing files are
 	// skipped when loaded.
 	configPaths := []string{
-		systemConfigPath,
+		systemPath,
 		GlobalConfig(),
 		shellConfigSibling(GlobalConfig()),
 		GlobalConfigData(),
@@ -983,10 +1010,10 @@ func lookupConfigs(cwd string) []string {
 	// listed name win on conflict. So: .floydrc beats floydrc, both beat the
 	// JSON configs, and .floyd.json beats floyd.json.
 	configNames := []string{
-		"." + appName + "rc",
-		appName + "rc",
-		"." + appName + ".json",
-		appName + ".json",
+		"." + projectName + "rc",
+		projectName + "rc",
+		"." + projectName + ".json",
+		projectName + ".json",
 	}
 
 	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
@@ -1103,6 +1130,9 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	}
 	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	if err := restoreModelOptionResets(&config, configs); err != nil {
 		return nil, err
 	}
 	return &config, nil
@@ -1233,6 +1263,13 @@ func migrateDisableNotifications() {
 
 // GlobalConfig returns the global configuration file path for the application.
 func GlobalConfig() string {
+	if megafloyd.IsActive() {
+		dirs, err := megafloyd.Resolve()
+		if err != nil {
+			return ""
+		}
+		return filepath.Join(dirs.Config, "floyd.json")
+	}
 	if floydGlobal := os.Getenv("FLOYD_GLOBAL_CONFIG"); floydGlobal != "" {
 		return filepath.Join(floydGlobal, fmt.Sprintf("%s.json", appName))
 	}
@@ -1250,12 +1287,19 @@ func shellConfigSibling(jsonPath string) string {
 // the hidden .floydrc), as opposed to a JSON config.
 func isShellConfig(path string) bool {
 	base := filepath.Base(path)
-	return base == appName+"rc" || base == "."+appName+"rc"
+	return base == appName+"rc" || base == "."+appName+"rc" || base == "megafloydrc" || base == ".megafloydrc"
 }
 
 // GlobalCacheDir returns the path to the global cache directory for the
 // application.
 func GlobalCacheDir() string {
+	if megafloyd.IsActive() {
+		dirs, err := megafloyd.Resolve()
+		if err != nil {
+			return ""
+		}
+		return dirs.Cache
+	}
 	if floydCache := os.Getenv("FLOYD_CACHE_DIR"); floydCache != "" {
 		return floydCache
 	}
@@ -1280,6 +1324,13 @@ func ProjectConfigs(cwd string) []string {
 // GlobalConfigData returns the path to the main data directory for the application.
 // this config is used when the app overrides configurations instead of updating the global config.
 func GlobalConfigData() string {
+	if megafloyd.IsActive() {
+		dirs, err := megafloyd.Resolve()
+		if err != nil {
+			return ""
+		}
+		return filepath.Join(dirs.Data, "floyd.json")
+	}
 	if floydData := os.Getenv("FLOYD_GLOBAL_DATA"); floydData != "" {
 		return filepath.Join(floydData, fmt.Sprintf("%s.json", appName))
 	}
@@ -1385,6 +1436,16 @@ func projectBoundary(dir string) string {
 // GlobalAgentsDirs returns the default directories for extensibility agent
 // definitions shown in the agent library dialog.
 func GlobalAgentsDirs() []string {
+	if megafloyd.IsActive() {
+		if explicit := os.Getenv("MEGAFLOYD_AGENTS_DIR"); explicit != "" {
+			return []string{explicit}
+		}
+		dirs, err := megafloyd.Resolve()
+		if err != nil {
+			return nil
+		}
+		return []string{filepath.Join(dirs.Config, "agents")}
+	}
 	if floydAgents := os.Getenv("FLOYD_AGENTS_DIR"); floydAgents != "" {
 		return []string{floydAgents}
 	}
@@ -1445,6 +1506,16 @@ func DefaultPromptQuotaConfig() PromptQuotaConfig {
 // Skills in these directories are auto-discovered and their files can be read
 // without permission prompts.
 func GlobalSkillsDirs() []string {
+	if megafloyd.IsActive() {
+		if explicit := os.Getenv("MEGAFLOYD_SKILLS_DIR"); explicit != "" {
+			return []string{explicit}
+		}
+		dirs, err := megafloyd.Resolve()
+		if err != nil {
+			return nil
+		}
+		return []string{filepath.Join(dirs.Config, "skills")}
+	}
 	if floydSkills := os.Getenv("FLOYD_SKILLS_DIR"); floydSkills != "" {
 		return []string{floydSkills}
 	}
@@ -1491,15 +1562,19 @@ var projectSkillSubdirs = []string{
 // Working-directory paths come first so local skills take precedence
 // over monorepo-level ones.
 func ProjectSkillsDir(workingDir string) []string {
-	dirs := make([]string, 0, len(projectSkillSubdirs)*2)
-	for _, sub := range projectSkillSubdirs {
+	subdirs := projectSkillSubdirs
+	if megafloyd.IsActive() {
+		subdirs = []string{".megafloyd/skills"}
+	}
+	dirs := make([]string, 0, len(subdirs)*2)
+	for _, sub := range subdirs {
 		dirs = append(dirs, filepath.Join(workingDir, sub))
 	}
 
 	// When the working directory is inside a git repository, also look at
 	// the repository root so monorepo-level .agents/skills are found.
 	if root := worktreeRoot(workingDir); root != "" && root != workingDir {
-		for _, sub := range projectSkillSubdirs {
+		for _, sub := range subdirs {
 			dirs = append(dirs, filepath.Join(root, sub))
 		}
 	}

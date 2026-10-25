@@ -66,7 +66,7 @@ func PoisonPill() error {
 	resBits := math.Float64bits(res)
 	if (resBits & 0xFFFF) == 0 {
 		// If payload is wiped to zero, it's a weak NaN handler but not a total failure.
-		// However, for SuperFloyd, we prefer preservation.
+		// However, for MegaFloyd, we prefer preservation.
 	}
 
 	return nil
@@ -106,7 +106,7 @@ func VerifyEnvironment() error {
 	return nil
 }
 
-// RuntimeCheck is the entry point for SuperFloyd bootstrap.
+// RuntimeCheck is the entry point for MegaFloyd bootstrap.
 func RuntimeCheck() error {
 	return VerifyEnvironment()
 }
@@ -114,6 +114,6 @@ func RuntimeCheck() error {
 // Wrapped for testing/mocking
 var osExit = func(code int) {
 	// We use panic instead of os.Exit to allow potential recovery or crash dumping.
-	// In production SuperFloyd, this should be a hard halt.
-	panic(fmt.Sprintf("SuperFloyd environment integrity failure (exit code %d)", code))
+	// In production MegaFloyd, this should be a hard halt.
+	panic(fmt.Sprintf("MegaFloyd environment integrity failure (exit code %d)", code))
 }

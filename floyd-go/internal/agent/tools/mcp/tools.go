@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/csync"
@@ -28,12 +29,13 @@ type ToolResult struct {
 var allTools = csync.NewMap[string, []*Tool]()
 
 // Tools returns all available MCP tools.
-func Tools() iter.Seq2[string, []*Tool] {
-	return allTools.Seq2()
+func Tools(scope ...WorkspaceScope) iter.Seq2[string, []*Tool] {
+	return scopedEntries(allTools.Seq2(), scope...)
 }
 
 // RunTool runs an MCP tool with the given input parameters.
 func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
+	name = registryName(cfg, name)
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
 		return ToolResult{}, fmt.Errorf("error parsing parameters: %s", err)
@@ -42,6 +44,11 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 	c, err := getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return ToolResult{}, err
+	}
+	if timeout := cfg.Config().MCP[publicName(name)].ToolTimeoutMs; timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
+		defer cancel()
 	}
 	result, err := c.CallTool(ctx, &mcp.CallToolParams{
 		Name:      toolName,
@@ -111,6 +118,7 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 // RefreshTools gets the updated list of tools from the MCP and updates the
 // global state.
 func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
+	name = registryName(cfg, name)
 	// Serialize with session renewal so the registered session can't be
 	// swapped between the Get and the state update below — a stale error
 	// transition would otherwise tear down the healthy replacement.
@@ -163,7 +171,7 @@ func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 }
 
 func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
-	mcpCfg, ok := cfg.Config().MCP[name]
+	mcpCfg, ok := cfg.Config().MCP[publicName(name)]
 	if ok {
 		tools = filterTools(mcpCfg, tools)
 	}

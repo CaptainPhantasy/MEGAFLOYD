@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# megafloyd launcher.
+# MegaFloyd launcher.
 #
 # Exports the MEGAFLOYD_* namespace, mirrors the FLOYD_* variables the chassis
 # reads, creates the home layout, and execs the binary. See
@@ -9,37 +9,17 @@
 set -euo pipefail
 
 APP=megafloyd
+DISPLAY_NAME=MegaFloyd
 
 # shellcheck disable=SC1007 # CDPATH= is an env assignment, not an empty value.
 SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 
 MEGAFLOYD_HOME=${MEGAFLOYD_HOME:-"$HOME/.megafloyd"}
 
-# Directory precedence matches internal/megafloyd: an explicit MEGAFLOYD_*
-# value wins, then an inherited FLOYD_* value, then the home subdirectory.
-if [ -n "${MEGAFLOYD_CONFIG_DIR:-}" ]; then
-	:
-elif [ -n "${FLOYD_GLOBAL_CONFIG:-}" ]; then
-	MEGAFLOYD_CONFIG_DIR=$FLOYD_GLOBAL_CONFIG
-else
-	MEGAFLOYD_CONFIG_DIR=$MEGAFLOYD_HOME/config
-fi
-
-if [ -n "${MEGAFLOYD_DATA_DIR:-}" ]; then
-	:
-elif [ -n "${FLOYD_GLOBAL_DATA:-}" ]; then
-	MEGAFLOYD_DATA_DIR=$FLOYD_GLOBAL_DATA
-else
-	MEGAFLOYD_DATA_DIR=$MEGAFLOYD_HOME/data
-fi
-
-if [ -n "${MEGAFLOYD_CACHE_DIR:-}" ]; then
-	:
-elif [ -n "${FLOYD_CACHE_DIR:-}" ]; then
-	MEGAFLOYD_CACHE_DIR=$FLOYD_CACHE_DIR
-else
-	MEGAFLOYD_CACHE_DIR=$MEGAFLOYD_HOME/cache
-fi
+# Canonical paths are independent of inherited parent-harness mirrors.
+MEGAFLOYD_CONFIG_DIR=${MEGAFLOYD_CONFIG_DIR:-"$MEGAFLOYD_HOME/config"}
+MEGAFLOYD_DATA_DIR=${MEGAFLOYD_DATA_DIR:-"$MEGAFLOYD_HOME/data"}
+MEGAFLOYD_CACHE_DIR=${MEGAFLOYD_CACHE_DIR:-"$MEGAFLOYD_HOME/cache"}
 
 mkdir -p "$MEGAFLOYD_HOME" \
 	"$MEGAFLOYD_CONFIG_DIR" \
@@ -57,13 +37,13 @@ export FLOYD_GLOBAL_DATA=$MEGAFLOYD_DATA_DIR
 export FLOYD_CACHE_DIR=$MEGAFLOYD_CACHE_DIR
 
 if [ -n "${MEGAFLOYD_IDENTITY:-}" ]; then
-	export FLOYD_IDENTITY=${FLOYD_IDENTITY:-"$MEGAFLOYD_IDENTITY"}
+	export FLOYD_IDENTITY=$MEGAFLOYD_IDENTITY
 fi
 if [ -n "${MEGAFLOYD_PROFILE:-}" ]; then
-	export FLOYD_PROFILE=${FLOYD_PROFILE:-"$MEGAFLOYD_PROFILE"}
+	export FLOYD_PROFILE=$MEGAFLOYD_PROFILE
 fi
 if [ -n "${MEGAFLOYD_SKILLS_DIR:-}" ]; then
-	export FLOYD_SKILLS_DIR=${FLOYD_SKILLS_DIR:-"$MEGAFLOYD_SKILLS_DIR"}
+	export FLOYD_SKILLS_DIR=$MEGAFLOYD_SKILLS_DIR
 fi
 
 # Resolve the binary. MEGAFLOYD_BIN wins; otherwise look beside the script
@@ -80,7 +60,7 @@ consider() {
 
 if [ -n "${MEGAFLOYD_BIN:-}" ]; then
 	consider "$MEGAFLOYD_BIN" || {
-		printf '%s: MEGAFLOYD_BIN is not executable: %s\n' "$APP" "$MEGAFLOYD_BIN" >&2
+		printf '%s: MEGAFLOYD_BIN is not executable: %s\n' "$DISPLAY_NAME" "$MEGAFLOYD_BIN" >&2
 		exit 127
 	}
 fi
@@ -101,7 +81,7 @@ fi
 
 if [ -z "$REAL" ]; then
 	cat >&2 <<EOF
-$APP: cannot find the $APP binary.
+$DISPLAY_NAME: cannot find the $APP binary.
 
 Build it first:
   cd floyd-go && go build -o ../dist/$APP .
@@ -114,15 +94,7 @@ EOF
 	exit 127
 fi
 
-# Pass --data-dir unless the caller already chose one.
-has_data_dir=0
-for argument in "$@"; do
-	case "$argument" in
-	-D|-D=*|--data-dir|--data-dir=*) has_data_dir=1 ;;
-	esac
-done
-
-if [ "$has_data_dir" -eq 1 ]; then
-	exec -a "$APP" "$REAL" "$@"
-fi
-exec -a "$APP" "$REAL" --data-dir "$MEGAFLOYD_DATA_DIR" "$@"
+# The Go runtime resolves workspace state in the current account's private home,
+# honoring this account's explicit workspace mapping when one is configured.
+# An explicit --data-dir argument is passed through unchanged.
+exec -a "$APP" "$REAL" "$@"

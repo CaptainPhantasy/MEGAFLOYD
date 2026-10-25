@@ -34,7 +34,7 @@ export const promptSubmissionSchema = z.object({
 });
 export type PromptSubmission = z.infer<typeof promptSubmissionSchema>;
 
-export const promptStatusSchema = z.enum(['running', 'queued', 'blocked']);
+export const promptStatusSchema = z.enum(['running', 'queued', 'blocked', 'completed']);
 export type PromptStatus = z.infer<typeof promptStatusSchema>;
 
 export const promptItemSchema = z.object({
@@ -43,6 +43,7 @@ export const promptItemSchema = z.object({
   status: promptStatusSchema,
   content: z.array(messageContentSchema).min(1),
   created_at: isoDateTimeSchema,
+  finished_at: isoDateTimeSchema.optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 export type PromptItem = z.infer<typeof promptItemSchema>;

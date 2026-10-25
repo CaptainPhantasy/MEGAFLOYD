@@ -219,7 +219,7 @@ func RunConfigAudit(globalConfigPath, projectConfigPath string, loadedMCP map[st
 			result.OrphanedFiles = append(result.OrphanedFiles, orphan)
 			result.Warnings = append(result.Warnings, ConfigWarning{
 				Level:   "warn",
-				Message: "Config file exists but is not loaded by floyd",
+				Message: "Config file exists but is not loaded by MegaFloyd",
 				Source:  filepath.Base(orphan),
 			})
 		}

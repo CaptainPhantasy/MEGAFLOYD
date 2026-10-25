@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,13 +39,17 @@ type CheckpointService interface {
 
 type checkpointService struct {
 	baseDir string
+	pathErr error
 }
 
 // NewCheckpointService creates a new checkpoint service
-func NewCheckpointService(workingDir string) CheckpointService {
-	return &checkpointService{
-		baseDir: filepath.Join(workingDir, ".floyd", "workflows"),
+func NewCheckpointService(workingDir string, selected ...string) CheckpointService {
+	var explicit string
+	if len(selected) > 0 {
+		explicit = selected[0]
 	}
+	dataDir, err := megafloyd.PersonalDataDir(workingDir, explicit)
+	return &checkpointService{baseDir: filepath.Join(dataDir, "workflows"), pathErr: err}
 }
 
 func (s *checkpointService) checkpointPath(id string) string {
@@ -52,7 +57,10 @@ func (s *checkpointService) checkpointPath(id string) string {
 }
 
 func (s *checkpointService) ensureDir() error {
-	return os.MkdirAll(s.baseDir, 0o755)
+	if s.pathErr != nil {
+		return s.pathErr
+	}
+	return os.MkdirAll(s.baseDir, 0o700)
 }
 
 // Save persists a checkpoint to disk
@@ -69,7 +77,7 @@ func (s *checkpointService) Save(checkpoint *Checkpoint) error {
 	}
 
 	path := s.checkpointPath(checkpoint.ID)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write checkpoint file: %w", err)
 	}
 
@@ -78,6 +86,9 @@ func (s *checkpointService) Save(checkpoint *Checkpoint) error {
 
 // Load retrieves a checkpoint from disk
 func (s *checkpointService) Load(id string) (*Checkpoint, error) {
+	if s.pathErr != nil {
+		return nil, s.pathErr
+	}
 	path := s.checkpointPath(id)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -132,6 +143,9 @@ func (s *checkpointService) List(workflowName string) ([]*Checkpoint, error) {
 
 // Delete removes a checkpoint from disk
 func (s *checkpointService) Delete(id string) error {
+	if s.pathErr != nil {
+		return s.pathErr
+	}
 	path := s.checkpointPath(id)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete checkpoint: %w", err)

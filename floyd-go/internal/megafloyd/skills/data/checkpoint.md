@@ -12,7 +12,7 @@ Record a named, restorable snapshot of the current state: conversation position,
 2. Capture the active diff with the `get_active_diff` tool.
 3. Write the checkpoint record with the `write` tool to `.harness/checkpoints/<name>.md` containing:
    - name and timestamp
-   - session id (`floyd session list` shows it) and current message position
+   - session id (`megafloyd session list` shows it) and current message position
    - git branch, HEAD commit, dirty-file list, stash ref if created
    - open todos (from the `todos` tool)
    - the intended next step, one sentence

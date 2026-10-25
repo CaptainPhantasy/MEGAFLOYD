@@ -6,18 +6,12 @@ const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const SESSION_NOT_FOUND = 40401;
 
 /**
- * Spec C6: the Go chassis (`<workspace>/.floyd/floyd.db`) and the web engine
- * (`$MEGAFLOYD_HOME/sessions/<id>`, `GET /api/v1/sessions/{id}`) are separate
- * stores. The desktop resolves a deep link against both and refuses to open a
- * transcript that the web engine cannot prove it owns.
+ * The desktop may inspect the canonical workspace database when resolving a
+ * session link. Parent harness stores are never discovered automatically.
  */
-export function chassisDbCandidates({ workspace, home } = {}) {
-  const candidates = [];
-  const explicit = process.env.MEGAFLOYD_DATA_DIR || process.env.FLOYD_DATA_DIR;
-  if (explicit) candidates.push(path.resolve(explicit, 'floyd.db'));
-  if (workspace) candidates.push(path.join(path.resolve(workspace), '.floyd', 'floyd.db'));
-  if (home) candidates.push(path.join(path.resolve(home), '.floyd', 'floyd.db'));
-  return [...new Set(candidates)];
+export function chassisDbCandidates({ workspace, dataDir } = {}) {
+  if (dataDir) return [path.resolve(dataDir, 'floyd.db')];
+  return [];
 }
 
 export function findChassisDb(candidates) {
@@ -68,8 +62,8 @@ export async function lookupEngineSession({ port, token, id, fetchImpl = fetch }
   if (!SAFE_ID.test(id)) {
     return { status: 'unknown', error: 'session id is not a plain identifier' };
   }
-  if (!port || !token) {
-    return { status: 'unknown', error: 'engine port or token unavailable' };
+  if (!port) {
+    return { status: 'unknown', error: 'engine port unavailable' };
   }
 
   const candidates = id.startsWith('session_') ? [id] : [id, `session_${id}`];
@@ -78,7 +72,7 @@ export async function lookupEngineSession({ port, token, id, fetchImpl = fetch }
       const response = await fetchImpl(
         `http://127.0.0.1:${port}/api/v1/sessions/${encodeURIComponent(candidate)}`,
         {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
           signal: AbortSignal.timeout(3000),
         },
       );
@@ -120,7 +114,7 @@ export function buildSessionNotice({ id, owner, engine, chassis, dbPath }) {
       sessionId: id,
       title: 'Session belongs to the CLI store',
       message:
-        `Session ${id} exists in the MEGAFLOYD chassis store` +
+        `Session ${id} exists in the MegaFloyd chassis store` +
         `${dbPath ? ` (${dbPath})` : ''}, not in the web engine. Opening it here would ` +
         `show an empty transcript. Resume it in the terminal with:\n\nmegafloyd -s ${id}`,
     };

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 )
 
 //go:embed project_map.md
@@ -48,7 +49,7 @@ func walkDir(root string, path string, prefix string, maxDepth int, currentDepth
 
 	for i, entry := range entries {
 		name := entry.Name()
-		if strings.HasPrefix(name, ".") && name != ".floyd" {
+		if strings.HasPrefix(name, ".") && name != megafloyd.ProjectDirName() {
 			continue
 		}
 		if name == "node_modules" || name == "vendor" {

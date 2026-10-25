@@ -79,6 +79,9 @@ func NewRenameTool(
 
 			if files != nil && sessionID != "" {
 				for _, path := range affectedFiles {
+					if err := history.CaptureBefore(ctx, files, path); err != nil {
+						return fantasy.ToolResponse{}, fmt.Errorf("capture file history: %w", err)
+					}
 					content, err := os.ReadFile(path)
 					if err != nil {
 						slog.Warn("Failed to read file for version tracking", "path", path, "error", err)

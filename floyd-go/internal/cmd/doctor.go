@@ -4,14 +4,16 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/runhealth"
 	"github.com/spf13/cobra"
 )
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Show SuperFloyd runtime health and resilience state",
+	Short: "Show MegaFloyd runtime health and resilience state",
 	Long:  "Displays quality gates, degradation controls, consistency lock, auto-stabilize status, and recent failure/circuit state.",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		cwd, err := ResolveCwd(cmd)
@@ -25,26 +27,33 @@ var doctorCmd = &cobra.Command{
 		}
 		cfg := cfgStore.Config()
 
-		isSF := isSuperFloydBinary()
-		st, _ := loadRuntimeHealth(cfg.Options.DataDirectory)
-		stabilizeNow := shouldStabilizeFromBenchmarks(cmd.Context(), cfgStore)
+		isSF := runhealth.Enabled()
+		legacyControls := isSuperFloydBinary()
+		st, err := loadRuntimeHealth(cfg.Options.DataDirectory)
+		if err != nil {
+			return err
+		}
+		st.Failures = keepRecentFailures(st.Failures, time.Now().Add(-retryBudgetWindow).Unix())
+		stabilizeNow := legacyControls && shouldStabilizeFromBenchmarks(cmd.Context(), cfgStore)
 		consistencyErr := enforceConsistencyLock(cfgStore)
 
 		fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-		fmt.Println("║                     SUPERFLOYD DOCTOR                       ║")
+		fmt.Println("║                     MegaFloyd DOCTOR                       ║")
 		fmt.Println("╠══════════════════════════════════════════════════════════════╣")
 		fmt.Printf("║ Binary lane                : %-31s ║\n", yesNo(isSF))
 		fmt.Printf("║ Active mode                : %-31s ║\n", truncate(strings.ToUpper(cmd.Root().Use), 31))
 		fmt.Printf("║ Max parallelism            : %-31s ║\n", getMaxParallelism())
-		fmt.Printf("║ Quality gates enabled      : %-31s ║\n", yesNo(qualityGatesEnabled()))
-		fmt.Printf("║ Degradation controls       : %-31s ║\n", yesNo(degradationControlsEnabled()))
-		fmt.Printf("║ Consistency lock enabled   : %-31s ║\n", yesNo(consistencyLockEnabled()))
-		fmt.Printf("║ Auto-stabilize enabled     : %-31s ║\n", yesNo(autoStabilizeEnabled()))
+		fmt.Printf("║ Quality gates enabled      : %-31s ║\n", yesNo(legacyControls && qualityGatesEnabled()))
+		fmt.Printf("║ Degradation controls       : %-31s ║\n", yesNo(isSF))
+		fmt.Printf("║ Consistency lock enabled   : %-31s ║\n", yesNo(legacyControls && consistencyLockEnabled()))
+		fmt.Printf("║ Auto-stabilize enabled     : %-31s ║\n", yesNo(legacyControls && autoStabilizeEnabled()))
 		fmt.Printf("║ Auto-stabilize active now  : %-31s ║\n", yesNo(stabilizeNow))
 		fmt.Printf("║ Runtime data dir           : %-31s ║\n", truncate(cfg.Options.DataDirectory, 31))
 		fmt.Printf("║ Failure records (1h)       : %-31d ║\n", len(st.Failures))
 		fmt.Println("╠══════════════════════════════════════════════════════════════╣")
-		if consistencyErr == nil {
+		if !legacyControls {
+			fmt.Printf("║ Consistency check          : %-31s ║\n", "inactive")
+		} else if consistencyErr == nil {
 			fmt.Printf("║ Consistency check          : %-31s ║\n", "PASS")
 		} else {
 			fmt.Printf("║ Consistency check          : %-31s ║\n", "FAIL")
@@ -60,7 +69,7 @@ var doctorCmd = &cobra.Command{
 		fmt.Println("╚══════════════════════════════════════════════════════════════╝")
 
 		if !isSF {
-			fmt.Println("Note: running outside superfloyd lane; safeguards may be inactive by design.")
+			fmt.Println("Note: persistent run health is disabled for this runtime profile.")
 		}
 		fmt.Println("Env toggles: SUPERFLOYD_QUALITY_GATES, SUPERFLOYD_DEGRADATION_CONTROLS, SUPERFLOYD_CONSISTENCY_LOCK, SUPERFLOYD_AUTOSTABILIZE")
 		return nil

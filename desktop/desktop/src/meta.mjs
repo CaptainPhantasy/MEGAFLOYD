@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 export const EXPECTED_ENGINE_MAJOR = 2;
 
 export const REQUIRED_CAPABILITIES = [
@@ -9,7 +12,20 @@ export const REQUIRED_CAPABILITIES = [
   'terminal',
 ];
 
-/** The token travels in the handoff URL fragment (spec C3). */
+/** Read the local ready URL emitted by the Go handoff. */
+export function handoffUrlFromLine(line, port) {
+  const match = /^(?:Web UI|Local):\s+(http:\/\/127\.0\.0\.1:\d+\/\S+)/.exec(line.trim());
+  if (!match) return null;
+  try {
+    const url = new URL(match[1]);
+    if (port !== undefined && Number(url.port) !== port) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** A fragment token is optional for the shared Go runtime. */
 export function tokenFromUrl(url) {
   try {
     const parsed = new URL(url);
@@ -113,16 +129,17 @@ export function interpretMeta(data, { expectedMajor = EXPECTED_ENGINE_MAJOR } = 
 export async function fetchMeta({
   port,
   token,
+  workspace,
+  dataDir,
   fetchImpl = fetch,
   attempts = 3,
   retryDelayMs = 250,
 }) {
-  if (!token) return { ok: false, error: 'engine ready URL carried no token' };
   let lastError = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       const response = await fetchImpl(`http://127.0.0.1:${port}/api/v1/meta`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         signal: AbortSignal.timeout(3000),
       });
       if (response.status === 401) {
@@ -133,7 +150,12 @@ export async function fetchMeta({
       }
       const envelope = parseEnvelope(await response.json());
       if (!envelope.ok) return envelope;
-      return interpretMeta(envelope.data);
+      const meta = interpretMeta(envelope.data);
+      if (!meta.ok || workspace === undefined) return meta;
+      const runtime = await fetchRuntime({ port, token, workspace, dataDir, fetchImpl, attempts, retryDelayMs });
+      return runtime.ok
+        ? { ...meta, runtime: runtime.data }
+        : { ...meta, ok: false, error: runtime.error };
     } catch (error) {
       lastError = error;
       if (attempt + 1 < attempts) {
@@ -142,4 +164,62 @@ export async function fetchMeta({
     }
   }
   return { ok: false, error: `meta probe failed: ${lastError?.message ?? 'unknown error'}` };
+}
+
+
+function canonicalPath(value) {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  try {
+    return fs.realpathSync(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
+/** Prove the web adapter serves this Go workspace and its own data store. */
+export async function fetchRuntime({
+  port,
+  token,
+  workspace,
+  dataDir,
+  workspaceId,
+  host,
+  timeoutMs = 3000,
+  fetchImpl = fetch,
+  attempts = 3,
+  retryDelayMs = 250,
+}) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetchImpl(`http://127.0.0.1:${port}/api/v1/runtime`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) return { ok: false, error: `runtime identity returned HTTP ${response.status}` };
+      const envelope = parseEnvelope(await response.json());
+      if (!envelope.ok) return envelope;
+      const runtime = envelope.data;
+      if (
+        runtime.engine !== 'go' ||
+        typeof runtime.host !== 'string' || runtime.host.length === 0 ||
+        typeof runtime.workspace_id !== 'string' || runtime.workspace_id.length === 0 ||
+        (workspaceId && runtime.workspace_id !== workspaceId) ||
+        (host && runtime.host !== host) ||
+        typeof runtime.cwd !== 'string' || !path.isAbsolute(runtime.cwd) ||
+        (workspace && canonicalPath(runtime.cwd) !== canonicalPath(workspace)) ||
+        typeof runtime.data_dir !== 'string' || !path.isAbsolute(runtime.data_dir) ||
+        (dataDir && canonicalPath(runtime.data_dir) !== canonicalPath(dataDir))
+      ) {
+        return { ok: false, error: `Expected the Go runtime for workspace ${workspace} and data ${dataDir}.` };
+      }
+      return { ok: true, data: runtime };
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      }
+    }
+  }
+  return { ok: false, error: `runtime probe failed: ${lastError?.message ?? 'unknown error'}` };
 }

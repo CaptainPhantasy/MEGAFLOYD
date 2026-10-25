@@ -1,4 +1,4 @@
-// Package exitbanner renders what Floyd prints after the TUI exits.
+// Package exitbanner renders what MegaFloyd prints after the TUI exits.
 package exitbanner
 
 import (
@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/ui/logo"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
@@ -65,11 +66,11 @@ func logoSection(contentWidth int) string {
 	// Wrap the greeting and the message together: wrapping only the message
 	// leaves the greeting's own width unaccounted for and overflows the frame.
 	return floydLogo + "\n" +
-		lipgloss.NewStyle().Width(contentWidth).Render("Thanks for using Floyd! "+randomExitMessage())
+		lipgloss.NewStyle().Width(contentWidth).Render("Thanks for using MegaFloyd! "+randomExitMessage())
 }
 
-// sessionResumeLines returns the "Session  <title>\nContinue floyd -s <hash>"
-// pair used by the exit banner.
+// sessionResumeLines returns the session title and profile-specific resume
+// command used by the exit banner.
 func sessionResumeLines(sess *session.Session, contentWidth int) string {
 	title := strings.ReplaceAll(sess.Title, "\n", " ")
 
@@ -79,10 +80,14 @@ func sessionResumeLines(sess *session.Session, contentWidth int) string {
 		title = ansi.Truncate(title, titleWidth, "…")
 	}
 
+	command := "floyd"
+	if megafloyd.IsActive() {
+		command = megafloyd.Name
+	}
 	hash := session.HashID(sess.ID)[:7]
 	label := lipgloss.NewStyle().Foreground(charmtone.Charple)
 	sessionLine := label.Render("Session  ") + title
-	continueLine := label.Render("Continue ") + "floyd -s " + hash
+	continueLine := label.Render("Continue ") + command + " -s " + hash
 	return sessionLine + "\n" + continueLine
 }
 

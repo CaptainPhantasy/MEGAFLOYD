@@ -2,11 +2,11 @@ import { app } from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 
-export const APP_NAME = 'MEGAFLOYD';
+export const APP_NAME = 'MegaFloyd';
 export const APP_VERSION = app.getVersion();
 
 /**
- * MEGAFLOYD owns one home directory. The platform uses the same one, so the
+ * MegaFloyd owns one home directory. The platform uses the same one, so the
  * desktop and the CLI never diverge.
  */
 export const HOME_DIR =
@@ -16,6 +16,7 @@ export const HOME_DIR =
 
 export const DESKTOP_STATE_DIR = path.join(HOME_DIR, 'desktop');
 export const LOGS_DIR = path.join(HOME_DIR, 'logs');
+export const NAVIGATION_STATE_FILE = path.join(DESKTOP_STATE_DIR, 'navigation.json');
 export const DEFAULT_PORT = 58627;
 export const ENGINE_START_TIMEOUT_MS = 60_000;
 export const ENGINE_STOP_TIMEOUT_MS = 8_000;

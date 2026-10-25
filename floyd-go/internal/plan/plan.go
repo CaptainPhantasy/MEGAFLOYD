@@ -193,6 +193,10 @@ func (s *Service) RecordRevision(sessionID string) (Revision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.recordRevisionLocked(sessionID)
+}
+
+func (s *Service) recordRevisionLocked(sessionID string) (Revision, error) {
 	state, err := s.readState(sessionID)
 	if err != nil {
 		return Revision{}, err

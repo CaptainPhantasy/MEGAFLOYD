@@ -23,6 +23,7 @@ import (
 var (
 	floydGeneralPromptTmpl    = mustDecodeTemplate("floyd-general.md.tpl")
 	superfloydCoderPromptTmpl = mustDecodeTemplate("superfloyd-coder.md.tpl")
+	megafloydCoderPromptTmpl  = mustDecodeTemplate("megafloyd-coder.md.tpl")
 	coderPromptTmpl           = mustDecodeTemplate("coder.md.tpl")
 	taskPromptTmpl            = mustDecodeTemplate("task.md.tpl")
 	initializePromptTmpl      = mustDecodeTemplate("initialize.md.tpl")
@@ -80,11 +81,14 @@ func promptTemplate(name string, embedded []byte) string {
 // to the general Floyd agent. Selection is pure so it can be tested without
 // environment mutation.
 func roleTemplateFor(profile, binaryName string) []byte {
+	if strings.Contains(strings.ToLower(filepath.Base(binaryName)), "megafloyd") || strings.EqualFold(strings.TrimSpace(profile), "megafloyd") {
+		return megafloydCoderPromptTmpl
+	}
 	if strings.EqualFold(strings.TrimSpace(profile), "superfloyd") {
 		return superfloydCoderPromptTmpl
 	}
 	bin := strings.ToLower(filepath.Base(binaryName))
-	if strings.Contains(bin, "superfloyd") || strings.Contains(bin, "megafloyd") {
+	if strings.Contains(bin, "superfloyd") {
 		return superfloydCoderPromptTmpl
 	}
 	return floydGeneralPromptTmpl

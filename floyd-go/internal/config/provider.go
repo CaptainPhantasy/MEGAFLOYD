@@ -22,6 +22,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/agent/hyper"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/home"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 )
 
 type syncer[T any] interface {
@@ -36,6 +37,15 @@ var (
 
 // file to cache provider data
 func cachePathFor(name string) string {
+	if megafloyd.IsActive() {
+		// Provider catalogs follow the same account-owned cache policy as the
+		// rest of MegaFloyd, including explicit MEGAFLOYD_CACHE_DIR overrides.
+		if dir := GlobalCacheDir(); dir != "" {
+			return filepath.Join(dir, name+".json")
+		}
+		return ""
+	}
+
 	xdgDataHome := os.Getenv("XDG_DATA_HOME")
 	if xdgDataHome != "" {
 		return filepath.Join(xdgDataHome, appName, name+".json")
@@ -199,7 +209,7 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 			items, err := catwalkSyncer.Get(ctx)
 			if err != nil {
 				catwalkURL := fmt.Sprintf("%s/v2/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
-				catwalkErr = fmt.Errorf("Floyd was unable to fetch an updated list of providers from %s. Consider setting FLOYD_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Floyd release. You can also update providers manually. For more info see floyd update-providers --help.\n\nCause: %w", catwalkURL, err) //nolint:staticcheck
+				catwalkErr = fmt.Errorf("MegaFloyd was unable to fetch an updated list of providers from %s. Consider setting FLOYD_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this MegaFloyd release. You can also update providers manually. For more info see megafloyd update-providers --help.\n\nCause: %w", catwalkURL, err) //nolint:staticcheck
 			}
 			providers.Append(items...)
 		})
@@ -228,7 +238,7 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 			// the user's config: dropping it signs a logged-in user out.
 			item, err := hyperSyncer.Get(ctx)
 			if err != nil {
-				hyperErr = fmt.Errorf("Floyd was unable to fetch updated information from Hyper: %w", err) //nolint:staticcheck
+				hyperErr = fmt.Errorf("MegaFloyd was unable to fetch updated information from Hyper: %w", err) //nolint:staticcheck
 			}
 			hyperProvider = item
 		})
@@ -293,7 +303,7 @@ func (c cache[T]) Store(v T) error {
 		return fmt.Errorf("failed to marshal provider data: %w", err)
 	}
 
-	// Written through a temporary file and renamed into place. Several Floyd
+	// Written through a temporary file and renamed into place. Several MegaFloyd
 	// instances start independently and race to refresh this cache, and a
 	// truncating write would let one of them read a half-written catalog and
 	// silently fall back to the bundled copy.

@@ -439,15 +439,15 @@ func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, ski
 // -- MCP operations --
 
 func (w *AppWorkspace) MCPGetStates() map[string]mcptools.ClientInfo {
-	return mcptools.GetStates()
+	return mcptools.GetStates(w.store)
 }
 
 func (w *AppWorkspace) MCPRefreshPrompts(ctx context.Context, name string) {
-	mcptools.RefreshPrompts(ctx, name)
+	mcptools.RefreshPrompts(ctx, name, w.store)
 }
 
 func (w *AppWorkspace) MCPRefreshResources(ctx context.Context, name string) {
-	mcptools.RefreshResources(ctx, name)
+	mcptools.RefreshResources(ctx, name, w.store)
 }
 
 func (w *AppWorkspace) RefreshMCPTools(ctx context.Context, name string) {
@@ -472,7 +472,7 @@ func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([
 }
 
 func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]commands.MCPPrompt, error) {
-	return commands.LoadMCPPrompts()
+	return commands.LoadMCPPrompts(w.store)
 }
 
 func (w *AppWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
@@ -516,7 +516,7 @@ func (w *AppWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer {
 }
 
 func (w *AppWorkspace) MCPAuthURL(name string) string {
-	return mcptools.MCPAuthURL(name)
+	return mcptools.MCPAuthURL(name, w.store)
 }
 
 // -- Lifecycle --

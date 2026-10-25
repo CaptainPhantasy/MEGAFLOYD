@@ -103,12 +103,9 @@ func (b *Backend) SaveSession(ctx context.Context, workspaceID string, sess sess
 
 // DeleteSession deletes a session from the given workspace.
 func (b *Backend) DeleteSession(ctx context.Context, workspaceID, sessionID string) error {
-	ws, err := b.GetWorkspace(workspaceID)
-	if err != nil {
-		return err
-	}
-
-	return ws.Sessions.Delete(ctx, sessionID)
+	return b.idleSessionOperation(workspaceID, sessionID, func(ws *Workspace) error {
+		return ws.Sessions.Delete(ctx, sessionID)
+	})
 }
 
 // ListUserMessages returns user-role messages for a session.

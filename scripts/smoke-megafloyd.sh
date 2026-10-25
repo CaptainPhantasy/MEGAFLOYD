@@ -10,12 +10,16 @@
 #   scripts/smoke-megafloyd.sh [path-to-binary]
 #
 # Environment:
+#   MEGAFLOYD_GOMODCACHE  Explicit module cache override; default is <repo>/.tmp/build-module-cache.
 #   MEGAFLOYD_BIN   Binary to test. Overrides the positional argument.
 #
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
+# Resolve this project cache before even --host calls go env; shell-wide
+# GOMODCACHE may point at an unrelated external application volume.
+export GOMODCACHE="${MEGAFLOYD_GOMODCACHE:-$REPO_ROOT/.tmp/build-module-cache}"
 
 host_binary() {
 	local goos goarch

@@ -88,6 +88,8 @@ type SelectedModel struct {
 }
 
 type ProviderConfig struct {
+	Source map[string]any `json:"source,omitempty"`
+
 	// The provider's id.
 	ID string `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`
 	// The provider's name, used for display purposes.
@@ -191,15 +193,19 @@ const (
 )
 
 type MCPConfig struct {
-	Command       string            `json:"command,omitempty" jsonschema:"description=Command to execute for stdio MCP servers,example=npx"`
-	Env           map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set for the MCP server"`
-	Args          []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the MCP server command"`
-	Type          MCPType           `json:"type" jsonschema:"required,description=Type of MCP connection,enum=stdio,enum=sse,enum=http,default=stdio"`
-	URL           string            `json:"url,omitempty" jsonschema:"description=URL for HTTP or SSE MCP servers,format=uri,example=http://localhost:3000/mcp"`
-	Disabled      bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
-	DisabledTools []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
-	EnabledTools  []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
-	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=10,example=30,example=60,example=120"`
+	Cwd              string            `json:"cwd,omitempty" jsonschema:"description=Working directory for stdio MCP server"`
+	StartupTimeoutMs int               `json:"startup_timeout_ms,omitempty" jsonschema:"description=Connection startup timeout in milliseconds"`
+	ToolTimeoutMs    int               `json:"tool_timeout_ms,omitempty" jsonschema:"description=Tool execution timeout in milliseconds"`
+	Deferred         bool              `json:"deferred,omitempty" jsonschema:"description=Disclose MCP tools through search instead of the initial model tool list"`
+	Command          string            `json:"command,omitempty" jsonschema:"description=Command to execute for stdio MCP servers,example=npx"`
+	Env              map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set for the MCP server"`
+	Args             []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the MCP server command"`
+	Type             MCPType           `json:"type" jsonschema:"required,description=Type of MCP connection,enum=stdio,enum=sse,enum=http,default=stdio"`
+	URL              string            `json:"url,omitempty" jsonschema:"description=URL for HTTP or SSE MCP servers,format=uri,example=http://localhost:3000/mcp"`
+	Disabled         bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
+	DisabledTools    []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
+	EnabledTools     []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
+	Timeout          int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=10,example=30,example=60,example=120"`
 
 	// Sessionless marks a server that does not maintain an MCP session (it
 	// never issues a Mcp-Session-Id). When true, Floyd omits the
@@ -212,7 +218,7 @@ type MCPConfig struct {
 	//
 	// When nil, Floyd auto-detects a set of known sessionless servers (see
 	// IsSessionless); set it explicitly to override that detection.
-	Sessionless *bool `json:"sessionless,omitempty" jsonschema:"description=Mark a sessionless MCP server (no Mcp-Session-Id) so Floyd skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP),default=false"`
+	Sessionless *bool `json:"sessionless,omitempty" jsonschema:"description=Mark a sessionless MCP server (no Mcp-Session-Id) so MegaFloyd skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP),default=false"`
 
 	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
 	// through shell expansion at MCP startup, so $VAR and $(cmd)
@@ -280,7 +286,7 @@ type TUIOptions struct {
 	Completions Completions        `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool              `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 	Scrollbar   string             `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
-	ExitBanner  ExitBanner         `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Floyd,enum=default,enum=compact,enum=none,default=default"`
+	ExitBanner  ExitBanner         `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting MegaFloyd,enum=default,enum=compact,enum=none,default=default"`
 	PromptQuota *PromptQuotaConfig `json:"prompt_quota,omitempty" jsonschema:"description=Prompt usage quota display settings"`
 }
 
@@ -351,6 +357,7 @@ const (
 )
 
 type Permissions struct {
+	Mode         string   `json:"mode,omitempty" jsonschema:"description=Tool approval policy,enum=manual,enum=yolo,enum=auto"`
 	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
 }
 
@@ -365,7 +372,7 @@ const (
 type Attribution struct {
 	TrailerStyle  TrailerStyle `json:"trailer_style,omitempty" jsonschema:"description=Style of attribution trailer to add to commits,enum=none,enum=co-authored-by,enum=assisted-by,default=assisted-by"`
 	CoAuthoredBy  *bool        `json:"co_authored_by,omitempty" jsonschema:"description=Deprecated: use trailer_style instead"`
-	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Floyd line to commit messages and issues and PRs,default=true"`
+	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with MegaFloyd line to commit messages and issues and PRs,default=true"`
 }
 
 // JSONSchemaExtend marks the co_authored_by field as deprecated in the schema.
@@ -378,11 +385,16 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 }
 
 type Options struct {
+	PluginRuntime        map[string]any            `json:"plugin_runtime,omitempty"`
+	CompanyPlatformURL   string                    `json:"company_platform_url,omitempty"`
+	PluginMarketplaceURL string                    `json:"plugin_marketplace_url,omitempty"`
+	ManagedAccounts      map[string]ManagedAccount `json:"managed_accounts,omitempty"`
+
 	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=FLOYD.md"`
 	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/floyd/FLOYD.md,default=~/.config/AGENTS.md"`
 	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/floyd/skills,example=./skills"`
-	PluginsPaths         []string    `json:"plugins_paths,omitempty" jsonschema:"description=Paths to directories containing Floyd plugins (folders with PLUGIN.md files),example=~/.config/floyd/plugins,example=./plugins"`
-	AgentName            string      `json:"agent_name,omitempty" jsonschema:"description=Identity name injected into prompt templates (overridden by FLOYD_IDENTITY env),default=Floyd"`
+	PluginsPaths         []string    `json:"plugins_paths,omitempty" jsonschema:"description=Paths to directories containing MegaFloyd plugins (folders with PLUGIN.md files),example=~/.config/floyd/plugins,example=./plugins"`
+	AgentName            string      `json:"agent_name,omitempty" jsonschema:"description=Identity name injected into prompt templates (overridden by FLOYD_IDENTITY env),default=MegaFloyd"`
 	TUI                  *TUIOptions `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
 	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
@@ -999,6 +1011,7 @@ func allToolNames() []string {
 		"question",
 		"sourcegraph",
 		"todos",
+		"goal",
 		"view",
 		"write",
 		"list_mcp_resources",
@@ -1013,6 +1026,7 @@ func allToolNames() []string {
 		"symbol_index",
 		"vision",
 		"workflow",
+		"run_skill",
 		"mcp_task_status",
 		"project_map",
 		"manage_scratchpad",

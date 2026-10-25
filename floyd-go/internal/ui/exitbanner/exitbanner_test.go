@@ -42,18 +42,18 @@ func TestRender(t *testing.T) {
 			sess:   testSession(),
 			want:   []string{"Session", "Fix the flaky test", "Continue", "floyd -s "},
 			// No logo, and no padding around the two lines.
-			notWant: []string{"Thanks for using Floyd!"},
+			notWant: []string{"Thanks for using MegaFloyd!"},
 		},
 		{
 			name:   "default with a session prints the logo and the resume lines",
 			banner: config.ExitBannerDefault,
 			sess:   testSession(),
-			want:   []string{"Thanks for using Floyd!", "Session", "Fix the flaky test", "Continue"},
+			want:   []string{"Thanks for using MegaFloyd!", "Session", "Fix the flaky test", "Continue"},
 		},
 		{
 			name:   "default without a session still prints the logo",
 			banner: config.ExitBannerDefault,
-			want:   []string{"Thanks for using Floyd!"},
+			want:   []string{"Thanks for using MegaFloyd!"},
 			// The separator between logo and resume lines must not be left
 			// dangling when there is no session.
 			notWant: []string{"Continue"},
@@ -62,12 +62,12 @@ func TestRender(t *testing.T) {
 			name:   "unrecognized values fall back to the full banner",
 			banner: config.ExitBanner("wat"),
 			sess:   testSession(),
-			want:   []string{"Thanks for using Floyd!", "Continue"},
+			want:   []string{"Thanks for using MegaFloyd!", "Continue"},
 		},
 		{
 			name: "zero value falls back to the full banner",
 			sess: testSession(),
-			want: []string{"Thanks for using Floyd!", "Continue"},
+			want: []string{"Thanks for using MegaFloyd!", "Continue"},
 		},
 	}
 
@@ -146,4 +146,18 @@ func TestRenderNonPositiveWidthUsesFallback(t *testing.T) {
 	for _, line := range strings.Split(got, "\n") {
 		require.LessOrEqual(t, ansi.StringWidth(line), FallbackWidth)
 	}
+}
+
+func TestCanonicalResumeCommandUsesOwnProfileAndSessionHash(t *testing.T) {
+	t.Setenv("MEGAFLOYD_ACTIVE", "1")
+	sess := &session.Session{
+		ID:    "41cffa2c-231a-46d8-b609-a729e74d78a8",
+		Title: "Canonical integration verification",
+	}
+
+	// The exit hint is a supported hash prefix, not a different session UUID.
+	require.Equal(t, "8346c8b", session.HashID(sess.ID)[:7])
+	want := "Session  Canonical integration verification\nContinue megafloyd -s 8346c8b"
+	require.Equal(t, want, ansi.Strip(Render(config.ExitBannerCompact, sess, 100)))
+	require.Contains(t, ansi.Strip(Render(config.ExitBannerDefault, sess, 100)), "Continue megafloyd -s 8346c8b")
 }

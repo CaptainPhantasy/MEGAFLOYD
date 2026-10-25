@@ -13,10 +13,8 @@ const (
 	// packages/oauth/src/constants.ts.
 	DefaultClientID = "17e5f671-d194-4dfb-9706-5516cb48c098"
 
-	// DefaultPlatform is the X-Msh-Platform value the f7 CLI reports.
-	// A distinct megafloyd value has not been tested against the server,
-	// so the known-good value is kept.
-	DefaultPlatform = "floyd_code_cli"
+	// DefaultPlatform identifies this harness in company device approvals.
+	DefaultPlatform = "megafloyd"
 
 	// DefaultPollInterval is the polling interval used when the server
 	// omits one (donor default).

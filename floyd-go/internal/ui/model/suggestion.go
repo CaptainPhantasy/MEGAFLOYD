@@ -1,25 +1,25 @@
 package model
 
 import (
+	"context"
+	"log/slog"
 	"strings"
+	"time"
 
 	"charm.land/bubbletea/v2"
 	"github.com/legacy-ai/floyd/internal/clipboard"
 	"github.com/legacy-ai/floyd/internal/experiments"
+	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/ui/util"
 )
 
-// TODO(port-wave4): the v5.3 line also sources AI-generated suggestions
-// through AgentCoordinator.SuggestFollowup/SuggestPrompt. The chassis
-// coordinator does not expose those methods yet, so suggestions here are
-// history-based only; wire the AI source when the coordinator grows it.
-
 // updateCommandSuggestion refreshes the inline ghost-text suggestion from
-// prompt history. The suggestion is only shown while the editor is
+// a completed AI suggestion or prompt history. It is only shown while the editor is
 // focused, no completion popup is open, and the editor content is a
 // prefix of the candidate (or empty).
 func (m *UI) updateCommandSuggestion() {
 	if !m.experimentEnabled(experiments.GhostText) {
+		m.cancelAISuggestion()
 		m.commandSuggestion = ""
 		return
 	}
@@ -32,6 +32,10 @@ func (m *UI) updateCommandSuggestion() {
 		return
 	}
 	value := m.textarea.Value()
+	if m.aiSuggestion != "" && strings.HasPrefix(m.aiSuggestion, value) && m.aiSuggestion != value {
+		m.commandSuggestion = m.aiSuggestion
+		return
+	}
 	// Multi-line suggestions are truncated to their first line while the
 	// editor itself is single-line.
 	if m.commandSuggestion != "" && strings.Contains(m.commandSuggestion, "\n") {
@@ -134,4 +138,52 @@ func (m *UI) renderEditorSuggestion(view string) string {
 	}
 	lines[lineIndex] = lines[lineIndex] + m.com.Styles.Editor.GhostSuggestion.Render(suffix)
 	return strings.Join(lines, "\n")
+}
+
+type aiSuggestionMsg struct {
+	sessionID string
+	messageID string
+	prefix    string
+	text      string
+}
+
+// requestAISuggestion schedules at most one model call per finished assistant
+// message. Typing only filters the cached result and never starts a model call.
+func (m *UI) requestAISuggestion(msg message.Message) tea.Cmd {
+	if !m.experimentEnabled(experiments.GhostText) || m.session == nil || msg.SessionID != m.session.ID || msg.Role != message.Assistant || msg.IsSummaryMessage || msg.FinishReason() != message.FinishReasonEndTurn || msg.ID == m.suggestionMessageID {
+		return nil
+	}
+	sessionID, messageID, prefix := msg.SessionID, msg.ID, m.textarea.Value()
+	if strings.Contains(prefix, "\n") || len([]rune(prefix)) > 300 {
+		return nil
+	}
+	m.cancelAISuggestion()
+	m.suggestionMessageID = msg.ID
+	ctx, cancel := context.WithTimeout(context.Background(), 16*time.Second)
+	m.suggestionCancel = cancel
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		defer cancel()
+		suggestion, err := ws.SuggestPrompt(ctx, sessionID, prefix)
+		if err != nil {
+			slog.Debug("Prompt suggestion unavailable", "error", err)
+			suggestion = ""
+		}
+		return aiSuggestionMsg{sessionID: sessionID, messageID: messageID, prefix: prefix, text: suggestion}
+	}
+}
+
+func (m *UI) cancelAISuggestion() {
+	if m.suggestionCancel != nil {
+		m.suggestionCancel()
+		m.suggestionCancel = nil
+	}
+}
+
+func (m *UI) applyAISuggestion(msg aiSuggestionMsg) {
+	if m.session != nil && m.session.ID == msg.sessionID && m.suggestionMessageID == msg.messageID && m.textarea.Value() == msg.prefix {
+		m.cancelAISuggestion()
+		m.aiSuggestion = msg.text
+		m.updateCommandSuggestion()
+	}
 }

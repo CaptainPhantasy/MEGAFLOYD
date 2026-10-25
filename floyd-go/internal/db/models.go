@@ -49,4 +49,29 @@ type Session struct {
 	CreatedAt        int64          `json:"created_at"`
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 	Todos            sql.NullString `json:"todos"`
+	Metadata         string         `json:"metadata"`
+	ArchivedAt       sql.NullInt64  `json:"archived_at"`
+	IsBranch         int64          `json:"is_branch"`
+}
+
+type SessionTurn struct {
+	SessionID     string `json:"session_id"`
+	TurnID        int64  `json:"turn_id"`
+	UserMessageID string `json:"user_message_id"`
+	Completed     int64  `json:"completed"`
+}
+
+type SessionUndoRecord struct {
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	Payload   string `json:"payload"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+type TurnFileHistory struct {
+	SessionID     string         `json:"session_id"`
+	UserMessageID string         `json:"user_message_id"`
+	Path          string         `json:"path"`
+	StartState    string         `json:"start_state"`
+	EndState      sql.NullString `json:"end_state"`
 }

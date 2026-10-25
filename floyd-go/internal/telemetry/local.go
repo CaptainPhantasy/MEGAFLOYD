@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ func NewLocalStore(path string) (*LocalStore, error) {
 		if err != nil {
 			return nil, fmt.Errorf("get working directory: %w", err)
 		}
-		path = filepath.Join(wd, ".floyd", "telemetry.db")
+		path = filepath.Join(wd, megafloyd.ProjectDirName(), "telemetry.db")
 	}
 
 	// Ensure the parent directory exists

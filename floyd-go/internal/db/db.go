@@ -24,6 +24,21 @@ func New(db DBTX) *Queries {
 func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	q := Queries{db: db}
 	var err error
+	if q.addSessionUsageStmt, err = db.PrepareContext(ctx, addSessionUsage); err != nil {
+		return nil, fmt.Errorf("error preparing query AddSessionUsage: %w", err)
+	}
+	if q.clearSessionSummaryStmt, err = db.PrepareContext(ctx, clearSessionSummary); err != nil {
+		return nil, fmt.Errorf("error preparing query ClearSessionSummary: %w", err)
+	}
+	if q.completeSessionTurnStmt, err = db.PrepareContext(ctx, completeSessionTurn); err != nil {
+		return nil, fmt.Errorf("error preparing query CompleteSessionTurn: %w", err)
+	}
+	if q.completeTurnFileStmt, err = db.PrepareContext(ctx, completeTurnFile); err != nil {
+		return nil, fmt.Errorf("error preparing query CompleteTurnFile: %w", err)
+	}
+	if q.copySessionMessageStmt, err = db.PrepareContext(ctx, copySessionMessage); err != nil {
+		return nil, fmt.Errorf("error preparing query CopySessionMessage: %w", err)
+	}
 	if q.createFileStmt, err = db.PrepareContext(ctx, createFile); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateFile: %w", err)
 	}
@@ -32,6 +47,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.createSessionStmt, err = db.PrepareContext(ctx, createSession); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateSession: %w", err)
+	}
+	if q.createSessionTurnStmt, err = db.PrepareContext(ctx, createSessionTurn); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateSessionTurn: %w", err)
 	}
 	if q.deleteFileStmt, err = db.PrepareContext(ctx, deleteFile); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteFile: %w", err)
@@ -78,11 +96,20 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getSessionByIDStmt, err = db.PrepareContext(ctx, getSessionByID); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSessionByID: %w", err)
 	}
+	if q.getSessionTurnStmt, err = db.PrepareContext(ctx, getSessionTurn); err != nil {
+		return nil, fmt.Errorf("error preparing query GetSessionTurn: %w", err)
+	}
+	if q.getSessionTurnByMessageStmt, err = db.PrepareContext(ctx, getSessionTurnByMessage); err != nil {
+		return nil, fmt.Errorf("error preparing query GetSessionTurnByMessage: %w", err)
+	}
 	if q.getToolUsageStmt, err = db.PrepareContext(ctx, getToolUsage); err != nil {
 		return nil, fmt.Errorf("error preparing query GetToolUsage: %w", err)
 	}
 	if q.getTotalStatsStmt, err = db.PrepareContext(ctx, getTotalStats); err != nil {
 		return nil, fmt.Errorf("error preparing query GetTotalStats: %w", err)
+	}
+	if q.getTurnFileStmt, err = db.PrepareContext(ctx, getTurnFile); err != nil {
+		return nil, fmt.Errorf("error preparing query GetTurnFile: %w", err)
 	}
 	if q.getUsageByDayStmt, err = db.PrepareContext(ctx, getUsageByDay); err != nil {
 		return nil, fmt.Errorf("error preparing query GetUsageByDay: %w", err)
@@ -95,6 +122,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getUsageByModelStmt, err = db.PrepareContext(ctx, getUsageByModel); err != nil {
 		return nil, fmt.Errorf("error preparing query GetUsageByModel: %w", err)
+	}
+	if q.insertSessionUndoRecordStmt, err = db.PrepareContext(ctx, insertSessionUndoRecord); err != nil {
+		return nil, fmt.Errorf("error preparing query InsertSessionUndoRecord: %w", err)
+	}
+	if q.insertTurnFileStmt, err = db.PrepareContext(ctx, insertTurnFile); err != nil {
+		return nil, fmt.Errorf("error preparing query InsertTurnFile: %w", err)
 	}
 	if q.listAllUserMessagesStmt, err = db.PrepareContext(ctx, listAllUserMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllUserMessages: %w", err)
@@ -117,11 +150,20 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listSessionReadFilesStmt, err = db.PrepareContext(ctx, listSessionReadFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessionReadFiles: %w", err)
 	}
+	if q.listSessionTurnsStmt, err = db.PrepareContext(ctx, listSessionTurns); err != nil {
+		return nil, fmt.Errorf("error preparing query ListSessionTurns: %w", err)
+	}
 	if q.listSessionsStmt, err = db.PrepareContext(ctx, listSessions); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessions: %w", err)
 	}
+	if q.listTurnFilesStmt, err = db.PrepareContext(ctx, listTurnFiles); err != nil {
+		return nil, fmt.Errorf("error preparing query ListTurnFiles: %w", err)
+	}
 	if q.listUserMessagesBySessionStmt, err = db.PrepareContext(ctx, listUserMessagesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUserMessagesBySession: %w", err)
+	}
+	if q.markSessionBranchStmt, err = db.PrepareContext(ctx, markSessionBranch); err != nil {
+		return nil, fmt.Errorf("error preparing query MarkSessionBranch: %w", err)
 	}
 	if q.recordFileReadStmt, err = db.PrepareContext(ctx, recordFileRead); err != nil {
 		return nil, fmt.Errorf("error preparing query RecordFileRead: %w", err)
@@ -129,11 +171,17 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.renameSessionStmt, err = db.PrepareContext(ctx, renameSession); err != nil {
 		return nil, fmt.Errorf("error preparing query RenameSession: %w", err)
 	}
+	if q.setSessionArchivedStmt, err = db.PrepareContext(ctx, setSessionArchived); err != nil {
+		return nil, fmt.Errorf("error preparing query SetSessionArchived: %w", err)
+	}
 	if q.updateMessageStmt, err = db.PrepareContext(ctx, updateMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateMessage: %w", err)
 	}
 	if q.updateSessionStmt, err = db.PrepareContext(ctx, updateSession); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSession: %w", err)
+	}
+	if q.updateSessionMetadataStmt, err = db.PrepareContext(ctx, updateSessionMetadata); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateSessionMetadata: %w", err)
 	}
 	if q.updateSessionTitleAndUsageStmt, err = db.PrepareContext(ctx, updateSessionTitleAndUsage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSessionTitleAndUsage: %w", err)
@@ -143,6 +191,31 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 
 func (q *Queries) Close() error {
 	var err error
+	if q.addSessionUsageStmt != nil {
+		if cerr := q.addSessionUsageStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing addSessionUsageStmt: %w", cerr)
+		}
+	}
+	if q.clearSessionSummaryStmt != nil {
+		if cerr := q.clearSessionSummaryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing clearSessionSummaryStmt: %w", cerr)
+		}
+	}
+	if q.completeSessionTurnStmt != nil {
+		if cerr := q.completeSessionTurnStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing completeSessionTurnStmt: %w", cerr)
+		}
+	}
+	if q.completeTurnFileStmt != nil {
+		if cerr := q.completeTurnFileStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing completeTurnFileStmt: %w", cerr)
+		}
+	}
+	if q.copySessionMessageStmt != nil {
+		if cerr := q.copySessionMessageStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing copySessionMessageStmt: %w", cerr)
+		}
+	}
 	if q.createFileStmt != nil {
 		if cerr := q.createFileStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createFileStmt: %w", cerr)
@@ -156,6 +229,11 @@ func (q *Queries) Close() error {
 	if q.createSessionStmt != nil {
 		if cerr := q.createSessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createSessionStmt: %w", cerr)
+		}
+	}
+	if q.createSessionTurnStmt != nil {
+		if cerr := q.createSessionTurnStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createSessionTurnStmt: %w", cerr)
 		}
 	}
 	if q.deleteFileStmt != nil {
@@ -233,6 +311,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getSessionByIDStmt: %w", cerr)
 		}
 	}
+	if q.getSessionTurnStmt != nil {
+		if cerr := q.getSessionTurnStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getSessionTurnStmt: %w", cerr)
+		}
+	}
+	if q.getSessionTurnByMessageStmt != nil {
+		if cerr := q.getSessionTurnByMessageStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getSessionTurnByMessageStmt: %w", cerr)
+		}
+	}
 	if q.getToolUsageStmt != nil {
 		if cerr := q.getToolUsageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getToolUsageStmt: %w", cerr)
@@ -241,6 +329,11 @@ func (q *Queries) Close() error {
 	if q.getTotalStatsStmt != nil {
 		if cerr := q.getTotalStatsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getTotalStatsStmt: %w", cerr)
+		}
+	}
+	if q.getTurnFileStmt != nil {
+		if cerr := q.getTurnFileStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getTurnFileStmt: %w", cerr)
 		}
 	}
 	if q.getUsageByDayStmt != nil {
@@ -261,6 +354,16 @@ func (q *Queries) Close() error {
 	if q.getUsageByModelStmt != nil {
 		if cerr := q.getUsageByModelStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getUsageByModelStmt: %w", cerr)
+		}
+	}
+	if q.insertSessionUndoRecordStmt != nil {
+		if cerr := q.insertSessionUndoRecordStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing insertSessionUndoRecordStmt: %w", cerr)
+		}
+	}
+	if q.insertTurnFileStmt != nil {
+		if cerr := q.insertTurnFileStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing insertTurnFileStmt: %w", cerr)
 		}
 	}
 	if q.listAllUserMessagesStmt != nil {
@@ -298,14 +401,29 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listSessionReadFilesStmt: %w", cerr)
 		}
 	}
+	if q.listSessionTurnsStmt != nil {
+		if cerr := q.listSessionTurnsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listSessionTurnsStmt: %w", cerr)
+		}
+	}
 	if q.listSessionsStmt != nil {
 		if cerr := q.listSessionsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSessionsStmt: %w", cerr)
 		}
 	}
+	if q.listTurnFilesStmt != nil {
+		if cerr := q.listTurnFilesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listTurnFilesStmt: %w", cerr)
+		}
+	}
 	if q.listUserMessagesBySessionStmt != nil {
 		if cerr := q.listUserMessagesBySessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listUserMessagesBySessionStmt: %w", cerr)
+		}
+	}
+	if q.markSessionBranchStmt != nil {
+		if cerr := q.markSessionBranchStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing markSessionBranchStmt: %w", cerr)
 		}
 	}
 	if q.recordFileReadStmt != nil {
@@ -318,6 +436,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing renameSessionStmt: %w", cerr)
 		}
 	}
+	if q.setSessionArchivedStmt != nil {
+		if cerr := q.setSessionArchivedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing setSessionArchivedStmt: %w", cerr)
+		}
+	}
 	if q.updateMessageStmt != nil {
 		if cerr := q.updateMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateMessageStmt: %w", cerr)
@@ -326,6 +449,11 @@ func (q *Queries) Close() error {
 	if q.updateSessionStmt != nil {
 		if cerr := q.updateSessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateSessionStmt: %w", cerr)
+		}
+	}
+	if q.updateSessionMetadataStmt != nil {
+		if cerr := q.updateSessionMetadataStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateSessionMetadataStmt: %w", cerr)
 		}
 	}
 	if q.updateSessionTitleAndUsageStmt != nil {
@@ -372,9 +500,15 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 type Queries struct {
 	db                                   DBTX
 	tx                                   *sql.Tx
+	addSessionUsageStmt                  *sql.Stmt
+	clearSessionSummaryStmt              *sql.Stmt
+	completeSessionTurnStmt              *sql.Stmt
+	completeTurnFileStmt                 *sql.Stmt
+	copySessionMessageStmt               *sql.Stmt
 	createFileStmt                       *sql.Stmt
 	createMessageStmt                    *sql.Stmt
 	createSessionStmt                    *sql.Stmt
+	createSessionTurnStmt                *sql.Stmt
 	deleteFileStmt                       *sql.Stmt
 	deleteMessageStmt                    *sql.Stmt
 	deleteSessionStmt                    *sql.Stmt
@@ -390,12 +524,17 @@ type Queries struct {
 	getMessageStmt                       *sql.Stmt
 	getRecentActivityStmt                *sql.Stmt
 	getSessionByIDStmt                   *sql.Stmt
+	getSessionTurnStmt                   *sql.Stmt
+	getSessionTurnByMessageStmt          *sql.Stmt
 	getToolUsageStmt                     *sql.Stmt
 	getTotalStatsStmt                    *sql.Stmt
+	getTurnFileStmt                      *sql.Stmt
 	getUsageByDayStmt                    *sql.Stmt
 	getUsageByDayOfWeekStmt              *sql.Stmt
 	getUsageByHourStmt                   *sql.Stmt
 	getUsageByModelStmt                  *sql.Stmt
+	insertSessionUndoRecordStmt          *sql.Stmt
+	insertTurnFileStmt                   *sql.Stmt
 	listAllUserMessagesStmt              *sql.Stmt
 	listFilesByPathStmt                  *sql.Stmt
 	listFilesBySessionStmt               *sql.Stmt
@@ -403,12 +542,17 @@ type Queries struct {
 	listMessagesBySessionStmt            *sql.Stmt
 	listNewFilesStmt                     *sql.Stmt
 	listSessionReadFilesStmt             *sql.Stmt
+	listSessionTurnsStmt                 *sql.Stmt
 	listSessionsStmt                     *sql.Stmt
+	listTurnFilesStmt                    *sql.Stmt
 	listUserMessagesBySessionStmt        *sql.Stmt
+	markSessionBranchStmt                *sql.Stmt
 	recordFileReadStmt                   *sql.Stmt
 	renameSessionStmt                    *sql.Stmt
+	setSessionArchivedStmt               *sql.Stmt
 	updateMessageStmt                    *sql.Stmt
 	updateSessionStmt                    *sql.Stmt
+	updateSessionMetadataStmt            *sql.Stmt
 	updateSessionTitleAndUsageStmt       *sql.Stmt
 }
 
@@ -416,9 +560,15 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
 		db:                                   tx,
 		tx:                                   tx,
+		addSessionUsageStmt:                  q.addSessionUsageStmt,
+		clearSessionSummaryStmt:              q.clearSessionSummaryStmt,
+		completeSessionTurnStmt:              q.completeSessionTurnStmt,
+		completeTurnFileStmt:                 q.completeTurnFileStmt,
+		copySessionMessageStmt:               q.copySessionMessageStmt,
 		createFileStmt:                       q.createFileStmt,
 		createMessageStmt:                    q.createMessageStmt,
 		createSessionStmt:                    q.createSessionStmt,
+		createSessionTurnStmt:                q.createSessionTurnStmt,
 		deleteFileStmt:                       q.deleteFileStmt,
 		deleteMessageStmt:                    q.deleteMessageStmt,
 		deleteSessionStmt:                    q.deleteSessionStmt,
@@ -434,12 +584,17 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getMessageStmt:                       q.getMessageStmt,
 		getRecentActivityStmt:                q.getRecentActivityStmt,
 		getSessionByIDStmt:                   q.getSessionByIDStmt,
+		getSessionTurnStmt:                   q.getSessionTurnStmt,
+		getSessionTurnByMessageStmt:          q.getSessionTurnByMessageStmt,
 		getToolUsageStmt:                     q.getToolUsageStmt,
 		getTotalStatsStmt:                    q.getTotalStatsStmt,
+		getTurnFileStmt:                      q.getTurnFileStmt,
 		getUsageByDayStmt:                    q.getUsageByDayStmt,
 		getUsageByDayOfWeekStmt:              q.getUsageByDayOfWeekStmt,
 		getUsageByHourStmt:                   q.getUsageByHourStmt,
 		getUsageByModelStmt:                  q.getUsageByModelStmt,
+		insertSessionUndoRecordStmt:          q.insertSessionUndoRecordStmt,
+		insertTurnFileStmt:                   q.insertTurnFileStmt,
 		listAllUserMessagesStmt:              q.listAllUserMessagesStmt,
 		listFilesByPathStmt:                  q.listFilesByPathStmt,
 		listFilesBySessionStmt:               q.listFilesBySessionStmt,
@@ -447,12 +602,17 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listMessagesBySessionStmt:            q.listMessagesBySessionStmt,
 		listNewFilesStmt:                     q.listNewFilesStmt,
 		listSessionReadFilesStmt:             q.listSessionReadFilesStmt,
+		listSessionTurnsStmt:                 q.listSessionTurnsStmt,
 		listSessionsStmt:                     q.listSessionsStmt,
+		listTurnFilesStmt:                    q.listTurnFilesStmt,
 		listUserMessagesBySessionStmt:        q.listUserMessagesBySessionStmt,
+		markSessionBranchStmt:                q.markSessionBranchStmt,
 		recordFileReadStmt:                   q.recordFileReadStmt,
 		renameSessionStmt:                    q.renameSessionStmt,
+		setSessionArchivedStmt:               q.setSessionArchivedStmt,
 		updateMessageStmt:                    q.updateMessageStmt,
 		updateSessionStmt:                    q.updateSessionStmt,
+		updateSessionMetadataStmt:            q.updateSessionMetadataStmt,
 		updateSessionTitleAndUsageStmt:       q.updateSessionTitleAndUsageStmt,
 	}
 }

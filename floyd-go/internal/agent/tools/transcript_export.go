@@ -10,6 +10,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/legacy-ai/floyd/internal/home"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/session"
 )
@@ -40,7 +41,7 @@ type ToolExecution struct {
 }
 
 // NewTranscriptExportTool creates a tool that exports session transcripts
-func NewTranscriptExportTool(sessions session.Service, messages message.Service, contextWindow int64, workingDir string) fantasy.AgentTool {
+func NewTranscriptExportTool(sessions session.Service, messages message.Service, contextWindow int64, workingDir string, selected ...string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		TranscriptExportToolName,
 		"Exports the current session transcript to a markdown file. Automatically triggered at 85% context usage or can be manually invoked.",
@@ -70,8 +71,16 @@ func NewTranscriptExportTool(sessions session.Service, messages message.Service,
 			}
 
 			// Create transcripts directory
-			transcriptsDir := filepath.Join(workingDir, ".floyd", "transcripts")
-			if err := os.MkdirAll(transcriptsDir, 0o755); err != nil {
+			var explicit string
+			if len(selected) > 0 {
+				explicit = selected[0]
+			}
+			dataDir, err := megafloyd.PersonalDataDir(workingDir, explicit)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			transcriptsDir := filepath.Join(dataDir, "transcripts")
+			if err := os.MkdirAll(transcriptsDir, 0o700); err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to create transcripts directory: %v", err)), nil
 			}
 
@@ -87,7 +96,7 @@ func NewTranscriptExportTool(sessions session.Service, messages message.Service,
 			content := generateTranscriptMarkdown(sess, msgs, toolExecs, percentUsed, totalTokens, contextWindow, workingDir, params.Reason)
 
 			// Write the file
-			if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+			if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to write transcript: %v", err)), nil
 			}
 

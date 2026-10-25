@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"sync"
 
 	"github.com/legacy-ai/floyd/internal/config"
 )
@@ -82,52 +81,36 @@ func reconcile(current config.MCPs, running map[string]ClientInfo) map[string]re
 	return actions
 }
 
-// reinitMu guards reinitRunning and reinitDirty.
-var (
-	reinitMu      sync.Mutex
-	reinitRunning bool
-	reinitDirty   bool
-)
-
-// Reinitialize reconciles running MCP servers against the current config.
-// Servers added since the last call are started, servers removed are torn
-// down, and servers whose config changed are restarted. Unchanged servers
-// keep their existing sessions.
-//
-// MCP state is process-global, so reconciliation is single-flighted: at
-// most one runs at a time. A config write that arrives mid-run just sets a
-// dirty flag and returns; the running reconciliation loops once more to
-// pick up the newer state. This coalesces a burst of rapid writes into at
-// most two reconciles instead of queueing a redundant no-op pass per write,
-// while still guaranteeing the final state reflects the latest config.
+// Reinitialize reconciles only this workspace's MCP clients. Concurrent
+// changes to the same workspace are coalesced; other workspaces keep their
+// independently configured clients, even when public server names match.
 func Reinitialize(ctx context.Context, cfg *config.ConfigStore) {
-	reinitMu.Lock()
-	if reinitRunning {
-		reinitDirty = true
-		reinitMu.Unlock()
+	gate := scopeReconcileGate(cfg)
+	gate.mu.Lock()
+	if gate.running {
+		gate.dirty = true
+		gate.mu.Unlock()
 		return
 	}
-	reinitRunning = true
-	reinitMu.Unlock()
-
+	gate.running = true
+	gate.mu.Unlock()
 	for {
 		reconcileOnce(ctx, cfg)
-
-		reinitMu.Lock()
-		if !reinitDirty {
-			reinitRunning = false
-			reinitMu.Unlock()
+		gate.mu.Lock()
+		if !gate.dirty {
+			gate.running = false
+			gate.mu.Unlock()
 			return
 		}
-		reinitDirty = false
-		reinitMu.Unlock()
+		gate.dirty = false
+		gate.mu.Unlock()
 	}
 }
 
 // reconcileOnce applies one reconciliation pass against the current config.
 func reconcileOnce(ctx context.Context, cfg *config.ConfigStore) {
-	current := cfg.Config().MCP
-	actions := reconcile(current, states.Copy())
+	current := scopedConfigs(cfg)
+	actions := reconcile(current, scopedStateRecords(cfg))
 	for name, action := range actions {
 		switch action {
 		case reinitRemove:
@@ -170,7 +153,7 @@ func removeServer(name string) {
 // time if a new field is added to MCPConfig without a decision about
 // whether it participates here.
 func mcpConfigEqual(a, b config.MCPConfig) bool {
-	return a.Command == b.Command &&
+	return a.Cwd == b.Cwd && a.StartupTimeoutMs == b.StartupTimeoutMs && a.ToolTimeoutMs == b.ToolTimeoutMs && a.Deferred == b.Deferred && a.Command == b.Command &&
 		maps.Equal(a.Env, b.Env) &&
 		slices.Equal(a.Args, b.Args) &&
 		a.Type == b.Type &&

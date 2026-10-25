@@ -15,6 +15,12 @@ type toolResultContentWidths struct {
 }
 
 func humanizedToolName(name string) string {
+	switch name {
+	case "floyd_info":
+		return "MegaFloyd Info"
+	case "floyd_logs":
+		return "MegaFloyd Logs"
+	}
 	name = strings.ReplaceAll(name, "_", " ")
 	name = strings.ReplaceAll(name, "-", " ")
 	return stringext.Capitalize(name)

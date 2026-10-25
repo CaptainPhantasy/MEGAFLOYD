@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 )
 
 const (
@@ -33,6 +35,9 @@ type Options struct {
 	Executable string
 	// SessionID is the session the printed URL opens.
 	SessionID string
+	// GoHost and GoDataDir identify the authoritative agent backend.
+	GoHost    string
+	GoDataDir string
 	// Port is the web server port. Zero means Port().
 	Port int
 	// Remote binds every interface. It is explicit only.
@@ -99,6 +104,12 @@ func StartRemoteControl(ctx context.Context, opts Options) (Result, error) {
 // when it is not available yet the URL is returned without it and a
 // warning explains why.
 func Start(ctx context.Context, opts Options) (Result, error) {
+	if megafloyd.IsActive() && opts.GoHost == "" {
+		return Result{}, errors.New("web handoff requires the shared Go backend; restart MegaFloyd with client/server mode enabled")
+	}
+	if opts.GoHost != "" && opts.RemoteControl {
+		return Result{}, errors.New("the shared Go runtime is available through the local web interface or Tailscale; relay remote control is not configured")
+	}
 	home := opts.HomeDir
 	if home == "" {
 		home = HomeDir()
@@ -156,6 +167,11 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		)
 	}
 	alreadyRunning := runningHost != ""
+	if alreadyRunning && opts.GoHost != "" {
+		if err := verifyRuntime(ctx, runningHost, port, opts); err != nil {
+			return Result{}, fmt.Errorf("web server on port %d belongs to a different runtime: %w; close that server or select MEGAFLOYD_WEB_PORT", port, err)
+		}
+	}
 
 	// Resolve the server and bundle before touching the tailnet serve
 	// configuration, so a missing checkout fails cleanly and side-effect
@@ -219,6 +235,12 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	childEnv := BuildChildEnv(baseEnv, info, dataDir)
+	if opts.GoHost != "" {
+		childEnv = setEnv(childEnv, "MEGAFLOYD_HOME", home)
+		childEnv = setEnv(childEnv, "MEGAFLOYD_GO_HOST", opts.GoHost)
+		childEnv = setEnv(childEnv, "MEGAFLOYD_GO_CWD", opts.CWD)
+		childEnv = setEnv(childEnv, "MEGAFLOYD_GO_DATA_DIR", opts.GoDataDir)
+	}
 	result := Result{
 		Port:      port,
 		Bind:      bind,
@@ -258,15 +280,22 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		result.Reused = true
 	}
 
-	tokenTimeout := opts.TokenTimeout
-	if tokenTimeout <= 0 {
-		tokenTimeout = defaultTokenTimeout
-	}
-	tokenPath := filepath.Join(dataDir, TokenFileName)
-	result.Token = waitForToken(ctx, tokenPath, tokenTimeout)
-	if result.Token == "" {
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("web server token not found at %s; the URL will not include a token", tokenPath))
+	if opts.GoHost != "" {
+		if err := verifyRuntime(ctx, bind.Host, port, opts); err != nil {
+			return Result{}, fmt.Errorf("web server does not use the expected Go runtime: %w; see %s", err, result.LogPath)
+		}
+	} else {
+		tokenTimeout := opts.TokenTimeout
+		if tokenTimeout <= 0 {
+			tokenTimeout = defaultTokenTimeout
+		}
+		tokenPath := filepath.Join(dataDir, TokenFileName)
+		result.Token = waitForToken(ctx, tokenPath, tokenTimeout)
+		if result.Token == "" {
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("web server token not found at %s; the URL will not include a token", tokenPath))
+		}
+
 	}
 
 	result.URL = SessionURL(TailnetOrigin(info, serveOK, port), opts.SessionID, result.Token)

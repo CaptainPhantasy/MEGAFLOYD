@@ -23,8 +23,8 @@ var (
 var logoutCmd = &cobra.Command{
 	Aliases: []string{"signout"},
 	Use:     "logout [platform]",
-	Short:   "Logout Floyd from a platform",
-	Long: `Logout Floyd from a specified platform, removing stored credentials.
+	Short:   "Logout MegaFloyd from a platform",
+	Long: `Logout MegaFloyd from a specified platform, removing stored credentials.
 The platform should be provided as an argument.
 If no argument is given, a list of logged-in platforms will be shown.
 Available platforms are: hyper, copilot.`,

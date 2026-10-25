@@ -31,9 +31,10 @@ type TieredContext struct {
 	Discard  []message.Message
 
 	// Metadata for summarization
-	ToolSummaries  []ToolSummary
-	FileOperations []FileOperation
-	KeyDecisions   []string
+	ToolSummaries    []ToolSummary
+	FileOperations   []FileOperation
+	KeyDecisions     []string
+	preservedHistory string
 }
 
 // ToolSummary captures essential info from tool interactions
@@ -159,6 +160,9 @@ func ClassifyMessage(msg message.Message, isFirstUser bool) MessageTier {
 
 // ClassifyMessageWithScore determines tier using semantic importance scoring
 func ClassifyMessageWithScore(msg message.Message, isFirstUser bool, position, totalMessages int, score SemanticScore) MessageTier {
+	if msg.Role == message.System {
+		return Tier1Preserve
+	}
 	// TIER 1: First user message (original request) - ALWAYS preserve
 	if isFirstUser && msg.Role == message.User {
 		return Tier1Preserve
@@ -223,11 +227,23 @@ func PrepareTieredContext(msgs []message.Message) *TieredContext {
 	}
 
 	totalMessages := len(msgs)
+	foundUser := false
 
 	for i, msg := range msgs {
+		if msg.IsSummaryMessage {
+			tc.Compress = append(tc.Compress, msg)
+			if _, preserved, ok := strings.Cut(msg.Content().Text, preservedSummaryHeading); ok {
+				tc.preservedHistory = preserved
+			}
+			continue
+		}
 		// Calculate semantic score for this message
 		score := CalculateSemanticScore(msg, i, totalMessages)
-		tier := ClassifyMessageWithScore(msg, i == 0, i, totalMessages, score)
+		firstUser := msg.Role == message.User && !foundUser
+		if msg.Role == message.User {
+			foundUser = true
+		}
+		tier := ClassifyMessageWithScore(msg, firstUser, i, totalMessages, score)
 
 		switch tier {
 		case Tier1Preserve:

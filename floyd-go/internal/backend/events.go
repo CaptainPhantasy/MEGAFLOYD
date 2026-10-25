@@ -94,18 +94,30 @@ func (b *Backend) LSPStopAll(ctx context.Context, workspaceID string) error {
 }
 
 // MCPGetStates returns the current state of all MCP clients.
-func (b *Backend) MCPGetStates(_ string) map[string]mcptools.ClientInfo {
-	return mcptools.GetStates()
+func (b *Backend) MCPGetStates(workspaceID string) map[string]mcptools.ClientInfo {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return map[string]mcptools.ClientInfo{}
+	}
+	return mcptools.GetStates(ws.Cfg)
 }
 
 // MCPRefreshPrompts refreshes prompts for a named MCP client.
-func (b *Backend) MCPRefreshPrompts(ctx context.Context, _ string, name string) {
-	mcptools.RefreshPrompts(ctx, name)
+func (b *Backend) MCPRefreshPrompts(ctx context.Context, workspaceID string, name string) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return
+	}
+	mcptools.RefreshPrompts(ctx, name, ws.Cfg)
 }
 
 // MCPRefreshResources refreshes resources for a named MCP client.
-func (b *Backend) MCPRefreshResources(ctx context.Context, _ string, name string) {
-	mcptools.RefreshResources(ctx, name)
+func (b *Backend) MCPRefreshResources(ctx context.Context, workspaceID string, name string) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return
+	}
+	mcptools.RefreshResources(ctx, name, ws.Cfg)
 }
 
 // MCPPendingAuth returns the MCP servers awaiting OAuth authentication,
@@ -121,8 +133,15 @@ func (b *Backend) MCPPendingAuth(workspaceID string) ([]mcptools.PendingAuthServ
 
 // MCPAuthURL returns the current OAuth authorization URL for a named
 // server, if a flow is in progress.
-func (b *Backend) MCPAuthURL(name string) string {
-	return mcptools.MCPAuthURL(name)
+func (b *Backend) MCPAuthURL(name string, workspaceIDs ...string) string {
+	if len(workspaceIDs) == 0 {
+		return ""
+	}
+	ws, err := b.GetWorkspace(workspaceIDs[0])
+	if err != nil {
+		return ""
+	}
+	return mcptools.MCPAuthURL(name, ws.Cfg)
 }
 
 // MCPAuthenticate runs the OAuth flow for a named MCP server with the

@@ -2,7 +2,7 @@ package commands
 
 import "slices"
 
-// BuiltinCommand describes a core slash command shipped with Floyd. The
+// BuiltinCommand describes a core slash command shipped with MegaFloyd. The
 // UI uses these entries to build the command palette and the slash
 // dispatcher; the actual handlers live in internal/ui/model.
 type BuiltinCommand struct {
@@ -52,23 +52,23 @@ var builtinCommands = []BuiltinCommand{
 	{Name: "export-md", Aliases: []string{"export"}, Description: "Export the session as Markdown", ArgumentHint: "[path]"},
 	{Name: "export-debug-zip", Description: "Export a diagnostic ZIP for this session"},
 	{Name: "copy", Description: "Copy the last assistant message"},
-	{Name: "exit", Aliases: []string{"quit", "q"}, Description: "Exit Floyd"},
+	{Name: "exit", Aliases: []string{"quit", "q"}, Description: "Exit MegaFloyd"},
 	{Name: "version", Description: "Show version information"},
 	{Name: "swarm", Description: "Dispatch one task across configured agents (local mode)", ArgumentHint: "<task>"},
 	{Name: "btw", Description: "Ask a one-shot side question without touching this session", ArgumentHint: "<question>"},
 	{Name: "feedback", Aliases: []string{"bug"}, Description: "Open the issue tracker to report a problem"},
 	{Name: "reload", Description: "Reload configuration from disk (local mode)"},
 	{Name: "reload-tui", Description: "Reapply UI styles from the current configuration"},
-	{Name: "web", Description: "Start or reuse the web UI and show its URL"},
-	{Name: "remote-control", Aliases: []string{"rc"}, Description: "Start or reuse the web UI through the Floyd relay"},
+	{Name: "web", Description: "Open this workspace and session in the browser"},
+	{Name: "desktop", Description: "Open this workspace and session in MegaFloyd desktop"},
+	{Name: "tui", Description: "Keep working in this terminal session"},
+	{Name: "remote-control", Aliases: []string{"rc"}, Description: "Start or reuse the web UI through the MegaFloyd relay"},
 }
 
 // BlockedBuiltin documents a required command that cannot be shipped as a
 // real trigger because the chassis has no mechanism for it. The value is
 // the evidence-based reason.
-var BlockedBuiltin = map[string]string{
-	"desktop": "f7 resolves /desktop to floydCodeOfficialInstallUrl(), which falls back to FLOYD_CODE_REPOSITORY_URL = https://github.com/CaptainPhantasy/f7, or to `${siteBase}/code` when a region profile defines one (apps/floyd-code/src/tui/commands/desktop.ts; src/constant/app.ts:79,148). That is the f7 harness repository, not a desktop product page for MEGAFLOYD, and this fork ships no desktop app to link to.",
-}
+var BlockedBuiltin = map[string]string{}
 
 // ExcludedBuiltin would list commands owned by another lane. The remote
 // lane's commands are now registered, so no command is excluded.

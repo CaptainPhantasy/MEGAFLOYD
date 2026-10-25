@@ -112,6 +112,7 @@ type Coordinator interface {
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
+	SuggestPrompt(ctx context.Context, sessionID, prefix string) (string, error)
 }
 
 type coordinator struct {
@@ -132,7 +133,12 @@ type coordinator struct {
 	// for coordinators built directly in tests.
 	plans     *plan.Service
 	plansOnce sync.Once
+	// Workflow state survives tool reconstruction after model/config changes.
+	workflows     *workflow.Engine
+	workflowOnce  sync.Once
+	toolRefreshMu sync.Mutex
 
+	selector     *AgentSelector
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
@@ -195,6 +201,12 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		interactive:  opts.Interactive,
 	}
 
+	selector, err := c.runtimeAgentSelector()
+	if err != nil {
+		return nil, err
+	}
+	c.selector = selector
+
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
 		return nil, errCoderAgentNotConfigured
@@ -252,17 +264,23 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// budget the turn proceeds without the stragglers; their tools simply
 	// stay absent from this run.
 	if !c.interactive {
-		if err := mcp.WaitForInitBudget(ctx, mcp.InitWaitBudget); err != nil {
+		if err := mcp.WaitForInitBudget(ctx, mcp.InitWaitBudget, c.cfg); err != nil {
 			return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 		}
 	}
 
-	// refresh models before each run
-	if err := c.UpdateModels(ctx); err != nil {
-		return nil, fmt.Errorf("failed to update models: %w", err)
+	settings, err := c.sessionSettingsSnapshot(ctx, accept, sessionID)
+	if err != nil {
+		return nil, err
 	}
-
-	model := c.currentAgent.Model()
+	selectedAgent, childRun := c.RuntimeChildAgent(sessionID)
+	if !childRun {
+		if err := c.UpdateModels(ctx); err != nil {
+			return nil, fmt.Errorf("failed to update models: %w", err)
+		}
+		selectedAgent = c.currentAgent
+	}
+	model := selectedAgent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
@@ -271,6 +289,12 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return nil, errModelProviderNotConfigured
+	}
+	if config.IsCompanyAuthAPIKey(providerCfg.APIKey) {
+		if err := c.cfg.ResolveCompanyProviderCredential(ctx, providerCfg.ID); err != nil {
+			return nil, err
+		}
+		providerCfg, _ = c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	}
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
@@ -305,22 +329,31 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// the coalesce closure publishes the final outcome under that
 	// same correlator.
 	runID := RunIDFromContext(ctx)
+	role := ""
+	if settings.Profile == "" && !childRun {
+		role, err = c.selectedRole(ctx, sessionID, prompt)
+		if err != nil {
+			return nil, err
+		}
+	}
 	run := func() (*fantasy.AgentResult, error) {
-		return c.currentAgent.Run(ctx, SessionAgentCall{
-			SessionID:        sessionID,
-			RunID:            runID,
-			Prompt:           prompt,
-			Attachments:      attachments,
-			MaxOutputTokens:  maxTokens,
-			ProviderOptions:  mergedOptions,
-			Temperature:      temp,
-			TopP:             topP,
-			TopK:             topK,
-			FrequencyPenalty: freqPenalty,
-			PresencePenalty:  presPenalty,
-			OnComplete:       onComplete,
-			Accepted:         accept,
-			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+		return selectedAgent.Run(ctx, SessionAgentCall{
+			SessionID:            sessionID,
+			RunID:                runID,
+			Prompt:               prompt,
+			SystemPromptAddition: role,
+			RunSettings:          settings,
+			Attachments:          attachments,
+			MaxOutputTokens:      maxTokens,
+			ProviderOptions:      mergedOptions,
+			Temperature:          temp,
+			TopP:                 topP,
+			TopK:                 topK,
+			FrequencyPenalty:     freqPenalty,
+			PresencePenalty:      presPenalty,
+			OnComplete:           onComplete,
+			Accepted:             accept,
+			OnAuthRefresh:        c.makeAuthRefreshCallback(providerCfg),
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
@@ -357,16 +390,15 @@ func effectiveReasoningEffort(model Model) string {
 		return ""
 	}
 
+	// An explicit off selection must not fall back to the catalog default.
+	if (model.ModelCfg.ReasoningEffort == "none" || model.ModelCfg.ReasoningEffort == "off") &&
+		!slices.Contains(model.CatwalkCfg.ReasoningLevels, model.ModelCfg.ReasoningEffort) {
+		return ""
+	}
 	if effort := model.ModelCfg.ReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
 		return effort
 	}
-	if effort := model.CatwalkCfg.DefaultReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
-		return effort
-	}
-	if len(model.CatwalkCfg.ReasoningLevels) > 0 {
-		return model.CatwalkCfg.ReasoningLevels[0]
-	}
-	return ""
+	return config.DefaultReasoningEffort(model.CatwalkCfg)
 }
 
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
@@ -417,7 +449,19 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		return options
 	}
 
+	if !model.CatwalkCfg.CanReason {
+		model.ModelCfg.Think = false
+		for _, key := range []string{"reasoning_effort", "reasoning", "reasoning_summary", "effort", "thinking", "thinking_config", "enable_thinking"} {
+			delete(mergedOptions, key)
+			if extra, ok := mergedOptions["extra_body"].(map[string]any); ok {
+				delete(extra, key)
+			}
+		}
+	}
+
 	reasoningEffort := effectiveReasoningEffort(model)
+	reasoningEnabled := model.CatwalkCfg.CanReason &&
+		(model.ModelCfg.Think || reasoningEffort != "" && reasoningEffort != "none" && reasoningEffort != "off")
 	shouldSetEffort := model.CatwalkCfg.CanReason &&
 		reasoningEffort != "" &&
 		slices.Contains(model.CatwalkCfg.ReasoningLevels, reasoningEffort)
@@ -429,7 +473,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			mergedOptions["reasoning_effort"] = reasoningEffort
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
-			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
+			if model.CatwalkCfg.CanReason && openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
 				mergedOptions["reasoning_summary"] = "auto"
 				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
 			}
@@ -507,7 +551,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	case google.Name:
 		_, hasReasoning := mergedOptions["thinking_config"]
-		if !hasReasoning {
+		if !hasReasoning && reasoningEnabled {
 			if strings.HasPrefix(model.CatwalkCfg.ID, "gemini-2") {
 				mergedOptions["thinking_config"] = map[string]any{
 					"thinking_budget":  2000,
@@ -549,59 +593,61 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		// Setting it in the right way for each provider.
 		// TODO: Abstract this in Fantasy somehow?
 		// TODO: Allow custom providers to specify how to set this?
-		switch providerCfg.ID {
-		case hyper.Name:
-			extraBody["thinking"] = model.ModelCfg.Think
-		case string(catwalk.InferenceProviderIoNet):
-			if _, ok := extraBody["reasoning"]; !ok && model.CatwalkCfg.CanReason {
-				if model.ModelCfg.Think {
-					extraBody["reasoning"] = map[string]string{"effort": "medium"}
-				} else {
-					extraBody["reasoning"] = map[string]string{"effort": "none"}
+		if model.CatwalkCfg.CanReason {
+			switch providerCfg.ID {
+			case hyper.Name:
+				extraBody["thinking"] = reasoningEnabled
+			case string(catwalk.InferenceProviderIoNet):
+				if _, ok := extraBody["reasoning"]; !ok && model.CatwalkCfg.CanReason {
+					if model.ModelCfg.Think {
+						extraBody["reasoning"] = map[string]string{"effort": "medium"}
+					} else {
+						extraBody["reasoning"] = map[string]string{"effort": "none"}
+					}
 				}
-			}
 
-		case string(catwalk.InferenceProviderZAI), string(catwalk.InferenceProviderDeepSeek):
-			if model.ModelCfg.Think || reasoningEffort != "" {
-				extraBody["thinking"] = map[string]any{"type": "enabled"}
-			} else {
-				extraBody["thinking"] = map[string]any{"type": "disabled"}
-			}
-
-		case string(catwalk.InferenceProviderFireworks):
-			// NOTE: Fireworks break if we set both `reasoning_effort` and `thinking`.
-			if reasoningEffort == "" {
-				if model.ModelCfg.Think {
+			case string(catwalk.InferenceProviderZAI), string(catwalk.InferenceProviderDeepSeek):
+				if reasoningEnabled {
 					extraBody["thinking"] = map[string]any{"type": "enabled"}
 				} else {
 					extraBody["thinking"] = map[string]any{"type": "disabled"}
 				}
-			}
 
-		case string(catwalk.InferenceProviderBaseten):
-			extraBody["chat_template_args"] = map[string]any{
-				"enable_thinking": model.ModelCfg.Think || reasoningEffort != "" && reasoningEffort != "none",
-			}
+			case string(catwalk.InferenceProviderFireworks):
+				// NOTE: Fireworks break if we set both `reasoning_effort` and `thinking`.
+				if reasoningEffort == "" {
+					if model.ModelCfg.Think {
+						extraBody["thinking"] = map[string]any{"type": "enabled"}
+					} else {
+						extraBody["thinking"] = map[string]any{"type": "disabled"}
+					}
+				}
 
-		case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
-			// MiniMax M3 uses the "thinking" parameter to control reasoning.
-			// "reasoning_split" must be true so thinking content is returned
-			// in the "reasoning_content" field instead of inline in "content".
-			if strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
-				if model.CatwalkCfg.CanReason && (model.ModelCfg.Think || reasoningEffort != "") {
-					extraBody["thinking"] = map[string]any{"type": "adaptive"}
-					extraBody["reasoning_split"] = true
-				} else {
-					extraBody["thinking"] = map[string]any{"type": "disabled"}
+			case string(catwalk.InferenceProviderBaseten):
+				extraBody["chat_template_args"] = map[string]any{
+					"enable_thinking": reasoningEnabled,
+				}
+
+			case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+				// MiniMax M3 uses the "thinking" parameter to control reasoning.
+				// "reasoning_split" must be true so thinking content is returned
+				// in the "reasoning_content" field instead of inline in "content".
+				if strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
+					if reasoningEnabled {
+						extraBody["thinking"] = map[string]any{"type": "adaptive"}
+						extraBody["reasoning_split"] = true
+					} else {
+						extraBody["thinking"] = map[string]any{"type": "disabled"}
+					}
+				}
+
+			case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
+				if model.CatwalkCfg.CanReason {
+					extraBody["enable_thinking"] = reasoningEnabled
 				}
 			}
 
-		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
-			if model.CatwalkCfg.CanReason {
-				extraBody["enable_thinking"] = model.ModelCfg.Think || reasoningEffort != ""
-			}
 		}
-
 		mergedOptions["extra_body"] = extraBody
 
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
@@ -669,14 +715,19 @@ func (c *coordinator) buildAgent(ctx context.Context, promptTemplate *prompt.Pro
 	}
 
 	result := NewSessionAgent(SessionAgentOptions{
-		LargeModel:           large,
-		SmallModel:           small,
-		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
-		SystemPrompt:         "",
+		LargeModel:         large,
+		SmallModel:         small,
+		SystemPromptPrefix: largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:       "",
+		DynamicContext: func(runCtx context.Context) string {
+			return prompt.DynamicContext(runCtx, c.cfg.WorkingDir(), *c.cfg.Config())
+		},
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
+		History:              c.history,
+		WorkingDir:           c.cfg.WorkingDir(),
 		Messages:             c.messages,
 		Tools:                nil,
 		Notify:               c.notify,
@@ -779,17 +830,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "floyd.log")
 
-	// Build hook runner if PreToolUse hooks are configured.
-	var hookRunner *hooks.Runner
-	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
-	}
-
-	var postToolHookRunner *hooks.Runner
-	if postHooks := c.cfg.Config().Hooks[hooks.EventPostToolUse]; len(postHooks) > 0 {
-		postToolHookRunner = hooks.NewRunner(postHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
-	}
-
 	allTools = append(
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
@@ -806,6 +846,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
+		tools.NewGoalTool(c.sessions),
+		tools.NewRunSkillTool(c.permissions, c.cfg.WorkingDir(), c.activeSkills),
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewEnterPlanModeTool(plans),
@@ -832,14 +874,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewComplexityEstimatorTool(),
 		tools.NewRefactorBlueprintTool(),
 		tools.NewFailureModeEnumeratorTool(),
-		tools.NewTranscriptExportTool(c.sessions, c.messages, contextWindow, c.cfg.WorkingDir()),
+		tools.NewTranscriptExportTool(c.sessions, c.messages, contextWindow, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory),
 		tools.NewArchiveQueryTool(c.messages, c.cfg.WorkingDir()),
 		tools.NewSymbolIndexTool(c.cfg.WorkingDir()),
 		tools.NewVisionTool(c.permissions, c.cfg.WorkingDir()),
-		tools.NewWorkflowTool(workflow.NewEngine(c.cfg.WorkingDir())),
+		tools.NewWorkflowTool(c.workflowEngine()),
 		tools.NewMCPTaskStatusTool(),
 		tools.NewProjectMapTool(c.cfg.WorkingDir()),
-		tools.NewManageScratchpadTool(c.cfg.WorkingDir()),
+		tools.NewManageScratchpadTool(c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory),
 		tools.NewListSymbolsTool(c.cfg.WorkingDir()),
 		tools.NewApplyPatchTool(c.permissions, c.cfg.WorkingDir()),
 		tools.NewSmartReplaceTool(c.permissions, c.cfg.WorkingDir()),
@@ -884,7 +926,36 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		}
 	}
 
+	filteredTools = c.wrapAgentTools(filteredTools, isSubAgent)
+	filteredTools = append(filteredTools, c.buildMCPTools(agent, isSubAgent)...)
+	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
+		return strings.Compare(a.Info().Name, b.Info().Name)
+	})
+
+	return filteredTools, nil
+}
+
+// workflowEngine owns durable in-process workflow state independently of the
+// per-model tool wrappers.
+func (c *coordinator) workflowEngine() *workflow.Engine {
+	c.workflowOnce.Do(func() {
+		c.workflows = workflow.NewEngine(c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory)
+	})
+	return c.workflows
+}
+
+// installedMCPTool marks entries that can be replaced when the MCP registry
+// changes. Native tools can also have mcp_ names, so names cannot identify them.
+type installedMCPTool struct {
+	fantasy.AgentTool
+	server string
+}
+
+func (c *coordinator) buildMCPTools(agent config.Agent, isSubAgent bool) []fantasy.AgentTool {
+	var filteredTools []fantasy.AgentTool
+	servers := make(map[string]string)
 	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
+		servers[tool.Name()] = tool.MCP()
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)
@@ -907,9 +978,25 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
 		}
 	}
-	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
-		return strings.Compare(a.Info().Name, b.Info().Name)
-	})
+	filteredTools = c.wrapAgentTools(filteredTools, isSubAgent)
+	for i, tool := range filteredTools {
+		filteredTools[i] = &installedMCPTool{AgentTool: tool, server: servers[tool.Info().Name]}
+	}
+	return c.deferMCPTools(filteredTools, isSubAgent)
+}
+
+func (c *coordinator) wrapAgentTools(filteredTools []fantasy.AgentTool, isSubAgent bool) []fantasy.AgentTool {
+	plans := c.planService()
+	// Build hook runner if PreToolUse hooks are configured.
+	var hookRunner *hooks.Runner
+	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
+		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+	}
+
+	var postToolHookRunner *hooks.Runner
+	if postHooks := c.cfg.Config().Hooks[hooks.EventPostToolUse]; len(postHooks) > 0 {
+		postToolHookRunner = hooks.NewRunner(postHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+	}
 
 	// Wrap tools with hook interception for the top-level agent only.
 	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
@@ -932,7 +1019,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// denial is decided before user hooks and tool permissions.
 	filteredTools = wrapToolsWithPlanGuard(filteredTools, plans, c.permissions, c.cfg.WorkingDir())
 
-	return filteredTools, nil
+	return filteredTools
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
@@ -1009,16 +1096,16 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	}
 
 	return Model{
-		Model:      largeModel,
-		CatwalkCfg: *largeCatwalkModel,
-		ModelCfg:   largeModelCfg,
-		FlatRate:   largeProviderCfg.FlatRate,
-	}, Model{
-		Model:      smallModel,
-		CatwalkCfg: *smallCatwalkModel,
-		ModelCfg:   smallModelCfg,
-		FlatRate:   smallProviderCfg.FlatRate,
-	}, nil
+			Model:      largeModel,
+			CatwalkCfg: *largeCatwalkModel,
+			ModelCfg:   largeModelCfg,
+			FlatRate:   largeProviderCfg.FlatRate,
+		}, Model{
+			Model:      smallModel,
+			CatwalkCfg: *smallCatwalkModel,
+			ModelCfg:   smallModelCfg,
+			FlatRate:   smallProviderCfg.FlatRate,
+		}, nil
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
@@ -1230,6 +1317,13 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 }
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool) (fantasy.Provider, error) {
+	if config.IsCompanyAuthAPIKey(providerCfg.APIKey) {
+		if err := c.cfg.ResolveCompanyProviderCredential(context.Background(), providerCfg.ID); err != nil {
+			return nil, err
+		}
+		providerCfg, _ = c.cfg.Config().Providers.Get(providerCfg.ID)
+	}
+
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
 		headers = make(map[string]string)
@@ -1311,27 +1405,39 @@ func isExactoSupported(modelID string) bool {
 // so a cancel arriving before the run registers in activeRequests is not
 // lost.
 func (c *coordinator) BeginAccepted(sessionID string) *AcceptedRun {
-	return c.currentAgent.BeginAccepted(sessionID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	settings, err := c.captureSessionRunSettings(ctx, sessionID)
+	accepted := c.runtimeSessionAgent(sessionID).BeginAccepted(sessionID)
+	if accepted != nil {
+		accepted.runSettings = &settings
+		accepted.settingsErr = err
+	}
+	return accepted
 }
 
 func (c *coordinator) Cancel(sessionID string) {
-	c.currentAgent.Cancel(sessionID)
+	if _, ok := c.RuntimeChildAgent(sessionID); ok {
+		_ = c.RuntimeTaskControl(sessionID, "cancel")
+	}
+	c.runtimeSessionAgent(sessionID).Cancel(sessionID)
 }
 
 func (c *coordinator) CancelAll() {
+	c.RuntimeCancelTasks()
 	c.currentAgent.CancelAll()
 }
 
 func (c *coordinator) ClearQueue(sessionID string) {
-	c.currentAgent.ClearQueue(sessionID)
+	c.runtimeSessionAgent(sessionID).ClearQueue(sessionID)
 }
 
 func (c *coordinator) IsBusy() bool {
-	return c.currentAgent.IsBusy()
+	return c.currentAgent.IsBusy() || c.runtimeChildrenBusy()
 }
 
 func (c *coordinator) IsSessionBusy(sessionID string) bool {
-	return c.currentAgent.IsSessionBusy(sessionID)
+	return c.runtimeSessionBusy(sessionID)
 }
 
 func (c *coordinator) Model() Model {
@@ -1339,36 +1445,77 @@ func (c *coordinator) Model() Model {
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
-	// build the models again so we make sure we get the latest config
+	// Explicit model/config updates rebuild the tool configuration. The
+	// coordinator-owned workflow engine retains active workflow state.
 	large, small, err := c.buildAgentModels(ctx, false)
 	if err != nil {
 		return err
 	}
-	c.currentAgent.SetModels(large, small)
-
+	if err := c.readyWg.Wait(); err != nil {
+		return err
+	}
+	c.toolRefreshMu.Lock()
+	defer c.toolRefreshMu.Unlock()
 	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
 	if !ok {
 		return errCoderAgentNotConfigured
 	}
-
-	tools, err := c.buildTools(ctx, agentCfg, false)
+	agentTools, err := c.buildTools(ctx, agentCfg, false)
 	if err != nil {
 		return err
 	}
-	c.currentAgent.SetTools(tools)
+	c.currentAgent.SetModels(large, small)
+	c.currentAgent.SetTools(agentTools)
+	return nil
+}
+
+// RefreshTools replaces only MCP entries in the installed palette. Native
+// instances keep their state; newly connected MCP tools receive the same
+// hooks, scope guard, and plan guard as tools installed during agent setup.
+func (c *coordinator) RefreshTools(ctx context.Context) error {
+	if err := c.readyWg.Wait(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.toolRefreshMu.Lock()
+	defer c.toolRefreshMu.Unlock()
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	if !ok {
+		return errCoderAgentNotConfigured
+	}
+	a, ok := c.currentAgent.(*sessionAgent)
+	if !ok {
+		return fmt.Errorf("agent does not expose an installed tool palette")
+	}
+	var refreshed []fantasy.AgentTool
+	for _, tool := range a.tools.Copy() {
+		switch tool.(type) {
+		case *installedMCPTool, *deferredMCPTool:
+		default:
+			refreshed = append(refreshed, tool)
+		}
+	}
+	refreshed = append(refreshed, c.buildMCPTools(agentCfg, false)...)
+	slices.SortFunc(refreshed, func(a, b fantasy.AgentTool) int {
+		return strings.Compare(a.Info().Name, b.Info().Name)
+	})
+	a.SetTools(refreshed)
 	return nil
 }
 
 func (c *coordinator) QueuedPrompts(sessionID string) int {
-	return c.currentAgent.QueuedPrompts(sessionID)
+	return c.runtimeSessionAgent(sessionID).QueuedPrompts(sessionID)
 }
 
 func (c *coordinator) QueuedPromptsList(sessionID string) []string {
-	return c.currentAgent.QueuedPromptsList(sessionID)
+	return c.runtimeSessionAgent(sessionID).QueuedPromptsList(sessionID)
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
-	providerCfg, ok := c.cfg.Config().Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
+	selectedAgent := c.runtimeSessionAgent(sessionID)
+	providerCfg, ok := c.cfg.Config().Providers.Get(selectedAgent.Model().ModelCfg.Provider)
 	if !ok {
 		return errModelProviderNotConfigured
 	}
@@ -1379,7 +1526,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 
 	// Auth failures during summarize flow through fantasy's OnAuthRefresh,
 	// the same path used by regular turns.
-	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg))
+	return selectedAgent.Summarize(ctx, sessionID, getProviderOptions(selectedAgent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg))
 }
 
 // GenerateTitle generates a session title using the current agent.
@@ -1533,7 +1680,7 @@ type subAgentParams struct {
 // runSubAgent runs a sub-agent and handles session management and cost accumulation.
 // It creates a sub-session, runs the agent with the given prompt, and propagates
 // the cost to the parent session.
-func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
+func (c *coordinator) runSubAgentInline(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
 	// Create sub-session
 	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
 	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
@@ -1556,6 +1703,12 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return fantasy.ToolResponse{}, errModelProviderNotConfigured
+	}
+	if config.IsCompanyAuthAPIKey(providerCfg.APIKey) {
+		if err := c.cfg.ResolveCompanyProviderCredential(ctx, providerCfg.ID); err != nil {
+			return fantasy.ToolResponse{}, err
+		}
+		providerCfg, _ = c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	}
 
 	// Run the agent

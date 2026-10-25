@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -310,6 +311,7 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	// initial RoundTrip.
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
+	c.writePendingInteractions(w, r)
 
 	for {
 		select {
@@ -1100,8 +1102,15 @@ func (c *controllerV1) handlePostWorkspaceQuestionsAnswer(w http.ResponseWriter,
 //	@Router			/workspaces/{id}/questions/cancel [post]
 func (c *controllerV1) handlePostWorkspaceQuestionsCancel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-
-	cancelled, err := c.backend.CancelQuestion(id)
+	var req struct {
+		BatchRequestID string `json:"batch_request_id"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		jsonError(w, http.StatusBadRequest, "invalid question cancellation")
+		return
+	}
+	cancelled, err := c.backend.CancelQuestionRequest(id, req.BatchRequestID)
 	if err != nil {
 		c.handleError(w, r, err)
 		return

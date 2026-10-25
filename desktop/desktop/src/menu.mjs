@@ -11,20 +11,21 @@ export function buildMenu(Menu, actions) {
     ...(isMac
       ? [
           {
-            label: 'MEGAFLOYD',
+            label: 'MegaFloyd',
             submenu: [
-              { role: 'about', label: 'About MEGAFLOYD' },
+              { role: 'about', label: 'About MegaFloyd' },
+              { label: 'Check for Updates…', click: actions.checkUpdates },
               { type: 'separator' },
               { label: 'Engine Status', accelerator: 'CmdOrCtrl+,', click: actions.showStatus },
               { label: 'Restart Engine', accelerator: 'Shift+CmdOrCtrl+R', click: actions.restartEngine },
               { type: 'separator' },
               { role: 'services' },
               { type: 'separator' },
-              { role: 'hide', label: 'Hide MEGAFLOYD' },
+              { role: 'hide', label: 'Hide MegaFloyd' },
               { role: 'hideOthers' },
               { role: 'unhide' },
               { type: 'separator' },
-              { role: 'quit', label: 'Quit MEGAFLOYD' },
+              { role: 'quit', label: 'Quit MegaFloyd' },
             ],
           },
         ]
@@ -37,6 +38,9 @@ export function buildMenu(Menu, actions) {
         { type: 'separator' },
         { label: 'Copy Local URL', accelerator: 'Shift+CmdOrCtrl+C', click: actions.copyUrl },
         { label: 'Open in Browser', click: actions.openInBrowser },
+        { label: 'Open in Terminal', click: actions.openInTerminal },
+        { label: 'Drive Access Settings…', click: actions.driveAccessSettings },
+        { label: 'Show App for Drive Access', click: actions.revealApp },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' },
       ],
@@ -48,7 +52,7 @@ export function buildMenu(Menu, actions) {
         { label: 'Reload Interface', accelerator: 'CmdOrCtrl+R', click: actions.reload },
         { type: 'separator' },
         { label: 'Open Engine Logs', click: actions.openLogs },
-        { label: 'Reveal MEGAFLOYD Home', click: actions.revealHome },
+        { label: 'Reveal MegaFloyd Home', click: actions.revealHome },
         { type: 'separator' },
         { label: 'Toggle Developer Tools', accelerator: 'Alt+CmdOrCtrl+I', click: actions.toggleDevTools },
       ],
@@ -86,7 +90,7 @@ export function buildMenu(Menu, actions) {
     {
       role: 'help',
       submenu: [
-        { label: 'MEGAFLOYD Documentation', click: actions.openDocs },
+        { label: 'MegaFloyd Documentation', click: actions.openDocs },
         { label: 'Project on GitHub', click: actions.openProject },
       ],
     },

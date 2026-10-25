@@ -172,3 +172,7 @@ func TestResolveSession_Last_NoSessions(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no sessions found")
 }
+
+func (m *mockSessionService) AddUsage(context.Context, string, int64, int64, float64) error {
+	return nil
+}

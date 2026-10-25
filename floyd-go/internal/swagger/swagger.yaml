@@ -56,12 +56,80 @@ definitions:
       trailer_style:
         $ref: '#/definitions/config.TrailerStyle'
     type: object
+  config.BudgetConfig:
+    properties:
+      max_usd:
+        description: MaxUSD is the maximum spend in USD for a single session.
+        type: number
+      warn_percent:
+        description: |-
+          WarnPercent is the percentage of the budget at which a warning is
+          injected into the conversation. Default: 80.
+        type: number
+    type: object
   config.Completions:
     properties:
       max_depth:
         type: integer
       max_items:
         type: integer
+    type: object
+  config.ExecutionOptions:
+    properties:
+      command_timeout_seconds:
+        description: |-
+          CommandTimeoutSeconds caps a single command's wall-clock time.
+          Zero or negative means no hard cap.
+        type: integer
+      max_output_bytes:
+        description: |-
+          MaxOutputBytes caps captured command output. Zero or negative uses
+          the built-in limit.
+        type: integer
+    type: object
+  config.ExitBanner:
+    enum:
+    - default
+    - compact
+    - none
+    type: string
+    x-enum-varnames:
+    - ExitBannerDefault
+    - ExitBannerCompact
+    - ExitBannerNone
+  config.FileOpsOptions:
+    properties:
+      enabled:
+        description: |-
+          Enabled permits mutating file operations. Nil and true both leave
+          them on; only an explicit false turns them off.
+        type: boolean
+      max_read_size_bytes:
+        description: |-
+          MaxReadSizeBytes caps a single file read. Zero or negative uses the
+          built-in limit.
+        type: integer
+    type: object
+  config.HeartbeatConfig:
+    properties:
+      cooldown_seconds:
+        description: |-
+          CooldownSeconds is how long to wait after a completed turn before
+          sending the heartbeat prompt. Default 2.
+        type: integer
+      enabled:
+        description: Enabled turns the heartbeat on. Default false.
+        type: boolean
+      max_consecutive:
+        description: |-
+          MaxConsecutive caps back-to-back synthetic continuations. A real
+          user message resets the counter. Default 25.
+        type: integer
+      prompt:
+        description: |-
+          Prompt is the synthetic user message sent on each heartbeat tick.
+          Empty uses the built-in default.
+        type: string
     type: object
   config.HookConfig:
     properties:
@@ -123,6 +191,10 @@ definitions:
         type: array
       command:
         type: string
+      cwd:
+        type: string
+      deferred:
+        type: boolean
       disabled:
         type: boolean
       disabled_tools:
@@ -182,7 +254,25 @@ definitions:
         description: |-
           OAuthToken is the persisted OAuth token for this server. It is
           managed internally and stored in the global data config.
+      sessionless:
+        description: |-
+          Sessionless marks a server that does not maintain an MCP session (it
+          never issues a Mcp-Session-Id). When true, Floyd omits the
+          tools/prompts/resources list-changed handlers: the go-sdk opens a
+          SEP-2575 "subscriptions/listen" stream whenever any of those handlers
+          is set, and sessionless streamable-HTTP servers (e.g. GitHub MCP)
+          answer that POST with 404 ("session not found"), which the SDK treats
+          as fatal. The cost is no live list-changed notifications from this
+          server.
+
+          When nil, Floyd auto-detects a set of known sessionless servers (see
+          IsSessionless); set it explicitly to override that detection.
+        type: boolean
+      startup_timeout_ms:
+        type: integer
       timeout:
+        type: integer
+      tool_timeout_ms:
         type: integer
       type:
         $ref: '#/definitions/config.MCPType'
@@ -203,12 +293,46 @@ definitions:
     additionalProperties:
       $ref: '#/definitions/config.MCPConfig'
     type: object
+  config.ManagedAccount:
+    properties:
+      authenticated:
+        type: boolean
+      base_url:
+        type: string
+      client_id:
+        type: string
+      oauth_host:
+        type: string
+      provider:
+        type: string
+      region:
+        type: string
+      status:
+        type: string
+      token_path:
+        type: string
+    type: object
   config.Permissions:
     properties:
       allowed_tools:
         items:
           type: string
         type: array
+      mode:
+        type: string
+    type: object
+  config.PromptQuotaConfig:
+    properties:
+      danger_percent:
+        type: integer
+      enabled:
+        type: boolean
+      limit_5h:
+        type: integer
+      limit_7d:
+        type: integer
+      warn_percent:
+        type: integer
     type: object
   config.SelectedModel:
     properties:
@@ -264,7 +388,17 @@ definitions:
         $ref: '#/definitions/config.Completions'
       diff_mode:
         type: string
+      exit_banner:
+        $ref: '#/definitions/config.ExitBanner'
+      prompt_quota:
+        $ref: '#/definitions/config.PromptQuotaConfig'
       scrollbar:
+        type: string
+      theme:
+        description: |-
+          Theme selects the TUI palette. Empty keeps the provider-derived
+          default, which is the dark Charmtone palette for every built-in
+          provider.
         type: string
       transparent:
         type: boolean
@@ -307,7 +441,7 @@ definitions:
     - TrailerStyleAssistedBy
   csync.Map-string-config_ProviderConfig:
     type: object
-  github_com_charmbracelet_floyd_internal_config.Config:
+  github_com_legacy-ai_floyd_internal_config.Config:
     properties:
       $schema:
         type: string
@@ -316,6 +450,21 @@ definitions:
           type: string
         description: Env is a map of environment variables set on startup.
         type: object
+      experimental:
+        additionalProperties:
+          type: boolean
+        description: |-
+          Experimental stores per-flag overrides for features registered in
+          internal/experiments. A missing key falls through to the flag's
+          environment override, then to its built-in default.
+        type: object
+      heartbeat:
+        allOf:
+        - $ref: '#/definitions/config.HeartbeatConfig'
+        description: |-
+          Heartbeat configures the auto-continue loop: after a run completes
+          successfully, the harness re-prompts the model so work continues
+          instead of idling between turns. Disabled unless configured.
       hooks:
         additionalProperties:
           items:
@@ -332,7 +481,7 @@ definitions:
         description: We currently only support large/small as values here.
         type: object
       options:
-        $ref: '#/definitions/github_com_charmbracelet_floyd_internal_config.Options'
+        $ref: '#/definitions/github_com_legacy-ai_floyd_internal_config.Options'
       permissions:
         $ref: '#/definitions/config.Permissions'
       providers:
@@ -349,12 +498,27 @@ definitions:
       tools:
         $ref: '#/definitions/config.Tools'
     type: object
-  github_com_charmbracelet_floyd_internal_config.Options:
+  github_com_legacy-ai_floyd_internal_config.Options:
     properties:
+      additional_dirs:
+        description: |-
+          AdditionalDirs lists extra project directories that file tools may
+          read and write, in addition to the working directory. Managed by
+          /add-dir and persisted at workspace scope so the set follows the
+          project rather than the machine.
+        items:
+          type: string
+        type: array
+      agent_name:
+        type: string
       attribution:
         $ref: '#/definitions/config.Attribution'
       auto_lsp:
         type: boolean
+      budget:
+        $ref: '#/definitions/config.BudgetConfig'
+      company_platform_url:
+        type: string
       context_paths:
         items:
           type: string
@@ -386,16 +550,43 @@ definitions:
         items:
           type: string
         type: array
+      execution:
+        allOf:
+        - $ref: '#/definitions/config.ExecutionOptions'
+        description: Execution bounds command execution for agent tools.
+      file_ops:
+        allOf:
+        - $ref: '#/definitions/config.FileOpsOptions'
+        description: FileOps controls tools that create, modify, or delete files.
       global_context_paths:
         items:
           type: string
         type: array
       initialize_as:
         type: string
+      managed_accounts:
+        additionalProperties:
+          $ref: '#/definitions/config.ManagedAccount'
+        type: object
       notifications:
         type: string
+      plugin_marketplace_url:
+        type: string
+      plugin_runtime:
+        additionalProperties: {}
+        type: object
+      plugins_paths:
+        items:
+          type: string
+        type: array
       progress:
         type: boolean
+      runtime_profile:
+        description: |-
+          RuntimeProfile selects the runtime lane when neither the
+          environment nor the executable name decides. See
+          Config.EffectiveRuntimeProfile for the precedence.
+        type: string
       skills_paths:
         items:
           type: string
@@ -403,7 +594,7 @@ definitions:
       tui:
         $ref: '#/definitions/config.TUIOptions'
     type: object
-  github_com_charmbracelet_floyd_internal_config.Scope:
+  github_com_legacy-ai_floyd_internal_config.Scope:
     enum:
     - 0
     - 1
@@ -411,12 +602,14 @@ definitions:
     x-enum-varnames:
     - ScopeGlobal
     - ScopeWorkspace
-  github_com_charmbracelet_floyd_internal_proto.Message:
+  github_com_legacy-ai_floyd_internal_proto.Message:
     properties:
       created_at:
         type: integer
       id:
         type: string
+      is_summary_message:
+        type: boolean
       model:
         type: string
       parts:
@@ -498,6 +691,13 @@ definitions:
         items:
           $ref: '#/definitions/proto.Attachment'
         type: array
+      heartbeat:
+        description: |-
+          Heartbeat marks a synthetic auto-continue prompt dispatched by the
+          harness heartbeat (not typed by a human). It advances the
+          consecutive-continuation counter; any message without the flag
+          resets the counter.
+        type: boolean
       prompt:
         type: string
       run_id:
@@ -507,6 +707,10 @@ definitions:
     type: object
   proto.AgentSession:
     properties:
+      archived:
+        type: boolean
+      archived_at:
+        type: integer
       attached_clients:
         type: integer
       completion_tokens:
@@ -521,6 +725,9 @@ definitions:
         type: boolean
       message_count:
         type: integer
+      metadata:
+        additionalProperties: {}
+        type: object
       parent_session_id:
         type: string
       prompt_tokens:
@@ -554,7 +761,7 @@ definitions:
       enabled:
         type: boolean
       scope:
-        $ref: '#/definitions/github_com_charmbracelet_floyd_internal_config.Scope'
+        $ref: '#/definitions/github_com_legacy-ai_floyd_internal_config.Scope'
     type: object
   proto.ConfigModelRequest:
     properties:
@@ -563,7 +770,7 @@ definitions:
       model_type:
         $ref: '#/definitions/config.SelectedModelType'
       scope:
-        $ref: '#/definitions/github_com_charmbracelet_floyd_internal_config.Scope'
+        $ref: '#/definitions/github_com_legacy-ai_floyd_internal_config.Scope'
     type: object
   proto.ConfigProviderKeyRequest:
     properties:
@@ -576,28 +783,28 @@ definitions:
       provider_id:
         type: string
       scope:
-        $ref: '#/definitions/github_com_charmbracelet_floyd_internal_config.Scope'
+        $ref: '#/definitions/github_com_legacy-ai_floyd_internal_config.Scope'
     type: object
   proto.ConfigRefreshOAuthRequest:
     properties:
       provider_id:
         type: string
       scope:
-        $ref: '#/definitions/github_com_charmbracelet_floyd_internal_config.Scope'
+        $ref: '#/definitions/github_com_legacy-ai_floyd_internal_config.Scope'
     type: object
   proto.ConfigRemoveRequest:
     properties:
       key:
         type: string
       scope:
-        $ref: '#/definitions/github_com_charmbracelet_floyd_internal_config.Scope'
+        $ref: '#/definitions/github_com_legacy-ai_floyd_internal_config.Scope'
     type: object
   proto.ConfigSetRequest:
     properties:
       key:
         type: string
       scope:
-        $ref: '#/definitions/github_com_charmbracelet_floyd_internal_config.Scope'
+        $ref: '#/definitions/github_com_legacy-ai_floyd_internal_config.Scope'
       value: {}
     type: object
   proto.CurrentSession:
@@ -657,6 +864,14 @@ definitions:
       path:
         type: string
     type: object
+  proto.MCPAuthResponse:
+    properties:
+      auth_url:
+        description: |-
+          AuthURL is the OAuth authorization URL the user must visit, when
+          the flow is still in progress.
+        type: string
+    type: object
   proto.MCPClientInfo:
     properties:
       connected_at:
@@ -692,6 +907,13 @@ definitions:
   proto.MCPNameRequest:
     properties:
       name:
+        type: string
+    type: object
+  proto.MCPPendingAuthServer:
+    properties:
+      name:
+        type: string
+      url:
         type: string
     type: object
   proto.MCPPrompt:
@@ -862,6 +1084,10 @@ definitions:
     type: object
   proto.Session:
     properties:
+      archived:
+        type: boolean
+      archived_at:
+        type: integer
       attached_clients:
         type: integer
       completion_tokens:
@@ -876,6 +1102,9 @@ definitions:
         type: boolean
       message_count:
         type: integer
+      metadata:
+        additionalProperties: {}
+        type: object
       parent_session_id:
         type: string
       prompt_tokens:
@@ -986,7 +1215,7 @@ definitions:
       client_id:
         type: string
       config:
-        $ref: '#/definitions/github_com_charmbracelet_floyd_internal_config.Config'
+        $ref: '#/definitions/github_com_legacy-ai_floyd_internal_config.Config'
       data_dir:
         type: string
       debug:
@@ -1037,13 +1266,13 @@ info:
   contact:
     name: Charm
     url: https://charm.sh
-  description: Floyd is a terminal-based AI coding assistant. This API is served over
-    a Unix socket (or Windows named pipe) and provides programmatic access to workspaces,
-    sessions, agents, LSP, MCP, and more.
+  description: MegaFloyd is a terminal-based AI coding assistant. This API is served
+    over a Unix socket (or Windows named pipe) and provides programmatic access to
+    workspaces, sessions, agents, LSP, MCP, and more.
   license:
     name: MIT
-    url: https://github.com/charmbracelet/floyd/blob/main/LICENSE
-  title: Floyd API
+    url: https://github.com/legacy-ai/floyd/blob/main/LICENSE
+  title: MegaFloyd API
   version: "1.0"
 paths:
   /clients/{client_id}:
@@ -2063,6 +2292,71 @@ paths:
       summary: Stop all LSP servers
       tags:
       - lsp
+  /workspaces/{id}/mcp/auth:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP name request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.MCPNameRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.MCPAuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Authenticate an MCP server
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/auth-url:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP server name
+        in: query
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.MCPAuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get MCP OAuth authorization URL
+      tags:
+      - mcp
   /workspaces/{id}/mcp/docker/disable:
     post:
       parameters:
@@ -2143,6 +2437,34 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Get MCP prompt
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/pending-auth:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.MCPPendingAuthServer'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get MCP servers pending OAuth
       tags:
       - mcp
   /workspaces/{id}/mcp/prompts:
@@ -2356,7 +2678,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_charmbracelet_floyd_internal_proto.Message'
+              $ref: '#/definitions/github_com_legacy-ai_floyd_internal_proto.Message'
             type: array
         "404":
           description: Not Found
@@ -2878,7 +3200,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_charmbracelet_floyd_internal_proto.Message'
+              $ref: '#/definitions/github_com_legacy-ai_floyd_internal_proto.Message'
             type: array
         "404":
           description: Not Found
@@ -2911,7 +3233,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_charmbracelet_floyd_internal_proto.Message'
+              $ref: '#/definitions/github_com_legacy-ai_floyd_internal_proto.Message'
             type: array
         "404":
           description: Not Found

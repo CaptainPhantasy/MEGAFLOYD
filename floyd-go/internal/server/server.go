@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/legacy-ai/floyd/internal/backend"
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	_ "github.com/legacy-ai/floyd/internal/swagger"
 	httpswagger "github.com/swaggo/http-swagger/v2"
 )
@@ -72,10 +74,19 @@ func ParseHostURL(host string) (*url.URL, error) {
 // macOS sun_path limit), we fall back to /tmp/floyd-<uid>.sock so
 // the socket remains bindable.
 func DefaultHost() string {
-	sock := "floyd.sock"
+	name := "floyd"
+	if megafloyd.IsActive() {
+		if host := os.Getenv("MEGAFLOYD_GO_HOST"); host != "" {
+			return host
+		}
+		home, _ := megafloyd.HomeDir()
+		digest := sha256.Sum256([]byte(home))
+		name = fmt.Sprintf("megafloyd-%x", digest[:6])
+	}
+	sock := name + ".sock"
 	usr, err := user.Current()
 	if err == nil && usr.Uid != "" {
-		sock = fmt.Sprintf("floyd-%s.sock", usr.Uid)
+		sock = fmt.Sprintf("%s-%s.sock", name, usr.Uid)
 	}
 	if runtime.GOOS == "windows" {
 		return fmt.Sprintf("npipe:////./pipe/%s", sock)
@@ -155,6 +166,12 @@ func (s *Server) installHandler() {
 	p.SetUnencryptedHTTP2(true)
 	c := &controllerV1{backend: s.backend, server: s}
 	mux := http.NewServeMux()
+	c.registerSessionOperationRoutes(mux)
+	c.registerManagementOperations(mux)
+	c.registerAccountOperations(mux)
+	c.registerProviderDirectoryOperations(mux)
+	c.registerRuntimeOperations(mux)
+	c.registerHandoff(mux)
 	mux.HandleFunc("GET /v1/health", c.handleGetHealth)
 	mux.HandleFunc("GET /v1/version", c.handleGetVersion)
 	mux.HandleFunc("GET /v1/config", c.handleGetConfig)
@@ -167,6 +184,7 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("GET /v1/workspaces/{id}", c.handleGetWorkspace)
 	mux.HandleFunc("GET /v1/workspaces/{id}/config", c.handleGetWorkspaceConfig)
 	mux.HandleFunc("GET /v1/workspaces/{id}/events", c.handleGetWorkspaceEvents)
+	mux.HandleFunc("GET /v1/workspaces/{id}/interactions", c.handleGetWorkspaceInteractions)
 	mux.HandleFunc("GET /v1/workspaces/{id}/providers", c.handleGetWorkspaceProviders)
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions", c.handleGetWorkspaceSessions)
 	mux.HandleFunc("POST /v1/workspaces/{id}/sessions", c.handlePostWorkspaceSessions)
@@ -199,6 +217,7 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("GET /v1/workspaces/{id}/agent/sessions/{sid}/prompts/list", c.handleGetWorkspaceAgentSessionPromptList)
 	mux.HandleFunc("POST /v1/workspaces/{id}/agent/sessions/{sid}/prompts/clear", c.handlePostWorkspaceAgentSessionPromptClear)
 	mux.HandleFunc("POST /v1/workspaces/{id}/agent/sessions/{sid}/summarize", c.handlePostWorkspaceAgentSessionSummarize)
+	mux.HandleFunc("POST /v1/workspaces/{id}/agent/sessions/{sid}/suggestion", c.handlePostWorkspaceSuggestion)
 	mux.HandleFunc("POST /v1/workspaces/{id}/agent/sessions/{sid}/shell", c.handlePostWorkspaceAgentSessionShell)
 	mux.HandleFunc("GET /v1/workspaces/{id}/agent/default-small-model", c.handleGetWorkspaceAgentDefaultSmallModel)
 	mux.HandleFunc("POST /v1/workspaces/{id}/config/set", c.handlePostWorkspaceConfigSet)
@@ -212,6 +231,7 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("POST /v1/workspaces/{id}/project/init", c.handlePostWorkspaceProjectInit)
 	mux.HandleFunc("GET /v1/workspaces/{id}/project/init-prompt", c.handleGetWorkspaceProjectInitPrompt)
 	mux.HandleFunc("GET /v1/workspaces/{id}/skills", c.handleGetWorkspaceSkills)
+	mux.HandleFunc("GET /v1/workspaces/{id}/tools", c.handleGetWorkspaceTools)
 	mux.HandleFunc("POST /v1/workspaces/{id}/skills/read", c.handlePostWorkspaceSkillRead)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-tools", c.handlePostWorkspaceMCPRefreshTools)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/read-resource", c.handlePostWorkspaceMCPReadResource)
@@ -220,6 +240,7 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/states", c.handleGetWorkspaceMCPStates)
 	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/pending-auth", c.handleGetWorkspaceMCPPendingAuth)
 	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/auth-url", c.handleGetWorkspaceMCPAuthURL)
+	c.registerMCPManagementRoutes(mux)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/auth", c.handlePostWorkspaceMCPAuth)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-prompts", c.handlePostWorkspaceMCPRefreshPrompts)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-resources", c.handlePostWorkspaceMCPRefreshResources)

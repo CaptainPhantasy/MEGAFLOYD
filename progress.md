@@ -1,3 +1,11 @@
+<!-- owner-final-release-hold-20261024:start -->
+**Release coordination — completed 2026-10-25 (UTC).**
+
+After the owner's advance notice and explicit coordinated build instruction, release `megafloyd-20261024T235658Z` was built from clean review-fix commit `67deb1ae9723e77d7cdc52b3ce23fb430a7af509`, installed, checked through the actual desktop/browser/terminal interfaces, and published. The current 23-message session, DeepSeek 384000/high and protected configuration/credential bytes were preserved. All six code-review findings have fixes and direct regression checks; their threads are resolved. Security review completed with zero findings, and review-fix CI passed.
+
+The owner's advance-notice requirement still applies to any future final build. Historical worker notes retain their original scope. This commit records final documentation and the ship-manifest pointer without rebuilding the executable. [PR #1](https://github.com/CaptainPhantasy/MEGAFLOYD/pull/1) remains open and unmerged; the final documentation commit's remote SHA and CI are checked separately after push. The actual six-mount startup execution remains the dated `234343` check; the unchanged helper, configuration and loaded job were rechecked read-only on `235658`.
+<!-- owner-final-release-hold-20261024:end -->
+
 # progress.md — MEGAFLOYD completion session log
 
 ## 2026-10-16 — session 1
@@ -299,3 +307,22 @@ The seven `skills.json` registry entries are stale too. See
 - Report: `docs/INSIDE-THE-SOURCE.md` (also on `docs-inside` in the new repo).
 - Not wired yet: Go tools/skills vs TS tools/skills, hooks (TS only), web UI source
   (`code-app` repo absent), CI workflow.
+
+## 2026-10-24 — canonical combined release installed and published
+
+- Implementation `8c4876a3d166d9ac1ddd9952f27b2ab0bed3dfd3` committed 385 reviewed files and all 561 authorized frontend assets; pushed without force to `codex/megafloyd-canonical-completion`. PR #1 is open and its implementation CI passed. Automated review follow-up remains ongoing; no merge is claimed.
+- Release `megafloyd-20261024T234343Z` was built from that clean implementation commit. The installed app's actual native/web hashes and BuildID matched. Plain icon launch at 23:45:41 UTC restored the same workspace/session with all 23 messages, DeepSeek 384000/high and protected configuration/credential bytes unchanged.
+- Actual browser and desktop keyboard `/tui` checks launched the correct installed terminal and completed to idle. Only the two verification terminal clients were closed normally. The desktop and owner's browser remain available.
+- The actual per-user startup job ran at 23:48:57 UTC, found all six configured work locations ready, exited 0 and reused desktop PID89919 without a duplicate. No reboot, forced unmount, model generation or credential change was used for these final checks.
+- The complete package was published only after installed acceptance; exact HTTPS manifest/archive and installed updater checks passed. This documentation commit records the verified results and final `ship-manifest.json` pointer without rebuilding the executable.
+- Committed reports: [completion](docs/megafloyd-completion.md), [release verification](docs/megafloyd-release-verification.md), [startup and telemetry](docs/megafloyd-startup-telemetry-verification.md), [frontend preservation](docs/megafloyd-web-branding-preservation.md), [MCP onboarding](docs/megafloyd-mcp-onboarding.md), and [current namespace](docs/megafloyd-namespace.md). Full private runtime receipts remain outside Git.
+
+## 2026-10-25 — review amendment installed, checked and published
+
+- Review-fix source `67deb1ae9723e77d7cdc52b3ce23fb430a7af509` resolves all six reported defects. Eighteen focused web tests, scoped TypeScript validation, the native goal regression and the required 14-template prompt-pack check passed. The normal commit hooks and diff check passed; no model generation was used for these review corrections.
+- Release `megafloyd-20261024T235658Z` was built from that clean source. Normal icon launch at 2026-10-24T23:59:04 UTC loaded desktop 97235, Go 97245 and web 97260 from the immutable installed package. The same workspace/session, 23-message content hash, DeepSeek 384000/high and protected configuration/credential bytes were preserved.
+- Actual browser and desktop keyboard `/tui` actions completed to idle and opened the correct installed terminal. Only verification clients 97968 and 98419 were closed normally. The desktop and owner's browser remain available. Catalog, artwork, filesystem and WebSocket checks passed without generation or account changes.
+- The existing startup helper/configuration/plist were unchanged on the amendment; the loaded job still recorded one successful run. No duplicate bootstrap was performed. The actual six-mount/no-duplicate proof remains the `234343` launchd run at 23:48:57 UTC.
+- Publication followed installed acceptance. The complete HTTPS archive, manifest and installed updater matched `235658`. This commit records final delivery reports and the `ship-manifest.json` pointer without rebuilding the executable.
+- [PR #1](https://github.com/CaptainPhantasy/MEGAFLOYD/pull/1) remains open and unmerged. Six code-review threads are resolved; security review reported zero findings. CI passed for the fix commit. The final metadata commit's remote identity and CI are checked after this push.
+- Reports: [completion](docs/megafloyd-completion.md), [release checks](docs/megafloyd-release-verification.md), [review fixes](docs/megafloyd-review-fixes.md), [startup and telemetry](docs/megafloyd-startup-telemetry-verification.md), [frontend preservation](docs/megafloyd-web-branding-preservation.md), and [MCP onboarding](docs/megafloyd-mcp-onboarding.md). Full personal receipts remain outside Git.

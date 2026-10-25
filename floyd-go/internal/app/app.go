@@ -109,11 +109,15 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		allowedTools = cfg.Permissions.AllowedTools
 	}
 
+	permissions, err := newConfiguredPermissions(store.WorkingDir(), skipPermissionsRequests, allowedTools, cfg)
+	if err != nil {
+		return nil, err
+	}
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Permissions: permissions,
 		Questions:   question.NewService(),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
@@ -144,7 +148,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// Arm initialization synchronously before launching it so WaitForInit
 	// blocks for the in-flight init instead of racing the goroutine and
 	// returning before any MCP tools register.
-	mcp.ArmInit()
+	mcp.ArmInit(store)
 	go mcp.Initialize(ctx, app.Permissions, store)
 
 	// Start herdr integration when running inside a herdr pane.
@@ -162,7 +166,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	app.cleanupFuncs = append(
 		app.cleanupFuncs,
 		func(context.Context) error { return db.Release(dataDir) },
-		func(ctx context.Context) error { return mcp.Close(ctx) },
+		func(ctx context.Context) error { return mcp.Close(ctx, store) },
 	)
 
 	// Install ralph loop slash commands into .floyd/commands/
@@ -338,7 +342,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// bounded so a server wedged mid-handshake cannot stall the one-shot run
 	// for its full connect timeout; past the budget the run proceeds without
 	// the unfinished servers' tools.
-	if err := mcp.WaitForInitBudget(ctx, mcp.InitWaitBudget); err != nil {
+	if err := mcp.WaitForInitBudget(ctx, mcp.InitWaitBudget, app.config); err != nil {
 		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 
@@ -616,7 +620,7 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
 	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "run-completions", app.runCompletions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "mcp", func(ctx context.Context) <-chan pubsub.Event[mcp.Event] { return mcp.SubscribeEvents(ctx, app.config) }, app.events)
 	app.serviceEventsWG.Add(1)
 	go func() {
 		defer app.serviceEventsWG.Done()
@@ -850,7 +854,7 @@ func (app *App) writeMemoryCheckpoint(ctx context.Context) {
 
 	ctx, cancel := context.WithTimeout(ctx, checkpointTimeout)
 	defer cancel()
-	if err := (megafloydmemory.Writer{CWD: cwd}).Write(ctx, cp); err != nil &&
+	if err := (megafloydmemory.Writer{CWD: cwd, DataDir: app.config.Config().Options.DataDirectory}).Write(ctx, cp); err != nil &&
 		!errors.Is(err, megafloydmemory.ErrStale) {
 		slog.Warn("Failed to write project memory checkpoint", "error", err)
 	}

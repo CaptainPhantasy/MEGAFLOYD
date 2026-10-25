@@ -9,8 +9,8 @@ import (
 
 // ToPromptXML renders the currently registered MCP tools for the system
 // prompt. It returns an empty string when no tools are registered.
-func ToPromptXML() string {
-	return ToPromptXMLFrom(Tools())
+func ToPromptXML(scope ...WorkspaceScope) string {
+	return ToPromptXMLFrom(Tools(scope...))
 }
 
 // ToPromptXMLFrom renders a tool registry. It is exported so callers and

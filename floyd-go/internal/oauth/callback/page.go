@@ -113,23 +113,23 @@ func Write(w io.Writer, r Result) error {
 	data.Favicon = template.URL("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(art))
 
 	if r.Failed() {
-		data.Title = "Authorization failed — Floyd"
+		data.Title = "Authorization failed — MegaFloyd"
 		data.Kind = "failed"
 		data.Heading = "Authorization failed"
-		data.Detail = "Floyd was not granted access to"
+		data.Detail = "MegaFloyd was not granted access to"
 		if r.Subject == "" {
-			data.Detail = "Floyd was not granted access."
+			data.Detail = "MegaFloyd was not granted access."
 		}
 		// A failed page keeps itself open: the reader needs the reason,
 		// and closing the tab out from under them would take it away.
-		data.Status = "Close this tab and try again from Floyd."
+		data.Status = "Close this tab and try again from MegaFloyd."
 	} else {
-		data.Title = "Authorized — Floyd"
+		data.Title = "Authorized — MegaFloyd"
 		data.Kind = "ok"
 		data.Heading = "You’re all set"
-		data.Detail = "Floyd is now connected to"
+		data.Detail = "MegaFloyd is now connected to"
 		if r.Subject == "" {
-			data.Detail = "Floyd is now connected."
+			data.Detail = "MegaFloyd is now connected."
 		}
 		// Replaced by the countdown as soon as the script runs, so this
 		// text is what a reader without JavaScript is left with.

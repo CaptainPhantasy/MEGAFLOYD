@@ -24,7 +24,7 @@ var sessionEnginesCmd = &cobra.Command{
 	Use:     "engines",
 	Aliases: []string{"engine", "engine-list"},
 	Short:   "List sessions from the desktop/web engine",
-	Long:    "List sessions stored by the Floyd Code engine (used by the desktop app). Use --json for machine-readable output.",
+	Long:    "List sessions stored by the MegaFloyd engine (used by the desktop app). Use --json for machine-readable output.",
 	RunE:    runSessionEngines,
 }
 

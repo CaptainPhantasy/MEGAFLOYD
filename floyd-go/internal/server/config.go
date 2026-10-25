@@ -533,7 +533,7 @@ func (c *controllerV1) handleGetWorkspaceMCPAuthURL(w http.ResponseWriter, r *ht
 		jsonError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	jsonEncode(w, proto.MCPAuthResponse{AuthURL: c.backend.MCPAuthURL(name)})
+	jsonEncode(w, proto.MCPAuthResponse{AuthURL: c.backend.MCPAuthURL(name, r.PathValue("id"))})
 }
 
 // handlePostWorkspaceMCPAuth runs the OAuth flow for a named MCP server.

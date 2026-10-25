@@ -31,6 +31,7 @@ func SkipHidden(path string) bool {
 
 	commonIgnoredDirs := map[string]bool{
 		".floyd":           true,
+		".megafloyd":       true,
 		"node_modules":     true,
 		"vendor":           true,
 		"dist":             true,

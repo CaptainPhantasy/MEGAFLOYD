@@ -14,7 +14,7 @@ import (
 var projectsCmd = &cobra.Command{
 	Use:   "projects",
 	Short: "List project directories",
-	Long:  "List directories where Floyd project data is known to exist",
+	Long:  "List directories where MegaFloyd project data is known to exist",
 	Example: `
 # List all projects in a table
 floyd projects

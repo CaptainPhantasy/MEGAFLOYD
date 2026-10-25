@@ -1579,6 +1579,105 @@ const docTemplate = `{
                 }
             }
         },
+        "/workspaces/{id}/mcp/auth": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Authenticate an MCP server",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "MCP name request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPNameRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPAuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/mcp/auth-url": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Get MCP OAuth authorization URL",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "MCP server name",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPAuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{id}/mcp/docker/disable": {
             "post": {
                 "tags": [
@@ -1688,6 +1787,49 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/mcp/pending-auth": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Get MCP servers pending OAuth",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/proto.MCPPendingAuthServer"
+                            }
                         }
                     },
                     "404": {
@@ -2029,7 +2171,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_charmbracelet_floyd_internal_proto.Message"
+                                "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_proto.Message"
                             }
                         }
                     },
@@ -2824,7 +2966,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_charmbracelet_floyd_internal_proto.Message"
+                                "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_proto.Message"
                             }
                         }
                     },
@@ -2874,7 +3016,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_charmbracelet_floyd_internal_proto.Message"
+                                "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_proto.Message"
                             }
                         }
                     },
@@ -3081,6 +3223,19 @@ const docTemplate = `{
                 }
             }
         },
+        "config.BudgetConfig": {
+            "type": "object",
+            "properties": {
+                "max_usd": {
+                    "description": "MaxUSD is the maximum spend in USD for a single session.",
+                    "type": "number"
+                },
+                "warn_percent": {
+                    "description": "WarnPercent is the percentage of the budget at which a warning is\ninjected into the conversation. Default: 80.",
+                    "type": "number"
+                }
+            }
+        },
         "config.Completions": {
             "type": "object",
             "properties": {
@@ -3089,6 +3244,66 @@ const docTemplate = `{
                 },
                 "max_items": {
                     "type": "integer"
+                }
+            }
+        },
+        "config.ExecutionOptions": {
+            "type": "object",
+            "properties": {
+                "command_timeout_seconds": {
+                    "description": "CommandTimeoutSeconds caps a single command's wall-clock time.\nZero or negative means no hard cap.",
+                    "type": "integer"
+                },
+                "max_output_bytes": {
+                    "description": "MaxOutputBytes caps captured command output. Zero or negative uses\nthe built-in limit.",
+                    "type": "integer"
+                }
+            }
+        },
+        "config.ExitBanner": {
+            "type": "string",
+            "enum": [
+                "default",
+                "compact",
+                "none"
+            ],
+            "x-enum-varnames": [
+                "ExitBannerDefault",
+                "ExitBannerCompact",
+                "ExitBannerNone"
+            ]
+        },
+        "config.FileOpsOptions": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Enabled permits mutating file operations. Nil and true both leave\nthem on; only an explicit false turns them off.",
+                    "type": "boolean"
+                },
+                "max_read_size_bytes": {
+                    "description": "MaxReadSizeBytes caps a single file read. Zero or negative uses the\nbuilt-in limit.",
+                    "type": "integer"
+                }
+            }
+        },
+        "config.HeartbeatConfig": {
+            "type": "object",
+            "properties": {
+                "cooldown_seconds": {
+                    "description": "CooldownSeconds is how long to wait after a completed turn before\nsending the heartbeat prompt. Default 2.",
+                    "type": "integer"
+                },
+                "enabled": {
+                    "description": "Enabled turns the heartbeat on. Default false.",
+                    "type": "boolean"
+                },
+                "max_consecutive": {
+                    "description": "MaxConsecutive caps back-to-back synthetic continuations. A real\nuser message resets the counter. Default 25.",
+                    "type": "integer"
+                },
+                "prompt": {
+                    "description": "Prompt is the synthetic user message sent on each heartbeat tick.\nEmpty uses the built-in default.",
+                    "type": "string"
                 }
             }
         },
@@ -3177,6 +3392,12 @@ const docTemplate = `{
                 "command": {
                     "type": "string"
                 },
+                "cwd": {
+                    "type": "string"
+                },
+                "deferred": {
+                    "type": "boolean"
+                },
                 "disabled": {
                     "type": "boolean"
                 },
@@ -3229,7 +3450,17 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "sessionless": {
+                    "description": "Sessionless marks a server that does not maintain an MCP session (it\nnever issues a Mcp-Session-Id). When true, Floyd omits the\ntools/prompts/resources list-changed handlers: the go-sdk opens a\nSEP-2575 \"subscriptions/listen\" stream whenever any of those handlers\nis set, and sessionless streamable-HTTP servers (e.g. GitHub MCP)\nanswer that POST with 404 (\"session not found\"), which the SDK treats\nas fatal. The cost is no live list-changed notifications from this\nserver.\n\nWhen nil, Floyd auto-detects a set of known sessionless servers (see\nIsSessionless); set it explicitly to override that detection.",
+                    "type": "boolean"
+                },
+                "startup_timeout_ms": {
+                    "type": "integer"
+                },
                 "timeout": {
+                    "type": "integer"
+                },
+                "tool_timeout_ms": {
                     "type": "integer"
                 },
                 "type": {
@@ -3259,6 +3490,35 @@ const docTemplate = `{
                 "$ref": "#/definitions/config.MCPConfig"
             }
         },
+        "config.ManagedAccount": {
+            "type": "object",
+            "properties": {
+                "authenticated": {
+                    "type": "boolean"
+                },
+                "base_url": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "oauth_host": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "region": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "token_path": {
+                    "type": "string"
+                }
+            }
+        },
         "config.Permissions": {
             "type": "object",
             "properties": {
@@ -3267,6 +3527,29 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.PromptQuotaConfig": {
+            "type": "object",
+            "properties": {
+                "danger_percent": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "limit_5h": {
+                    "type": "integer"
+                },
+                "limit_7d": {
+                    "type": "integer"
+                },
+                "warn_percent": {
+                    "type": "integer"
                 }
             }
         },
@@ -3338,7 +3621,17 @@ const docTemplate = `{
                 "diff_mode": {
                     "type": "string"
                 },
+                "exit_banner": {
+                    "$ref": "#/definitions/config.ExitBanner"
+                },
+                "prompt_quota": {
+                    "$ref": "#/definitions/config.PromptQuotaConfig"
+                },
                 "scrollbar": {
+                    "type": "string"
+                },
+                "theme": {
+                    "description": "Theme selects the TUI palette. Empty keeps the provider-derived\ndefault, which is the dark Charmtone palette for every built-in\nprovider.",
                     "type": "string"
                 },
                 "transparent": {
@@ -3403,7 +3696,7 @@ const docTemplate = `{
         "csync.Map-string-config_ProviderConfig": {
             "type": "object"
         },
-        "github_com_charmbracelet_floyd_internal_config.Config": {
+        "github_com_legacy-ai_floyd_internal_config.Config": {
             "type": "object",
             "properties": {
                 "$schema": {
@@ -3415,6 +3708,21 @@ const docTemplate = `{
                     "additionalProperties": {
                         "type": "string"
                     }
+                },
+                "experimental": {
+                    "description": "Experimental stores per-flag overrides for features registered in\ninternal/experiments. A missing key falls through to the flag's\nenvironment override, then to its built-in default.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "boolean"
+                    }
+                },
+                "heartbeat": {
+                    "description": "Heartbeat configures the auto-continue loop: after a run completes\nsuccessfully, the harness re-prompts the model so work continues\ninstead of idling between turns. Disabled unless configured.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.HeartbeatConfig"
+                        }
+                    ]
                 },
                 "hooks": {
                     "type": "object",
@@ -3439,7 +3747,7 @@ const docTemplate = `{
                     }
                 },
                 "options": {
-                    "$ref": "#/definitions/github_com_charmbracelet_floyd_internal_config.Options"
+                    "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_config.Options"
                 },
                 "permissions": {
                     "$ref": "#/definitions/config.Permissions"
@@ -3467,14 +3775,30 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_charmbracelet_floyd_internal_config.Options": {
+        "github_com_legacy-ai_floyd_internal_config.Options": {
             "type": "object",
             "properties": {
+                "additional_dirs": {
+                    "description": "AdditionalDirs lists extra project directories that file tools may\nread and write, in addition to the working directory. Managed by\n/add-dir and persisted at workspace scope so the set follows the\nproject rather than the machine.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "agent_name": {
+                    "type": "string"
+                },
                 "attribution": {
                     "$ref": "#/definitions/config.Attribution"
                 },
                 "auto_lsp": {
                     "type": "boolean"
+                },
+                "budget": {
+                    "$ref": "#/definitions/config.BudgetConfig"
+                },
+                "company_platform_url": {
+                    "type": "string"
                 },
                 "context_paths": {
                     "type": "array",
@@ -3516,6 +3840,22 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "execution": {
+                    "description": "Execution bounds command execution for agent tools.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.ExecutionOptions"
+                        }
+                    ]
+                },
+                "file_ops": {
+                    "description": "FileOps controls tools that create, modify, or delete files.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.FileOpsOptions"
+                        }
+                    ]
+                },
                 "global_context_paths": {
                     "type": "array",
                     "items": {
@@ -3525,11 +3865,34 @@ const docTemplate = `{
                 "initialize_as": {
                     "type": "string"
                 },
+                "managed_accounts": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/config.ManagedAccount"
+                    }
+                },
                 "notifications": {
                     "type": "string"
                 },
+                "plugin_marketplace_url": {
+                    "type": "string"
+                },
+                "plugin_runtime": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "plugins_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "progress": {
                     "type": "boolean"
+                },
+                "runtime_profile": {
+                    "description": "RuntimeProfile selects the runtime lane when neither the\nenvironment nor the executable name decides. See\nConfig.EffectiveRuntimeProfile for the precedence.",
+                    "type": "string"
                 },
                 "skills_paths": {
                     "type": "array",
@@ -3542,7 +3905,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_charmbracelet_floyd_internal_config.Scope": {
+        "github_com_legacy-ai_floyd_internal_config.Scope": {
             "type": "integer",
             "enum": [
                 0,
@@ -3553,7 +3916,7 @@ const docTemplate = `{
                 "ScopeWorkspace"
             ]
         },
-        "github_com_charmbracelet_floyd_internal_proto.Message": {
+        "github_com_legacy-ai_floyd_internal_proto.Message": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -3561,6 +3924,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
+                },
+                "is_summary_message": {
+                    "type": "boolean"
                 },
                 "model": {
                     "type": "string"
@@ -3679,6 +4045,10 @@ const docTemplate = `{
                         "$ref": "#/definitions/proto.Attachment"
                     }
                 },
+                "heartbeat": {
+                    "description": "Heartbeat marks a synthetic auto-continue prompt dispatched by the\nharness heartbeat (not typed by a human). It advances the\nconsecutive-continuation counter; any message without the flag\nresets the counter.",
+                    "type": "boolean"
+                },
                 "prompt": {
                     "type": "string"
                 },
@@ -3693,6 +4063,12 @@ const docTemplate = `{
         "proto.AgentSession": {
             "type": "object",
             "properties": {
+                "archived": {
+                    "type": "boolean"
+                },
+                "archived_at": {
+                    "type": "integer"
+                },
                 "attached_clients": {
                     "type": "integer"
                 },
@@ -3713,6 +4089,10 @@ const docTemplate = `{
                 },
                 "message_count": {
                     "type": "integer"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "parent_session_id": {
                     "type": "string"
@@ -3764,7 +4144,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_floyd_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_config.Scope"
                 }
             }
         },
@@ -3778,7 +4158,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/config.SelectedModelType"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_floyd_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_config.Scope"
                 }
             }
         },
@@ -3798,7 +4178,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_floyd_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_config.Scope"
                 }
             }
         },
@@ -3809,7 +4189,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_floyd_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_config.Scope"
                 }
             }
         },
@@ -3820,7 +4200,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_floyd_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_config.Scope"
                 }
             }
         },
@@ -3831,7 +4211,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_floyd_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_config.Scope"
                 },
                 "value": {}
             }
@@ -3924,6 +4304,15 @@ const docTemplate = `{
                 }
             }
         },
+        "proto.MCPAuthResponse": {
+            "type": "object",
+            "properties": {
+                "auth_url": {
+                    "description": "AuthURL is the OAuth authorization URL the user must visit, when\nthe flow is still in progress.",
+                    "type": "string"
+                }
+            }
+        },
         "proto.MCPClientInfo": {
             "type": "object",
             "properties": {
@@ -3977,6 +4366,17 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.MCPPendingAuthServer": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "url": {
                     "type": "string"
                 }
             }
@@ -4231,6 +4631,12 @@ const docTemplate = `{
         "proto.Session": {
             "type": "object",
             "properties": {
+                "archived": {
+                    "type": "boolean"
+                },
+                "archived_at": {
+                    "type": "integer"
+                },
                 "attached_clients": {
                     "type": "integer"
                 },
@@ -4251,6 +4657,10 @@ const docTemplate = `{
                 },
                 "message_count": {
                     "type": "integer"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "parent_session_id": {
                     "type": "string"
@@ -4416,7 +4826,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "config": {
-                    "$ref": "#/definitions/github_com_charmbracelet_floyd_internal_config.Config"
+                    "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_config.Config"
                 },
                 "data_dir": {
                     "type": "string"
@@ -4484,8 +4894,8 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "",
 	BasePath:         "/v1",
 	Schemes:          []string{},
-	Title:            "Floyd API",
-	Description:      "Floyd is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.",
+	Title:            "MegaFloyd API",
+	Description:      "MegaFloyd is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

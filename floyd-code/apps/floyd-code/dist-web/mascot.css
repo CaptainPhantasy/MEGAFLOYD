@@ -26,18 +26,31 @@
 }
 #floyd-mascot.fm-think .fm-screen img { animation: fm-breathe 1.7s ease-in-out infinite; }
 @keyframes fm-breathe { 0%,100% { opacity: .84; } 50% { opacity: 1; } }
-.mascot-peek { display: none !important; }
-.ws-mascot { display: flex !important; align-items: center; justify-content: center; }
-.floyd-peek {
-  width: 36px; height: 36px; flex: none; cursor: pointer;
-  background-image: url("/mascot-sprite.webp");
-  background-size: 432px 216px;
-  background-repeat: no-repeat;
-  background-position: 0 0;
+/* Founder heads occupy real layout space at twice their previous size. */
+.ch-logo, .brand-logo, .wi-face, .ws-mascot {
+  background-image: url("/mascot-sprite.webp") !important;
+  background-repeat: no-repeat !important;
+  background-size: 1200% 600% !important;
+  background-position: var(--floyd-face-x, 0%) var(--floyd-face-y, 0%) !important;
+  background-color: transparent !important;
+  border-radius: 0 !important;
+  flex-shrink: 0 !important;
+  aspect-ratio: 1 / 1;
 }
+.ch-logo, .wi-face { width: 44px !important; height: 44px !important; }
+.brand-logo { width: min(var(--mega-founder-size, 128px), 100%) !important; height: auto !important; }
+.ws-mascot { display: block !important; width: 72px !important; height: 72px !important; flex-basis: 72px; }
+.ws-pill-row { height: auto !important; min-height: 72px; }
+.mega-founder-follows { transform: var(--mega-founder-lean, none); transform-origin: 50% 80%; }
+.ch-logo > *, .brand-logo > *, .wi-face > *, .ws-mascot > * { display: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
-  #floyd-mascot, #floyd-mascot .fm-face { animation: none !important; transition: none !important; }
+  #floyd-mascot, #floyd-mascot .fm-screen img, .ch-logo, .brand-logo, .wi-face, .ws-mascot { animation: none !important; transition: none !important; }
 }
 @media (max-width: 900px) { #floyd-mascot { width: 112px; } }
 @media (max-width: 720px) { #floyd-mascot { display: none; } }
+
+/* Keep the supplied 75-column wordmark legible without changing its grid. */
+.empty-logo.wordmark { width: min(700px, 100%); }
+
+.gload-logo { width: min(700px, calc(100vw - 48px)) !important; height: auto; }

@@ -13,6 +13,7 @@ import (
 func TestProfileFromBinaryName(t *testing.T) {
 	tests := map[string]runtimeProfile{
 		"floyd":      runtimeProfileFloyd,
+		"megafloyd":  runtimeProfileMegafloyd,
 		"superfloyd": runtimeProfileSuperFloyd,
 		"beast":      runtimeProfileSuperFloyd,
 		"balanced":   runtimeProfileSuperFloyd,

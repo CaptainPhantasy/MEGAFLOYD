@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -39,7 +40,8 @@ type SkillExecutor interface {
 
 // BashExecutor executes skills using bash/shell.
 type BashExecutor struct {
-	shell string // defaults to "/bin/bash"
+	shell      string // Defaults to "/bin/bash".
+	workingDir string
 }
 
 // NewBashExecutor creates a BashExecutor with the default shell.
@@ -67,20 +69,26 @@ func (e *BashExecutor) Execute(ctx context.Context, skill *ExecutableSkill) (*Ex
 	}
 
 	timeout := time.Duration(skill.Runtime.Timeout) * time.Second
-	if timeout == 0 {
+	if timeout <= 0 {
 		timeout = 60 * time.Second
+	}
+	if timeout > 5*time.Minute {
+		timeout = 5 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, e.shell, "-c", command)
+	cmd.Dir = e.workingDir
+	cmd.Env = os.Environ()
+	cmd.WaitDelay = time.Second
 
 	// Inject environment variables from runtime config
 	if len(skill.Runtime.Env) > 0 {
 		cmd.Env = append(cmd.Env, envMapToSlice(skill.Runtime.Env)...)
 	}
 
-	var stdout, stderr bytes.Buffer
+	var stdout, stderr limitedBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -96,7 +104,7 @@ func (e *BashExecutor) Execute(ctx context.Context, skill *ExecutableSkill) (*Ex
 	}
 
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
+		if ctx.Err() != nil {
 			result.ExitCode = -1
 			result.Stderr = fmt.Sprintf("skill %q timed out after %s\n%s", skill.Name, timeout, stderr.String())
 		} else {
@@ -167,10 +175,17 @@ type RuntimeDispatcher struct {
 // NewRuntimeDispatcher creates a dispatcher with the default executor chain:
 // builtin → bash.
 func NewRuntimeDispatcher() *RuntimeDispatcher {
+	return NewRuntimeDispatcherForDirectory("")
+}
+
+// NewRuntimeDispatcherForDirectory runs executable skills in their workspace.
+func NewRuntimeDispatcherForDirectory(workingDir string) *RuntimeDispatcher {
+	bash := NewBashExecutor()
+	bash.workingDir = workingDir
 	return &RuntimeDispatcher{
 		executors: []SkillExecutor{
 			NewBuiltinExecutor(),
-			NewBashExecutor(),
+			bash,
 		},
 	}
 }
@@ -216,4 +231,16 @@ func exitCode(err error) int {
 		return ee.ExitCode()
 	}
 	return 1
+}
+
+// limitedBuffer bounds captured output while continuing to drain subprocess pipes.
+type limitedBuffer struct{ bytes.Buffer }
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	remaining := 256*1024 - b.Len()
+	if remaining > 0 {
+		_, _ = b.Buffer.Write(p[:min(remaining, n)])
+	}
+	return n, nil
 }

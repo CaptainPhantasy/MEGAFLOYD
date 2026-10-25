@@ -65,7 +65,7 @@ func (m *UI) checkPendingMCPAuth() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := mcp.WaitForInit(ctx); err != nil {
+		if err := mcp.WaitForInit(ctx, m.com.Workspace); err != nil {
 			return nil
 		}
 		return mcpStateChangedMsg{

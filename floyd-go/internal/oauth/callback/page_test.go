@@ -18,6 +18,8 @@ func TestWrite_Success(t *testing.T) {
 
 	require.Contains(t, page, `class="card ok"`)
 	require.Contains(t, page, "You’re all set")
+	require.Contains(t, page, "Authorized — MegaFloyd")
+	require.Contains(t, page, "MegaFloyd is now connected to")
 	require.Contains(t, page, "linear")
 	// A successful page counts itself down and closes.
 	require.Contains(t, page, `data-delay="5"`)
@@ -80,7 +82,7 @@ func TestWrite_TerseFailure(t *testing.T) {
 	require.Contains(t, page, "did not")
 	// With no subject the sentence must not dangle on a preposition.
 	require.NotContains(t, page, "access to <span")
-	require.Contains(t, page, "Floyd was not granted access.")
+	require.Contains(t, page, "MegaFloyd was not granted access.")
 }
 
 // TestWrite_EscapesUntrustedText proves provider-supplied strings cannot

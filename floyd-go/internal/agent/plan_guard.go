@@ -110,6 +110,8 @@ func (g *planGuardTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy
 		if !writesOnlyPlanFile(call, status.Path, g.workingDir) {
 			return fantasy.NewTextErrorResponse(planModeWriteDeniedMessage(status.Path)), nil
 		}
+	case tools.RunSkillToolName:
+		return fantasy.NewTextErrorResponse("Executable skills are unavailable in plan mode. Call exit_plan_mode before running a skill."), nil
 	case tools.JobKillToolName:
 		return fantasy.NewTextErrorResponse(
 			"job_kill is not available in plan mode. Call exit_plan_mode to exit plan mode before stopping a background task.",

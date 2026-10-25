@@ -1,8 +1,8 @@
 {
   "name": "megafloyd-desktop",
-  "productName": "MEGAFLOYD",
+  "productName": "MegaFloyd",
   "version": "1.0.0",
-  "description": "MEGAFLOYD Desktop — native shell for the MEGAFLOYD engine.",
+  "description": "MegaFloyd Desktop — native shell for the MegaFloyd engine.",
   "private": true,
   "type": "module",
   "main": "src/main.mjs",

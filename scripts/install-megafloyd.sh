@@ -448,10 +448,11 @@ MEGAFLOYD_CACHE_DIR="\${MEGAFLOYD_CACHE_DIR:-\$MEGAFLOYD_HOME/cache}"
 export MEGAFLOYD_HOME MEGAFLOYD_CONFIG_DIR MEGAFLOYD_DATA_DIR MEGAFLOYD_CACHE_DIR
 
 # Compatibility mirrors: the current chassis reads these names.
-export FLOYD_GLOBAL_CONFIG="\${FLOYD_GLOBAL_CONFIG:-\$MEGAFLOYD_CONFIG_DIR}"
-export FLOYD_GLOBAL_DATA="\${FLOYD_GLOBAL_DATA:-\$MEGAFLOYD_DATA_DIR}"
-export FLOYD_CACHE_DIR="\${FLOYD_CACHE_DIR:-\$MEGAFLOYD_CACHE_DIR}"
-export FLOYD_APP="\${FLOYD_APP:-$PROG}"
+export FLOYD_GLOBAL_CONFIG="\$MEGAFLOYD_CONFIG_DIR"
+export FLOYD_GLOBAL_DATA="\$MEGAFLOYD_DATA_DIR"
+export FLOYD_CACHE_DIR="\$MEGAFLOYD_CACHE_DIR"
+export FLOYD_APP="$PROG"
+export MEGAFLOYD_ACTIVE=1
 
 mkdir -p "\$MEGAFLOYD_CONFIG_DIR" "\$MEGAFLOYD_DATA_DIR" "\$MEGAFLOYD_CACHE_DIR" 2>/dev/null || true
 
@@ -460,17 +461,8 @@ if [ ! -x "\$MEGAFLOYD_BIN" ]; then
 	exit 127
 fi
 
-has_data_dir=0
-for argument in "\$@"; do
-	case "\$argument" in
-	-D | -D=* | --data-dir | --data-dir=*) has_data_dir=1 ;;
-	esac
-done
-
-if [ "\$has_data_dir" -eq 1 ]; then
-	exec "\$MEGAFLOYD_BIN" "\$@"
-fi
-exec "\$MEGAFLOYD_BIN" --data-dir "\$MEGAFLOYD_DATA_DIR" "\$@"
+# Let the runtime select <cwd>/.megafloyd unless --data-dir is explicit.
+exec "\$MEGAFLOYD_BIN" "\$@"
 EOF
 	run install -d -m 0755 "$PREFIX/bin" "$LIBEXEC"
 	run install -m 0755 "$staged" "$LAUNCHER"

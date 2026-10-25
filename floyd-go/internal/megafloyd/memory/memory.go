@@ -14,6 +14,7 @@
 package memory
 
 import (
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"path/filepath"
 	"time"
 )
@@ -50,5 +51,5 @@ type GitState struct {
 
 // Path returns the checkpoint path for a working directory.
 func Path(cwd string) string {
-	return filepath.Join(cwd, DirName, FileName)
+	return filepath.Join(cwd, megafloyd.ProjectDirName(), FileName)
 }

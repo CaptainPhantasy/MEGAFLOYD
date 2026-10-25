@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"html/template"
 	"os"
 	"os/user"
@@ -51,7 +52,7 @@ var statsCmd = &cobra.Command{
 }
 
 func init() {
-	statsCmd.Flags().String("crawl-dir", "", "Crawl a directory recursively for all floyd projects and aggregate stats")
+	statsCmd.Flags().String("crawl-dir", "", "Crawl a directory recursively for all MegaFloyd projects and aggregate stats")
 	statsCmd.Flags().Bool("all", false, "Aggregate stats from all known projects (from projects.json)")
 }
 
@@ -222,7 +223,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	if outputDataDir == "" {
-		outputDataDir = ".floyd"
+		outputDataDir = megafloyd.ProjectDirName()
 	}
 
 	htmlPath := filepath.Join(outputDataDir, "stats/index.html")
@@ -260,7 +261,7 @@ func crawlForStats(ctx context.Context, rootDir string) ([]ProjectStats, error) 
 		// Look for .floyd/floyd.db pattern
 		if !d.IsDir() && d.Name() == "floyd.db" {
 			dir := filepath.Dir(path)
-			if filepath.Base(dir) == ".floyd" {
+			if filepath.Base(dir) == megafloyd.ProjectDirName() {
 				projectDir := filepath.Dir(dir)
 				dbPaths = append(dbPaths, struct {
 					dbPath     string

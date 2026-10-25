@@ -104,7 +104,7 @@ func (m *Manager) ActiveSkills() []*Skill {
 // ResolvedPaths returns the expanded skills directory paths stored at
 // construction time.
 func (m *Manager) ResolvedPaths() []string {
-	return m.resolvedPaths
+	return m.pathsSnapshot()
 }
 
 // WorkingDir returns the workspace working directory stored at

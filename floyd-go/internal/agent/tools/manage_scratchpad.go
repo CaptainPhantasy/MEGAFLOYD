@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"charm.land/fantasy"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 )
 
 //go:embed manage_scratchpad.md
@@ -18,12 +19,20 @@ type ManageScratchpadParams struct {
 	Content string `json:"content,omitempty" jsonschema:"description=Content to write or append"`
 }
 
-func NewManageScratchpadTool(wd string) fantasy.AgentTool {
+func NewManageScratchpadTool(wd string, selected ...string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		"manage_scratchpad",
 		string(manageScratchpadDescription),
 		func(ctx context.Context, params ManageScratchpadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			path := filepath.Join(wd, ".floyd", "scratchpad.md")
+			var explicit string
+			if len(selected) > 0 {
+				explicit = selected[0]
+			}
+			dataDir, err := megafloyd.PersonalDataDir(wd, explicit)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			path := filepath.Join(dataDir, "scratchpad.md")
 
 			switch params.Action {
 			case "read":
@@ -36,19 +45,25 @@ func NewManageScratchpadTool(wd string) fantasy.AgentTool {
 				}
 				return fantasy.NewTextResponse(string(b)), nil
 			case "write":
-				os.MkdirAll(filepath.Dir(path), 0o755)
-				if err := os.WriteFile(path, []byte(params.Content), 0o644); err != nil {
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				if err := os.WriteFile(path, []byte(params.Content), 0o600); err != nil {
 					return fantasy.NewTextResponse(err.Error()), nil
 				}
 				return fantasy.NewTextResponse("Scratchpad written."), nil
 			case "append":
-				os.MkdirAll(filepath.Dir(path), 0o755)
-				f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 				if err != nil {
 					return fantasy.NewTextResponse(err.Error()), nil
 				}
 				defer f.Close()
-				f.WriteString("\n" + params.Content)
+				if _, err := f.WriteString("\n" + params.Content); err != nil {
+					return fantasy.ToolResponse{}, err
+				}
 				return fantasy.NewTextResponse("Scratchpad appended."), nil
 			case "clear":
 				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

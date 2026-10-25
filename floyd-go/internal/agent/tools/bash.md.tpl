@@ -94,14 +94,14 @@ When user asks to create git commit:
 Commit message here.
 
 {{ if .Attribution.GeneratedWith }}
-💘 Generated with Floyd
+💘 Generated with MegaFloyd
 {{ end}}
 {{if eq .Attribution.TrailerStyle "assisted-by" }}
 
-Assisted-by: Floyd:{{ .ModelID }}
+Assisted-by: MegaFloyd:{{ .ModelID }}
 {{ else if eq .Attribution.TrailerStyle "co-authored-by" }}
 
-Co-Authored-By: Floyd <floyd@charm.land>
+Assisted-by: MegaFloyd
 {{ end }}
 EOF
 )"
@@ -155,7 +155,7 @@ When user asks you to create or update a PR:
 <summary>
 
 {{ if .Attribution.GeneratedWith -}}
-💘 Generated with Floyd
+💘 Generated with MegaFloyd
 {{- end }}
 
 EOF

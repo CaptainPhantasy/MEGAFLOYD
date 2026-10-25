@@ -36,6 +36,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/event"
 	"github.com/legacy-ai/floyd/internal/lock"
 	floydlog "github.com/legacy-ai/floyd/internal/log"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"github.com/legacy-ai/floyd/internal/projects"
 	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/server"
@@ -93,8 +94,8 @@ func init() {
 
 var rootCmd = &cobra.Command{
 	Use:   "floyd",
-	Short: "A terminal-first AI assistant for software development",
-	Long:  "A glamorous, terminal-first AI assistant for software development and adjacent tasks",
+	Short: "MegaFloyd, a terminal-first AI assistant for software development",
+	Long:  "MegaFloyd is a terminal-first AI assistant for software development and adjacent tasks",
 	Example: `
 # Run in interactive mode
 floyd
@@ -156,7 +157,7 @@ floyd --continue
 		if _, err := program.Run(); err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
-			return errors.New("Floyd crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/legacy-ai/floyd/issues/new?template=bug.yml") //nolint:staticcheck
+			return errors.New("MegaFloyd crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/CaptainPhantasy/MEGAFLOYD/issues/new") //nolint:staticcheck
 		}
 		var banner config.ExitBanner
 		if cfg := com.Config(); cfg != nil {
@@ -194,7 +195,7 @@ func printSessionResume(model *ui.UI, banner config.ExitBanner) {
 }
 
 // copied from cobra:
-const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
+const defaultVersionTemplate = `{{if eq .Name "megafloyd"}}MegaFloyd {{else}}{{with .DisplayName}}{{printf "%s " .}}{{end}}{{end}}{{printf "version %s" .Version}}
 `
 
 func Execute() {
@@ -250,8 +251,13 @@ func supportsProgressBar() bool {
 // useClientServer returns true when the client/server architecture is
 // enabled via the FLOYD_CLIENT_SERVER environment variable.
 func useClientServer() bool {
-	v, _ := strconv.ParseBool(os.Getenv("FLOYD_CLIENT_SERVER"))
-	return v
+	for _, key := range []string{"MEGAFLOYD_CLIENT_SERVER", "FLOYD_CLIENT_SERVER"} {
+		if value, exists := os.LookupEnv(key); exists {
+			enabled, _ := strconv.ParseBool(value)
+			return enabled
+		}
+	}
+	return megafloyd.IsActive()
 }
 
 // setupWorkspaceWithProgressBar wraps setupWorkspace with an optional
@@ -507,7 +513,7 @@ func replaceExitingServer(cmd *cobra.Command, hostURL *url.URL) error {
 		}
 	}
 	if err := spawnAndWaitReady(cmd, hostURL); err != nil {
-		return fmt.Errorf("failed to initialize floyd server: %v", err)
+		return fmt.Errorf("failed to initialize MegaFloyd server: %v", err)
 	}
 	return nil
 }
@@ -571,13 +577,13 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 
 		if needsStart {
 			if err := spawnAndWaitReady(cmd, hostURL); err != nil {
-				return fmt.Errorf("failed to initialize floyd server: %v", err)
+				return fmt.Errorf("failed to initialize MegaFloyd server: %v", err)
 			}
 			return nil
 		}
 
 		if err := waitForServerReady(cmd.Context(), hostURL); err != nil {
-			return fmt.Errorf("failed to initialize floyd server: %v", err)
+			return fmt.Errorf("failed to initialize MegaFloyd server: %v", err)
 		}
 	}
 
@@ -909,11 +915,11 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	c.Stderr = stderr
 
 	if err := c.Start(); err != nil {
-		return fmt.Errorf("failed to start floyd server: %v", err)
+		return fmt.Errorf("failed to start MegaFloyd server: %v", err)
 	}
 
 	if err := c.Process.Release(); err != nil {
-		return fmt.Errorf("failed to detach floyd server process: %v", err)
+		return fmt.Errorf("failed to detach MegaFloyd server process: %v", err)
 	}
 
 	return nil

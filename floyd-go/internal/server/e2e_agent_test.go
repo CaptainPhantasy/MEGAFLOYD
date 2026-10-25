@@ -740,3 +740,7 @@ func TestE2E_CancelOfActiveRunAlsoCancelsAcceptedFollowUp(t *testing.T) {
 	})
 	require.False(t, gotEnd, "the accepted follow-up must not stream model output after the cancel")
 }
+
+func (c *scriptedCoordinator) SuggestPrompt(context.Context, string, string) (string, error) {
+	return "", nil
+}

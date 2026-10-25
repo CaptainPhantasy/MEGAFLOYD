@@ -35,10 +35,6 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		return err
 	}
 
-	if ws.AgentCoordinator == nil {
-		return ErrAgentNotInitialized
-	}
-
 	if err := agent.ValidateCall(agent.SessionAgentCall{
 		SessionID:   msg.SessionID,
 		Prompt:      msg.Prompt,
@@ -47,14 +43,16 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		return err
 	}
 
-	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
-
 	ws.runMu.Lock()
 	if ws.closing {
 		ws.runMu.Unlock()
-		accept.Close()
 		return ErrWorkspaceClosing
 	}
+	if ws.AgentCoordinator == nil {
+		ws.runMu.Unlock()
+		return ErrAgentNotInitialized
+	}
+	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
 	ws.runWG.Add(1)
 	ws.runMu.Unlock()
 
@@ -198,6 +196,8 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 		return proto.AgentInfo{}, err
 	}
 
+	ws.runMu.Lock()
+	defer ws.runMu.Unlock()
 	var agentInfo proto.AgentInfo
 	if ws.AgentCoordinator != nil {
 		m := ws.AgentCoordinator.Model()
@@ -211,13 +211,22 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	return agentInfo, nil
 }
 
-// InitAgent initializes the coder agent for the workspace.
+// InitAgent initializes the workspace's coder agent once. Reattaching clients
+// share the installed coordinator, including its active runs and pending tools.
 func (b *Backend) InitAgent(ctx context.Context, workspaceID string, interactive bool) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
 
+	ws.runMu.Lock()
+	defer ws.runMu.Unlock()
+	if ws.closing {
+		return ErrWorkspaceClosing
+	}
+	if ws.AgentCoordinator != nil {
+		return nil
+	}
 	if interactive {
 		return ws.InitCoderAgent(ctx)
 	}

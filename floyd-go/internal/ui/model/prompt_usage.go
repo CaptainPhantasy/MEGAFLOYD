@@ -86,7 +86,7 @@ func (m *UI) promptQuotaInfo(width int) string {
 	fiveHourLine = usageSeverityStyle(t, fiveHourPct, quotaCfg).Render(fiveHourLine)
 	sevenDayLine = usageSeverityStyle(t, sevenDayPct, quotaCfg).Render(sevenDayLine)
 
-	note := t.Sidebar.QuotaNote.Render("Local Floyd usage only")
+	note := t.Sidebar.QuotaNote.Render("Local MegaFloyd usage only")
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,

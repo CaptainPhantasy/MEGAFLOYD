@@ -9,6 +9,9 @@ vendor/
 # Platform build inputs (pinned in PLATFORM-COMMIT; see README)
 platform/
 platform-src/
+# Same inputs when wired as symlinks
+platform
+platform-src
 
 # Generated icon intermediates
 desktop/assets/MEGAFLOYD.iconset/

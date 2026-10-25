@@ -45,6 +45,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/history"
 	"github.com/legacy-ai/floyd/internal/home"
 	"github.com/legacy-ai/floyd/internal/lsp"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/permission"
 	"github.com/legacy-ai/floyd/internal/pubsub"
@@ -285,8 +286,11 @@ type UI struct {
 	completionsPositionStart image.Point // x,y where user typed '@'
 
 	// commandSuggestion holds the inline ghost-text suggestion shown after
-	// the caret in the editor (history-based; see suggestion.go).
-	commandSuggestion string
+	// the caret in the editor (AI or history; see suggestion.go).
+	commandSuggestion   string
+	aiSuggestion        string
+	suggestionMessageID string
+	suggestionCancel    context.CancelFunc
 	// stashedPrompt holds text shelved with the stash key (alt+s) so an
 	// interrupted draft can be recalled after sending something else.
 	stashedPrompt string
@@ -922,6 +926,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.updateLayoutAndSize()
 		}
+		m.cancelAISuggestion()
+		m.aiSuggestion = ""
+		m.suggestionMessageID = ""
 		// Reload prompt history for the new session.
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
@@ -934,6 +941,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			paths = append(paths, f.LatestVersion.Path)
 		}
 		cmds = append(cmds, m.startLSPs(paths))
+
+	case aiSuggestionMsg:
+		m.applyAISuggestion(msg)
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -1062,6 +1072,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case pubsub.DeletedEvent:
 			m.chat.RemoveMessage(msg.Payload.ID)
 		}
+		if msg.Payload.Role == message.User && msg.Type == pubsub.CreatedEvent {
+			m.cancelAISuggestion()
+			m.aiSuggestion = ""
+			m.suggestionMessageID = ""
+		}
+		if cmd := m.requestAISuggestion(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		// start the spinner if there is a new message
 		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
 			m.todoIsSpinning = true
@@ -1113,7 +1131,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		if cmd := m.sendNotification(notification.Notification{
-			Title:   "Floyd is waiting...",
+			Title:   "MegaFloyd is waiting...",
 			Message: fmt.Sprintf("Permission required to execute \"%s\"", msg.Payload.ToolName),
 		}); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1126,7 +1144,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		if cmd := m.sendNotification(notification.Notification{
-			Title:   "Floyd is waiting...",
+			Title:   "MegaFloyd is waiting...",
 			Message: fmt.Sprintf("%d questions need your input", len(msg.Payload.Questions)),
 		}); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1525,9 +1543,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case app.UpdateAvailableMsg:
-		text := fmt.Sprintf("Floyd update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
+		text := fmt.Sprintf("MegaFloyd update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
-			text = fmt.Sprintf("This is a development version of Floyd. The latest version is v%s.", msg.LatestVersion)
+			text = fmt.Sprintf("This is a development version of MegaFloyd. The latest version is v%s.", msg.LatestVersion)
 		}
 		ttl := 10 * time.Second
 		m.status.SetInfoMsg(util.InfoMsg{
@@ -1662,7 +1680,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 	info := util.InfoMsg{
 		Type: util.InfoTypeWarn,
-		Msg:  "Lost connection to the Floyd server — reconnecting…",
+		Msg:  "Lost connection to the MegaFloyd server — reconnecting…",
 		TTL:  30 * time.Second,
 	}
 	switch msg.State {
@@ -1670,13 +1688,13 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 		slog.Warn("Server connection degraded", "error", msg.Err, "stuck", msg.Stuck)
 		if msg.Stuck {
 			info.Type = util.InfoTypeError
-			info.Msg = "Can't restore the connection to the Floyd server. Restart Floyd to recover."
+			info.Msg = "Can't restore the connection to the MegaFloyd server. Restart MegaFloyd to recover."
 			info.TTL = time.Minute
 		}
 	case workspace.ConnectionRecovered:
 		info = util.InfoMsg{
 			Type: util.InfoTypeSuccess,
-			Msg:  "Reconnected to the Floyd server.",
+			Msg:  "Reconnected to the MegaFloyd server.",
 			TTL:  DefaultStatusTTL,
 		}
 	}
@@ -3409,7 +3427,7 @@ func (m *UI) View() tea.View {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
 	v.ReportFocus = m.caps.ReportFocusEvents
-	v.WindowTitle = "floyd " + home.Short(m.com.Workspace.WorkingDir())
+	v.WindowTitle = "MegaFloyd " + home.Short(m.com.Workspace.WorkingDir())
 
 	canvas := uv.NewScreenBuffer(m.width, m.height)
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
@@ -4096,7 +4114,7 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		return util.ReportError(err)
 	}
 	cmd, err := editor.Command(
-		"floyd",
+		"MegaFloyd",
 		tmpPath,
 		editor.AtPosition(
 			m.textarea.Line()+1,
@@ -4952,6 +4970,9 @@ func (m *UI) openConfigAuditDialog() tea.Cmd {
 		workingDir := m.com.Workspace.WorkingDir()
 		// Look for project-level config.
 		configNames := []string{"floyd.json", ".floyd.json"}
+		if megafloyd.IsActive() {
+			configNames = []string{"megafloyd.json", ".megafloyd.json"}
+		}
 		for _, name := range configNames {
 			path := filepath.Join(workingDir, name)
 			if _, err := os.Stat(path); err == nil {
@@ -5145,7 +5166,7 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	case notify.TypeAgentFinished:
 		common.StopTurn()
 		cmds = append(cmds, m.sendNotification(notification.Notification{
-			Title:   "Floyd is waiting...",
+			Title:   "MegaFloyd is waiting...",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
 		}))
 		if m.com.IsHyper() {
@@ -5654,7 +5675,7 @@ func (m *UI) disableDockerMCP() tea.Msg {
 	return util.NewInfoMsg("Docker MCP disabled successfully")
 }
 
-// renderLogo renders the Floyd logo with the given styles and dimensions.
+// renderLogo renders the MegaFloyd logo with the given styles and dimensions.
 func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 	return logo.Render(t.Logo.GradCanvas, version.Version, compact, logo.Opts{
 		FieldColor:   t.Logo.FieldColor,

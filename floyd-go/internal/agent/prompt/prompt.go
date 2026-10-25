@@ -236,7 +236,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	agentName := cmp.Or(
 		os.Getenv("FLOYD_IDENTITY"),
 		cfg.Options.AgentName,
-		"Floyd",
+		"MegaFloyd",
 	)
 	data := PromptDat{
 		Provider:       provider,

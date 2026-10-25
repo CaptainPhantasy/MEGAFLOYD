@@ -45,18 +45,22 @@ func (sb *syncBuffer) String() string {
 
 // BackgroundShell represents a shell running in the background.
 type BackgroundShell struct {
-	ID          string
-	Command     string
-	Description string
-	Shell       *Shell
-	WorkingDir  string
-	ctx         context.Context
-	cancel      context.CancelFunc
-	stdout      *syncBuffer
-	stderr      *syncBuffer
-	done        chan struct{}
-	exitErr     error
-	completedAt atomic.Int64 // Unix timestamp when job completed (0 if still running)
+	ID           string
+	Command      string
+	Description  string
+	Shell        *Shell
+	WorkingDir   string
+	SessionID    string
+	WorkspaceDir string
+	StartedAt    time.Time
+	cancelled    atomic.Bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	stdout       *syncBuffer
+	stderr       *syncBuffer
+	done         chan struct{}
+	exitErr      error
+	completedAt  atomic.Int64 // Unix timestamp when job completed (0 if still running)
 }
 
 // BackgroundShellManager manages background shell instances.
@@ -101,17 +105,21 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 
 	shellCtx, cancel := context.WithCancel(ctx)
 
+	owner, _ := ctx.Value(runtimeTaskOwnerKey{}).(runtimeTaskOwner)
 	bgShell := &BackgroundShell{
-		ID:          id,
-		Command:     command,
-		Description: description,
-		WorkingDir:  workingDir,
-		Shell:       shell,
-		ctx:         shellCtx,
-		cancel:      cancel,
-		stdout:      &syncBuffer{},
-		stderr:      &syncBuffer{},
-		done:        make(chan struct{}),
+		SessionID:    owner.sessionID,
+		WorkspaceDir: owner.workspace,
+		StartedAt:    time.Now().UTC(),
+		ID:           id,
+		Command:      command,
+		Description:  description,
+		WorkingDir:   workingDir,
+		Shell:        shell,
+		ctx:          shellCtx,
+		cancel:       cancel,
+		stdout:       &syncBuffer{},
+		stderr:       &syncBuffer{},
+		done:         make(chan struct{}),
 	}
 
 	m.shells.Set(id, bgShell)

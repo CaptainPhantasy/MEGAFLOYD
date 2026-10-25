@@ -161,3 +161,7 @@ func TestRunAgent_CancellationPublishesNoErrorTerminal(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 }
+
+func (c *errorCoordinator) SuggestPrompt(context.Context, string, string) (string, error) {
+	return "", nil
+}

@@ -45,4 +45,4 @@ Be specific. Don't write "implement authentication" - write:
 
 **Tone**: Write as if briefing a teammate taking over mid-task. Include everything they'd need to continue without asking questions. No emojis ever.
 
-**Length**: No limit. Err on the side of too much detail rather than too little. Critical context is worth the tokens.
+**Length**: Target 500-1500 words. Include all critical context but be concise — this summary consumes context window tokens. Prioritize actionable detail over narrative.

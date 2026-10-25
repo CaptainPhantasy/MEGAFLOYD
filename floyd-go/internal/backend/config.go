@@ -316,10 +316,11 @@ func (b *Backend) GetMCPPrompt(workspaceID, clientID, promptID string, args map[
 }
 
 func (b *Backend) ListMCPPrompts(workspaceID string) ([]proto.MCPPrompt, error) {
-	if _, err := b.GetWorkspace(workspaceID); err != nil {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
 		return nil, err
 	}
-	prompts, err := commands.LoadMCPPrompts()
+	prompts, err := commands.LoadMCPPrompts(ws.Cfg)
 	if err != nil {
 		return nil, err
 	}
