@@ -111,6 +111,7 @@ type service struct {
 	q        db.Querier
 	db       *sql.DB
 	debounce time.Duration
+	review   *outputReview
 
 	mu      sync.Mutex
 	pending map[string]*pendingState
@@ -152,7 +153,7 @@ func NewService(q db.Querier, opts ...ServiceOption) Service {
 }
 
 func (s *service) Delete(ctx context.Context, id string) error {
-	message, err := s.Get(ctx, id)
+	message, err := PublicGet(ctx, s, id)
 	if err != nil {
 		return err
 	}
@@ -208,7 +209,14 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	}
 	// Clone the message before publishing to avoid race conditions with
 	// concurrent modifications to the Parts slice.
-	s.Publish(pubsub.CreatedEvent, message.Clone())
+	if s.review != nil && message.Role == Assistant {
+		if err := s.review.record(ctx, message, privateKind(message), false); err != nil {
+			return Message{}, err
+		}
+	}
+	if err := s.publishOutput(ctx, pubsub.CreatedEvent, message, false); err != nil {
+		return Message{}, err
+	}
 	return message, nil
 }
 
@@ -370,6 +378,10 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		s.mu.Unlock()
 
 		err := s.write(ctx, snap)
+		if err == nil {
+			// Preserve publication order while this message owns its flush.
+			err = s.publishOutput(ctx, pubsub.UpdatedEvent, snap, isTerminal)
+		}
 
 		s.mu.Lock()
 		p.flushing = false
@@ -389,15 +401,6 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 			return err
 		}
 
-		// Terminal events — message finished, tool call added or
-		// finished, reasoning ended — use the bounded must-deliver
-		// path so they never get dropped under channel contention.
-		if isTerminal {
-			s.PublishMustDeliver(ctx, pubsub.UpdatedEvent, snap)
-		} else {
-			s.Publish(pubsub.UpdatedEvent, snap)
-		}
-
 		if wasDirty && syncCaller {
 			continue
 		}
@@ -408,6 +411,9 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 // write performs the unguarded SQL write + UpdatedAt stamp. Caller
 // owns publishing.
 func (s *service) write(ctx context.Context, msg Message) error {
+	if s.review != nil && msg.Role == Assistant {
+		return s.review.record(ctx, msg, privateKind(msg), true)
+	}
 	parts, err := marshalParts(msg.Parts)
 	if err != nil {
 		return err

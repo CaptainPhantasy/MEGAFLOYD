@@ -167,7 +167,7 @@ func runSessionExport(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("session %s: %w", args[0], err)
 	}
-	stored, err := svc.messages.List(ctx, found.ID)
+	stored, err := message.PublicList(ctx, svc.messages, found.ID)
 	if err != nil {
 		return fmt.Errorf("list messages for %s: %w", found.ID, err)
 	}

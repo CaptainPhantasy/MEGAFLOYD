@@ -78,7 +78,7 @@ func (b *Backend) ListSessionMessages(ctx context.Context, workspaceID, sessionI
 	if err := ws.Messages.FlushAll(ctx); err != nil {
 		return nil, err
 	}
-	return ws.Messages.List(ctx, sessionID)
+	return message.PublicList(ctx, ws.Messages, sessionID)
 }
 
 // ListSessionHistory returns the history items for a session.

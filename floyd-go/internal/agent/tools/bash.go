@@ -45,6 +45,7 @@ type BashResponseMetadata struct {
 	WorkingDirectory string `json:"working_directory"`
 	Background       bool   `json:"background,omitempty"`
 	ShellID          string `json:"shell_id,omitempty"`
+	ExitCode         *int   `json:"exit_code,omitempty"`
 }
 
 const (
@@ -275,6 +276,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						StartTime:        startTime.UnixMilli(),
 						EndTime:          time.Now().UnixMilli(),
 						Output:           stdout,
+						ExitCode:         &exitCode,
 						Description:      params.Description,
 						Background:       params.RunInBackground,
 						WorkingDirectory: bgShell.WorkingDir,
@@ -359,6 +361,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					StartTime:        startTime.UnixMilli(),
 					EndTime:          time.Now().UnixMilli(),
 					Output:           stdout,
+					ExitCode:         &exitCode,
 					Description:      params.Description,
 					Background:       params.RunInBackground,
 					WorkingDirectory: bgShell.WorkingDir,

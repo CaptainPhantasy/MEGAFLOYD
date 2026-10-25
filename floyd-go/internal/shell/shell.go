@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/x/exp/slice"
+	"github.com/legacy-ai/floyd/internal/filelock"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -276,6 +277,15 @@ func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr i
 	if err := validateRedirs(line); err != nil {
 		return err
 	}
+	paths, err := filelock.ShellTargets(line, s.cwd)
+	if err != nil {
+		return err
+	}
+	release, err := filelock.Acquire(ctx, paths)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	runner, err = s.newInterp(nil, stdout, stderr)
 	if err != nil {

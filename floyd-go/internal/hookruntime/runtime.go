@@ -27,10 +27,12 @@ type (
 )
 
 type actionState struct {
-	mu       sync.Mutex
-	entered  bool
-	rejected bool
-	input    string
+	mu         sync.Mutex
+	entered    bool
+	rejected   bool
+	input      string
+	sessionID  string
+	mechanical bool
 }
 
 // WithRun preserves the accepted run ID without changing execution behavior.
@@ -235,13 +237,13 @@ func (r *Runtime) Before(ctx context.Context, sid string, call fantasy.ToolCall)
 // terminal event even when a plan guard, permission, error, or cancel prevents
 // the inner tool from completing.
 func (r *Runtime) ObserveTool(ctx context.Context, sid string, call fantasy.ToolCall, run func(context.Context, fantasy.ToolCall) (fantasy.ToolResponse, error)) (response fantasy.ToolResponse, retErr error) {
-	state := &actionState{input: call.Input}
+	state := &actionState{input: call.Input, sessionID: sid}
 	ctx = context.WithValue(ctx, actionKey{}, state)
 	started := time.Now()
 	defer func() {
 		panicked := recover()
 		state.mu.Lock()
-		entered, rejected, actualInput := state.entered, state.rejected, state.input
+		entered, rejected, actualInput, mechanical := state.entered, state.rejected, state.input, state.mechanical
 		state.mu.Unlock()
 		info := details(ctx)
 		info.ToolCallID, info.DurationMS = call.ID, time.Since(started).Milliseconds()
@@ -261,6 +263,15 @@ func (r *Runtime) ObserveTool(ctx context.Context, sid string, call fantasy.Tool
 			event, info.Outcome = hooks.EventActionRejected, "rejected"
 		case retErr != nil || response.IsError || metadata.ExitCode != nil && *metadata.ExitCode != 0:
 			event, info.Outcome = hooks.EventPostToolUseFailure, "failed"
+		}
+		if mechanical {
+			terminalState := "succeeded"
+			if info.Outcome == "failed" || info.Outcome == "cancelled" {
+				terminalState = info.Outcome
+			} else if info.Outcome == "rejected" {
+				terminalState = "denied"
+			}
+			r.recordBuiltin(ctx, call, event, "native-tool-result", terminalState, info.Outcome, metadata.ExitCode)
 		}
 		if retErr != nil {
 			info.Error = retErr.Error()
@@ -302,8 +313,15 @@ func (r *Runtime) ExecuteTool(ctx context.Context, sid string, call fantasy.Tool
 			response.Metadata = MergeMetadata("", result)
 			return response, nil
 		}
-		EnterTool(ctx)
-		response, err := run(ctx, call)
+		var response fantasy.ToolResponse
+		var err error
+		if call.Name == "bash" {
+			info := fantasy.ToolInfo{Name: "bash", Parameters: map[string]any{"command": map[string]any{"type": "string", "minLength": 1}}, Required: []string{"command"}}
+			response, err = r.ExecuteRegisteredBody(ctx, info, call, run)
+		} else {
+			EnterTool(ctx)
+			response, err = run(ctx, call)
+		}
 		if result.Context != "" {
 			response.Content += "\n" + result.Context
 		}

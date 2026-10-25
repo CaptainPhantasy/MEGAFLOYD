@@ -93,7 +93,7 @@ func (b *Backend) UndoSession(ctx context.Context, workspaceID, sessionID string
 		if e := ws.Messages.FlushAll(ctx); e != nil {
 			return e
 		}
-		before, e := ws.Messages.List(ctx, sessionID)
+		before, e := message.PublicList(ctx, ws.Messages, sessionID)
 		if e != nil {
 			return e
 		}

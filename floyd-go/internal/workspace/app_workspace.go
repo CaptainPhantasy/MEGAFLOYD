@@ -97,7 +97,7 @@ func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]me
 	if err := w.app.Messages.FlushAll(ctx); err != nil {
 		return nil, err
 	}
-	return w.app.Messages.List(ctx, sessionID)
+	return message.PublicList(ctx, w.app.Messages, sessionID)
 }
 
 func (w *AppWorkspace) ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error) {

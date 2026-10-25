@@ -788,6 +788,8 @@ type Config struct {
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
 
+	OutputReview *OutputReviewConfig `json:"output_review,omitempty" jsonschema:"description=Review and simplify responses before showing them"`
+
 	// Heartbeat configures the auto-continue loop: after a run completes
 	// successfully, the harness re-prompts the model so work continues
 	// instead of idling between turns. Disabled unless configured.
@@ -802,6 +804,16 @@ type Config struct {
 	Experimental map[string]bool `json:"experimental,omitempty" jsonschema:"description=Experimental feature overrides keyed by flag id"`
 
 	Agents map[string]Agent `json:"-"`
+}
+
+// OutputReviewConfig controls the independent assistant publication review.
+type OutputReviewConfig struct {
+	Enabled bool `json:"enabled" jsonschema:"description=Review assistant output before public delivery,default=false"`
+}
+
+// OutputReviewEnabled reports whether assistant publication review is enabled.
+func (c *Config) OutputReviewEnabled() bool {
+	return c != nil && c.OutputReview != nil && c.OutputReview.Enabled
 }
 
 // HeartbeatConfig controls the harness heartbeat: a synthetic continuation

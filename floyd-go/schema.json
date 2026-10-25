@@ -122,6 +122,10 @@
           "type": "object",
           "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
         },
+        "output_review": {
+          "$ref": "#/$defs/OutputReviewConfig",
+          "description": "Review and simplify responses before showing them"
+        },
         "heartbeat": {
           "$ref": "#/$defs/HeartbeatConfig",
           "description": "Keep-alive loop that re-prompts the model after each completed turn so it does not sit idle between turns"
@@ -811,6 +815,20 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "OutputReviewConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Review assistant output before public delivery",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "enabled"
+      ]
     },
     "Permissions": {
       "properties": {

@@ -773,6 +773,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// message of the turn is the value reachable through this
 	// pointer when the defer runs.
 	var currentAssistant *message.Message
+	defer func() {
+		if !skipRunComplete && message.OutputReviewEnabled(a.messages) && result != nil && currentAssistant != nil {
+			result = a.publicOutputResult(context.WithoutCancel(ctx), result, currentAssistant.ID)
+		}
+	}()
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -803,7 +808,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
 		if currentAssistant != nil {
 			complete.MessageID = currentAssistant.ID
-			complete.Text = currentAssistant.Content().String()
+			if message.OutputReviewEnabled(a.messages) {
+				publicText, projectionErr := message.FinalPublicText(context.WithoutCancel(ctx), a.messages, currentAssistant.ID)
+				if projectionErr != nil {
+					complete.Error = projectionErr.Error()
+				} else {
+					complete.Text = publicText
+				}
+			} else {
+				complete.Text = currentAssistant.Content().String()
+			}
 		}
 		if retErr != nil {
 			complete.Error = retErr.Error()
@@ -916,7 +930,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	agent := fantasy.NewAgent(
 		largeModel.Model,
-		fantasy.WithSystemPrompt(systemPrompt),
+		fantasy.WithSystemPrompt(a.outputPrompt(systemPrompt)),
 		fantasy.WithTools(agentTools...),
 		fantasy.WithUserAgent(userAgent),
 	)
@@ -1623,7 +1637,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		if currentAssistant != nil {
 			complete.MessageID = currentAssistant.ID
-			complete.Text = currentAssistant.Content().String()
+			if message.OutputReviewEnabled(a.messages) {
+				publicText, projectionErr := message.FinalPublicText(context.WithoutCancel(ctx), a.messages, currentAssistant.ID)
+				if projectionErr != nil {
+					complete.Error = projectionErr.Error()
+				} else {
+					complete.Text = publicText
+				}
+			} else {
+				complete.Text = currentAssistant.Content().String()
+			}
 		}
 		if ctx.Err() != nil {
 			complete.Cancelled = true
@@ -2087,7 +2110,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
 		return fantasy.NewAgent(
 			m,
-			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
+			fantasy.WithSystemPrompt(a.outputPrompt(string(p))+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
 			fantasy.WithUserAgent(userAgent),
 		)
@@ -2165,6 +2188,12 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		title = cmp.Or(fallback, DefaultSessionName)
 	}
 
+	reviewedTitle, projectionErr := message.ReviewText(ctx, a.messages, sessionID, "title", title)
+	if projectionErr != nil {
+		slog.Warn("Session title publication failed", "error", projectionErr)
+		return
+	}
+	title = reviewedTitle
 	// Calculate usage and cost.
 	var openrouterCost *float64
 	for _, step := range resp.Steps {

@@ -41,6 +41,53 @@ type Message struct {
 	IsSummaryMessage int64          `json:"is_summary_message"`
 }
 
+type OutputReviewActivation struct {
+	ID          int64 `json:"id"`
+	ActivatedAt int64 `json:"activated_at"`
+}
+
+type OutputReviewAttempt struct {
+	ID         int64  `json:"id"`
+	MessageID  string `json:"message_id"`
+	SourceHash string `json:"source_hash"`
+	Candidate  string `json:"candidate"`
+	Issue      string `json:"issue"`
+}
+
+type OutputReviewCorrection struct {
+	MessageID string `json:"message_id"`
+	Revision  int64  `json:"revision"`
+	Receipt   string `json:"receipt"`
+}
+
+type OutputReviewEvent struct {
+	Cursor    int64  `json:"cursor"`
+	MessageID string `json:"message_id"`
+	SessionID string `json:"session_id"`
+	Revision  int64  `json:"revision"`
+	Parts     string `json:"parts"`
+	State     string `json:"state"`
+}
+
+type OutputReviewPrivate struct {
+	MessageID  string `json:"message_id"`
+	SessionID  string `json:"session_id"`
+	Revision   int64  `json:"revision"`
+	Kind       string `json:"kind"`
+	SourceHash string `json:"source_hash"`
+	Parts      string `json:"parts"`
+}
+
+type OutputReviewPublic struct {
+	MessageID  string `json:"message_id"`
+	SessionID  string `json:"session_id"`
+	Revision   int64  `json:"revision"`
+	SourceHash string `json:"source_hash"`
+	Parts      string `json:"parts"`
+	State      string `json:"state"`
+	Receipt    string `json:"receipt"`
+}
+
 type ReadFile struct {
 	SessionID string `json:"session_id"`
 	Path      string `json:"path"`

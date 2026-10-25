@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/legacy-ai/floyd/internal/agent/tools"
+	"github.com/legacy-ai/floyd/internal/app"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/db"
 	"github.com/legacy-ai/floyd/internal/event"
@@ -127,10 +128,14 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	queries := db.New(conn)
 	svc := &sessionServices{
 		sessions: session.NewService(queries, conn),
-		messages: message.NewService(queries),
+		messages: message.NewService(queries, message.WithDB(conn)),
 		cfg:      cfg,
 	}
-	return ctx, svc, func() { conn.Close() }, nil
+	if err := app.ConfigureOutputReview(ctx, svc.messages, cfg.Config()); err != nil {
+		db.Release(dataDir)
+		return nil, nil, nil, fmt.Errorf("initialize output review: %w", err)
+	}
+	return ctx, svc, func() { db.Release(dataDir) }, nil
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {
@@ -273,7 +278,7 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	msgs, err := svc.messages.List(ctx, sess.ID)
+	msgs, err := message.PublicList(ctx, svc.messages, sess.ID)
 	if err != nil {
 		return fmt.Errorf("failed to list messages: %w", err)
 	}
@@ -380,7 +385,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 
 	sess := list[0]
 
-	msgs, err := svc.messages.List(ctx, sess.ID)
+	msgs, err := message.PublicList(ctx, svc.messages, sess.ID)
 	if err != nil {
 		return fmt.Errorf("failed to list messages: %w", err)
 	}
@@ -560,12 +565,12 @@ func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), b
 	}
 
 	return &colorprofile.Writer{
-			Forward: pipe,
-			Profile: profile,
-		}, func() {
-			pipe.Close()
-			_ = cmd.Wait()
-		}, true
+		Forward: pipe,
+		Profile: profile,
+	}, func() {
+		pipe.Close()
+		_ = cmd.Wait()
+	}, true
 }
 
 type sessionShowMeta struct {

@@ -106,6 +106,9 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	messages := message.NewService(q, message.WithDB(conn))
 	files := history.NewService(q, conn)
 	cfg := store.Config()
+	if err := ConfigureOutputReview(ctx, messages, cfg); err != nil {
+		return nil, fmt.Errorf("initialize output review: %w", err)
+	}
 	skipPermissionsRequests := store.Overrides().SkipPermissionRequests
 	var allowedTools []string
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {

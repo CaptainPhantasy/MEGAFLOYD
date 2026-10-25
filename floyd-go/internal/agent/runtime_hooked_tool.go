@@ -54,8 +54,7 @@ func (h *runtimePreTool) Run(ctx context.Context, call fantasy.ToolCall) (fantas
 		response.Metadata = hookruntime.MergeMetadata("", result)
 		return response, nil
 	}
-	hookruntime.EnterTool(ctx)
-	response, err := h.AgentTool.Run(ctx, call)
+	response, err := h.runtime.ExecuteRegisteredBody(ctx, h.AgentTool.Info(), call, h.AgentTool.Run)
 	if result.Context != "" {
 		response.Content = joinHookContext(response.Content, result.Context)
 	}
