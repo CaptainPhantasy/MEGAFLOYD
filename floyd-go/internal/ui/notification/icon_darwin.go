@@ -4,8 +4,8 @@ package notification
 
 import _ "embed"
 
-// Icon is the PNG data for the Floyd icon, used for OSC 99 notifications.
-// Native macOS notifications don't support custom icons via beeep, but OSC 99 does.
+// Icon is the MegaFloyd PNG used by OSC 99 and native notifications.
+// The macOS AppleScript fallback does not support a custom icon.
 //
 //go:embed floyd-icon.png
 var Icon []byte
