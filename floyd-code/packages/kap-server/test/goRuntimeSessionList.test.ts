@@ -1,5 +1,5 @@
 import { createServer, type ServerResponse } from 'node:http';
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -8,12 +8,22 @@ import { startGoServer } from '../src/goRuntime/server';
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 
-async function fixture() {
+async function fixture(restore = false) {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'mega-sessions-')));
   cleanups.push(() => rm(dir, { recursive: true, force: true }));
   await mkdir(join(dir, 'data'));
+  const savedRoot = join(dir, 'saved-project');
+  const unavailableRoot = join(dir, 'unavailable-project');
+  await mkdir(savedRoot);
+  const preferences = JSON.stringify([
+    { root: savedRoot, name: 'Saved project', created_at: '2024-07-01T00:00:00.000Z', last_opened_at: '2024-07-03T00:00:00.000Z' },
+    { root: unavailableRoot, name: 'Unavailable project', created_at: '2024-07-01T00:00:00.000Z', last_opened_at: '2024-07-02T00:00:00.000Z' },
+    { root: join(dir, 'removed-project'), name: 'Removed project', created_at: '2024-07-01T00:00:00.000Z', last_opened_at: '2024-07-02T00:00:00.000Z', hidden: true },
+  ]);
+  if (restore) await writeFile(join(dir, 'go-workspaces.json'), preferences);
   const socketPath = join(dir, 'go.sock');
   const workspace = { id: 'workspace-go', path: dir, data_dir: join(dir, 'data') };
+  const nativeWorkspaces = [workspace];
   const info = { is_ready: true, is_busy: false, model_cfg: { provider: 'example', model: 'example-model' }, model: { id: 'example-model', name: 'Example Model', context_window: 4096 } };
   const makeSession = (id: string, parent: string, archived = false) => ({ id, title: id, parent_session_id: parent, is_branch: Boolean(parent), archived, archived_at: archived ? 1720000002 : 0, metadata: {}, created_at: 1720000000, updated_at: 1720000001, is_busy: false, message_count: 0, prompt_tokens: 0, completion_tokens: 0, cost: 0 });
   const sessions = [makeSession('root-session', ''), makeSession('fork-session', 'root-session'), makeSession('branch-session', 'root-session'), makeSession('archived-fork', 'root-session', true)];
@@ -31,14 +41,21 @@ async function fixture() {
     if (path === '/v1/health') return send({ status: 'ok' });
     if (path === '/v1/version') return send({ version: 'canonical-test', build_id: 'session-contracts' });
     if (path === '/v1/handoff/web') return send({ registered: true });
-    if (path === '/v1/workspaces') return send(req.method === 'POST' ? workspace : [workspace]);
+    if (path === '/v1/workspaces' && req.method === 'POST') {
+      const found = nativeWorkspaces.find((item) => item.path === body.path);
+      if (found) return send(found);
+      const opened = { id: 'saved-workspace', path: body.path, data_dir: join(dir, 'saved-private-data') };
+      nativeWorkspaces.push(opened);
+      return send(opened);
+    }
+    if (path === '/v1/workspaces') return send(nativeWorkspaces);
     if (path.endsWith('/agent') && req.method === 'GET') return send(info);
     if (path.endsWith('/interactions')) return send({ permissions: [], questions: [] });
     if (path.endsWith('/permissions/mode')) return send({ mode: 'manual' });
     if (path.endsWith('/config/plugin-reload')) return send({});
     if (path.endsWith('/config')) return send(config);
     if (path.endsWith('/mcp/states')) return send({});
-    if (path.endsWith('/sessions') && req.method === 'GET') return send(sessions);
+    if (path.endsWith('/sessions') && req.method === 'GET') return send(path.includes('/saved-workspace/') ? [makeSession('saved-session', '')] : sessions);
     const archive = /\/sessions\/([^/]+)\/archive$/.exec(path);
     if (archive && req.method === 'POST') { const session = sessions.find((item) => item.id === archive[1]); if (session) { session.archived = body.archived; session.archived_at = body.archived ? 1720000002 : 0; return send(session); } }
     const sessionMatch = /\/sessions\/([^/]+)$/.exec(path);
@@ -50,7 +67,7 @@ async function fixture() {
   cleanups.push(async () => { for (const stream of streams) stream.end(); await new Promise<void>((resolve) => go.close(() => resolve())); });
   const web = await startGoServer({ host: '127.0.0.1', port: 0, homeDir: dir, disableAuth: true, hostIdentity: { name: 'example', version: 'test' } as never, env: { MEGAFLOYD_GO_HOST: `unix://${socketPath}`, MEGAFLOYD_GO_CWD: dir, MEGAFLOYD_GO_DATA_DIR: join(dir, 'data') } });
   cleanups.push(() => web.close());
-  return { web, sessions, requests };
+  return { web, sessions, requests, dir, savedRoot, unavailableRoot, preferences };
 }
 
 test('canonical session lists retain native forks and branches in flat grouped and archived views', async () => {
@@ -97,4 +114,32 @@ test('canonical batch session actions accept the single-colon browser URLs', asy
   expect(requests.some((request) => request.method === 'DELETE' && request.path === '/v1/workspaces/workspace-go/sessions/branch-session')).toBe(true);
   expect(requests.some((request) => request.method === 'POST' && request.path.endsWith('/agent'))).toBe(false);
   expect((await web.app.inject({ method: 'POST', url: '/api/v2/sessions::archive', payload: { ids } })).statusCode).toBe(404);
+});
+
+
+test.each(['v1', 'v2'])('saved projects remain listed after restart and load history on %s selection', async (version) => {
+  const { web, requests, dir, savedRoot, unavailableRoot, preferences } = await fixture(true);
+  const read = async (url: string) => {
+    const response = await web.app.inject({ method: 'GET', url });
+    expect(response.statusCode, response.body).toBe(200);
+    return response.json().data;
+  };
+  const projects = (await read('/api/v1/workspaces')).items;
+  expect(projects).toHaveLength(3);
+  expect(projects.map((item: { root: string }) => item.root).sort()).toEqual([dir, savedRoot, unavailableRoot].sort());
+  const saved = projects.find((item: { root: string }) => item.root === savedRoot);
+  expect(saved).toMatchObject({ name: 'Saved project', session_count: null });
+  expect(projects.find((item: { root: string }) => item.root === unavailableRoot)).toMatchObject({ name: 'Unavailable project', session_count: null });
+  expect(requests.filter((item) => item.method === 'POST' && item.path === '/v1/workspaces')).toHaveLength(1);
+  expect(await readFile(join(dir, 'go-workspaces.json'), 'utf8')).toBe(preferences);
+  const history = await read(version === 'v2' ? `/api/v2/sessions?workspace.id=${saved.id}` : `/api/v1/sessions?workspace_id=${saved.id}`);
+  expect(history.items.map((item: { id: string }) => item.id)).toEqual(['saved-session']);
+  const nativeOpens = requests.filter((item) => item.method === 'POST' && item.path === '/v1/workspaces');
+  expect(nativeOpens).toHaveLength(2);
+  expect(nativeOpens[1]!.body).toMatchObject({ path: savedRoot });
+  expect(nativeOpens[1]!.body).not.toHaveProperty('data_dir');
+  expect((await read(`/api/v1/sessions?workspace_id=${saved.id}`)).items.map((item: { id: string }) => item.id)).toEqual(['saved-session']);
+  expect((await read('/api/v1/workspaces')).items.find((item: { root: string }) => item.root === savedRoot)).toMatchObject({ session_count: 1 });
+  expect(requests.some((item) => item.method === 'POST' && item.path.endsWith('/agent'))).toBe(false);
+  expect(await readFile(join(dir, 'go-workspaces.json'), 'utf8')).toBe(preferences);
 });

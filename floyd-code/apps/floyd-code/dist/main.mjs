@@ -352449,7 +352449,7 @@ var init_workspace$1 = __esmMin((() => {
 		name: string().min(1).max(100),
 		created_at: isoDateTimeSchema$1,
 		last_opened_at: isoDateTimeSchema$1,
-		session_count: number$1().int().nonnegative()
+		session_count: number$1().int().nonnegative().nullable()
 	});
 	workspaceCreateSchema = object$1({
 		root: string().min(1),
@@ -352918,7 +352918,7 @@ function registerGoRoutes(app, runtime, views, options) {
 			const selected = await selectRuntime(runtime, views, req, options);
 			const managed = await options.mcp.route(selected.runtime, decodeURIComponent(url.pathname.slice(7)), req.method, object(req.body), url.searchParams);
 			if (managed) return reply.send(envelope(managed.data, req.id));
-			if (req.method === "GET" && url.pathname === "/api/v2/sessions") return reply.send(envelope(await listGoSessionsV2(runtime, views, url.searchParams, await options.workspaces.all()), req.id));
+			if (req.method === "GET" && url.pathname === "/api/v2/sessions") return reply.send(envelope(await listGoSessionsV2(runtime, views, url.searchParams, await options.workspaces.all(url.searchParams.getAll("workspace.id"))), req.id));
 			const batch = /^\/api\/v2\/sessions:(archive|restore|delete)$/.exec(url.pathname);
 			if (req.method === "POST" && batch) return reply.send(envelope(await batchSessions(async (id) => (await options.workspaces.session(id)).runtime, batch[1], object(req.body)), req.id));
 			throw new GoRequestError(404, `No route for ${req.method} ${url.pathname}`);
@@ -353044,11 +353044,7 @@ async function dispatch$1(runtime, views, req, options) {
 			model: (await runtime.catalog()).models.find((item) => item.model === model)
 		};
 	}
-	if (get && path === "/workspaces") {
-		const items = [];
-		for (const entry of await options.workspaces.all()) items.push(await options.workspaces.wire(entry));
-		return { items };
-	}
+	if (get && path === "/workspaces") return { items: await options.workspaces.list() };
 	if (/^\/workspaces\/[^/]+$/.test(path)) {
 		const id = path.slice(12);
 		if (get) return options.workspaces.wire(await options.workspaces.workspace(id));
@@ -355988,11 +355984,27 @@ var init_workspaces$1 = __esmMin((() => {
 				this.flights.delete(key);
 			}
 		}
-		async all() {
+		async all(workspaceIds = []) {
+			if (workspaceIds.length) return Promise.all([...new Set(workspaceIds)].map((id) => this.workspace(id)));
 			const running = await this.primary.client.json("GET", "/v1/workspaces");
 			const items = [];
 			for (const item of running) if (!this.record(item.path).hidden) items.push(await this.root(item.path));
 			return items;
+		}
+		async list() {
+			await this.all();
+			return Promise.all([...this.records.values()].filter((record) => !record.hidden).map(async (record) => {
+				const entry = this.attached.get(workspaceKey(record.root));
+				if (entry) return this.wire(entry);
+				return {
+					id: workspaceKey(record.root),
+					root: record.root,
+					name: record.name,
+					created_at: record.created_at,
+					last_opened_at: record.last_opened_at,
+					session_count: null
+				};
+			}));
 		}
 		async recentRoots() {
 			for (const item of await this.primary.client.json("GET", "/v1/workspaces")) this.record(item.path);
@@ -364986,7 +364998,7 @@ var init_workspace = __esmMin((() => {
 		name: string().min(1).max(100),
 		created_at: isoDateTimeSchema,
 		last_opened_at: isoDateTimeSchema,
-		session_count: number$1().int().nonnegative()
+		session_count: number$1().int().nonnegative().nullable()
 	});
 	workspaceMessageSchema = object$1({
 		type: literal("workspace"),

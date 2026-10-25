@@ -84,11 +84,21 @@ export class GoWorkspaces extends EventEmitter {
     try { return await pending; } finally { this.flights.delete(key); }
   }
 
-  async all(): Promise<GoWorkspaceView[]> {
+  async all(workspaceIds: string[] = []): Promise<GoWorkspaceView[]> {
+    if (workspaceIds.length) return Promise.all([...new Set(workspaceIds)].map((id) => this.workspace(id)));
     const running = await this.primary.client.json<GoWorkspace[]>('GET', '/v1/workspaces');
     const items: GoWorkspaceView[] = [];
     for (const item of running) if (!this.record(item.path).hidden) items.push(await this.root(item.path));
     return items;
+  }
+
+  async list() {
+    await this.all();
+    return Promise.all([...this.records.values()].filter((record) => !record.hidden).map(async (record) => {
+      const entry = this.attached.get(workspaceKey(record.root));
+      if (entry) return this.wire(entry);
+      return { id: workspaceKey(record.root), root: record.root, name: record.name, created_at: record.created_at, last_opened_at: record.last_opened_at, session_count: null };
+    }));
   }
 
   async recentRoots(): Promise<string[]> {

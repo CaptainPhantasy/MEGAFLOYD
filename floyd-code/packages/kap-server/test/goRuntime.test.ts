@@ -329,7 +329,7 @@ test('canonical web chat continues the Go session, preserves tools, and recovers
   expect(workspaceAttachments).toBe(beforeBrowseAttachments);
   expect(JSON.stringify(config)).toBe(handoffConfig);
 
-  expect((await api('/workspaces')).items).toEqual([expect.objectContaining({ root: dir, name: 'Canonical workspace', session_count: 1 })]);
+  expect((await api('/workspaces')).items).toEqual([expect.objectContaining({ root: dir, name: 'Canonical workspace', session_count: 1 }), expect.objectContaining({ root: historicalRoot, name: 'Historical workspace', session_count: null })]);
   expect(workspaceAttachments).toBe(1);
   expect(await readFile(join(dir, 'workspaces.json'), 'utf8')).toBe(workspacePreferences);
   await expect(readFile(join(dir, 'go-workspaces.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
