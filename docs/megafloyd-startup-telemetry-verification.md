@@ -1,5 +1,7 @@
 MegaFloyd login startup is enabled for the current Mac account. Its actual launchd run passed at 23:48:57 UTC on 24 October 2026: all six configured mounts were ready, the job exited 0, and the installed `234343` desktop remained the same process (`89919`) with no duplicate instance. The scheduled telemetry job also passed its actual launchd execution.
 
+The amended `235658` release was checked read-only at 23:59:20 UTC on 24 October 2026. Its packaged startup helper matches the already installed internal helper exactly (`dae4ebd6…`); the current account’s mount configuration and LaunchAgent plist are unchanged. The same job still reports one run and last exit code 0. The actual six-mount/bootstrap proof remains the `234343` execution above; startup was not bootstrapped or run again for the amendment.
+
 At 23:10:30 UTC on 24 October 2026, one authorized telemetry tick finished with exit code 0: it collected 1,174 events, including 1,172 new events, and shipped 1,172 events in three traces to the existing local Jaeger service. No model generation call was made.
 
 The earlier scheduled attempt at 23:03:22 failed with exit code 126 because macOS denied the shell access to the external-drive launcher script. A single launchd probe then executed the installed native binary with `telemetry collect --help` and returned exit code 0. The tick script now uses this stable native path:
