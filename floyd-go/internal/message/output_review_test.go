@@ -269,7 +269,7 @@ func TestOutputReviewExactSecretsStayPrivateAcrossPublicBoundaries(t *testing.T)
 		ordered, _, _, _ := reviewedSQL(t, ReviewConfig{SecretValues: secrets})
 		require.Equal(t, "[redacted]a", ordered.(*service).review.redactText("ababa"))
 	}
-	secret := "fixture-key-4fed9a1b"
+	secret := "test-only-secret"
 	svc, _, sid, _ := reviewedSQL(t, ReviewConfig{RequireFinalReview: true, SecretValues: []string{"", secret}})
 	stream := svc.Subscribe(t.Context())
 	user, err := svc.Create(t.Context(), sid, CreateMessageParams{Role: User, Parts: []ContentPart{TextContent{Text: "Credential " + secret}}})
