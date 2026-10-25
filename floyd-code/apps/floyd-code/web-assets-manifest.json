@@ -267,8 +267,8 @@
     "assets/index-B3oDj0jz.js": "c8cda94b8656b2f36e8323c9c7ebc59e5d8a58e0b304ddc3e1bdef2d9237f281",
     "assets/index-BaplSJn2.js": "abac5e09e1466c4ffaced3251a9b04626531689936d79a3a38c266df53cb1694",
     "assets/index-BxYISzcB.css": "3a988254c012a05408ff21a6b8554978b56fca9539551ee56e83b24b862fd4e5",
-    "assets/index-DusVyqlT.js": "c0ea1561ba24eac91ab6e6671aca74941db6e3e3e8ad074814e9d9bcec69a31e",
-    "assets/index-MEGAFloyd1.js": "441e87d4ac570788c4e1b775932141fe879018438c2172aec83a528d1e5f036c",
+    "assets/index-DusVyqlT.js": "10d87f11b9fb607ff72ccf75fffdaf66f9f8a59b72a94f3cd2afb1ddd2b64301",
+    "assets/index-MEGAFloyd1.js": "47a59e27063efbd4f36176e156fc3120e63954d5e83fc0a2cf8568f8a070355a",
     "assets/index10-c69OEP3n.js": "49652b7e681f48e4c561884ac0f29107bf54b46dfe5aa96aa72d18825eeb0e22",
     "assets/index11-Ckocwove.js": "727c928a743cebb0d737f64d21469a7c6318fb35ea1f4f0f4c06ac4ee78f406c",
     "assets/index5-CvyQMVP4.js": "82d77231da1d77188aeb11fb6a76b1dc8f9856a539abc47d2c39c1c5e5f608f4",
@@ -556,13 +556,18 @@
     "expressions/warning-blink.webp": "03703d5241b0e81a664224d30c0f87aa8ec8206af8f63552f34465f8df9cfa15",
     "expressions/warning.webp": "25af47893d0f5aac2b8e9a304737e61e13c56aabd878d0b2b346420c95e54933",
     "face.webp": "ad6ce06366204423b0bf37aad8a8b4992ac1bd0f7c94d5b7fff85c14026d86f6",
-    "favicon.ico": "49aa6d1d1cbdbe92d2eafa165bc2d81a71d613608c55348b338c43e86cc69b9c",
-    "index.html": "893416f53aa7917714234a49058610b40e2927c6dee250d18c1993d57a261fc7",
+    "favicon.ico": "be47db7a009642042ba09e6426b8bf293ef3557507b2c94844664149b8ec76ea",
+    "index.html": "4c0ae8eeebc832de60a6a9422ebe67a1521ecfd79fdc7d91aa1926843ab25698",
+    "manifest.json": "ba050eac468d22844991f29ebfaa1ba3fa647d33a9c6c73db875b9f6422c1c24",
     "mascot-cabinet.webp": "444c3c2587b24d64650a157b5349486c5b2bd82f42a2c2a801a7edac1a6a919a",
     "mascot-sprite.webp": "14ad2511bcd06747af1770410f2a11e88dd99d81da61c8a7b17bdb092f36f6b9",
     "mascot.css": "4d41188887e268ab6126c2389805dff4affb5ac81eb2b51e85e34fc891204748",
     "mascot.js": "ab8f952b95a1e93b46b25bd71e36321547656e71efe155ce37e77321810a2093",
-    "wordmark.webp": "fad8cc7faee7f2074fabc564d683d366770e916761ffc7b7d943e3a5e8465a31",
-    "wordmark.svg": "c710139cb65c42261684f43f7c1125b2de37ddbee9df0ab5bcf0482c092cc590"
+    "megafloyd-icon-180.png": "ed0dc20c17950ccfa1ec9c370c608550a82ddf04547cdb5b5a207032121119f5",
+    "megafloyd-icon-192.png": "7c9b5a4fa2745b7fcf1d8a54633c5f4dc6e047351d5814fc17835028c33f8d99",
+    "megafloyd-icon-32.png": "5349784eb7272a6fd058323e4b92c8f0ae82d9cb0a8dcac980a97f0d728954ff",
+    "megafloyd-icon-512.png": "9de472e972de5ba1a972177e0d19ea71546a894034e34e1fd92b87e9a9d33d0b",
+    "wordmark.svg": "c710139cb65c42261684f43f7c1125b2de37ddbee9df0ab5bcf0482c092cc590",
+    "wordmark.webp": "fad8cc7faee7f2074fabc564d683d366770e916761ffc7b7d943e3a5e8465a31"
   }
 }

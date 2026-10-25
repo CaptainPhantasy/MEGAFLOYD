@@ -23,7 +23,7 @@ const config = withMermaid(defineConfig({
   description: 'Floyd Code CLI Documentation',
 
   head: [
-    ['link', { rel: 'icon', type: 'image/x-icon', href: `${base}favicon.ico` }],
+    ['link', { rel: 'icon', type: 'image/x-icon', href: `${base}favicon.ico?v=d2e6da2d` }],
     ['meta', { name: 'theme-color', content: '#0a7aff' }],
   ],
 
