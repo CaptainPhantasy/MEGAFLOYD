@@ -113,19 +113,17 @@ func EnableOutputReview(ctx context.Context, svc Service, cfg ReviewConfig) erro
 		return err
 	}
 	defer tx.Rollback()
-	var active int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM output_review_activation WHERE id=1`).Scan(&active); err != nil {
+	qtx := db.New(tx)
+	active, err := qtx.CountOutputReviewActivations(ctx)
+	if err != nil {
 		return err
 	}
 	if active == 0 {
-		_, err = tx.ExecContext(ctx, `INSERT INTO output_review_public(message_id,session_id,revision,source_hash,parts,state,receipt)
- SELECT id,session_id,0,'',parts,'legacy_visible','{"reviewer":"published-before-activation"}' FROM messages
- WHERE role='assistant' AND NOT EXISTS (SELECT 1 FROM output_review_private p WHERE p.message_id=messages.id)
- ON CONFLICT(message_id) DO NOTHING`)
+		err = qtx.SeedLegacyOutputReviewPublic(ctx)
 		if err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO output_review_activation(id) VALUES(1)`); err != nil {
+		if err = qtx.CreateOutputReviewActivation(ctx); err != nil {
 			return err
 		}
 	}
@@ -242,23 +240,23 @@ func (r *outputReview) record(ctx context.Context, msg Message, kind string, upd
 		return err
 	}
 	defer tx.Rollback()
-	var revision int64
-	var priorHash string
-	err = tx.QueryRowContext(ctx, `SELECT revision,source_hash FROM output_review_private WHERE message_id=? ORDER BY revision DESC LIMIT 1`, msg.ID).Scan(&revision, &priorHash)
+	qtx := db.New(tx)
+	prior, err := qtx.GetLatestOutputReviewPrivate(ctx, msg.ID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
+	revision := prior.Revision
 	hash := reviewHash(string(parts))
-	if priorHash == hash {
+	if prior.SourceHash == hash {
 		return tx.Commit()
 	}
-	var correction int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM output_review_corrections WHERE message_id=? AND revision=?`, msg.ID, revision).Scan(&correction); err != nil {
+	correction, err := qtx.CountOutputReviewCorrections(ctx, db.CountOutputReviewCorrectionsParams{MessageID: msg.ID, Revision: revision})
+	if err != nil {
 		return err
 	}
 	if correction > 0 {
-		var seen int
-		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM output_review_private WHERE message_id=? AND source_hash=?`, msg.ID, hash).Scan(&seen); err != nil {
+		seen, err := qtx.CountOutputReviewSource(ctx, db.CountOutputReviewSourceParams{MessageID: msg.ID, SourceHash: hash})
+		if err != nil {
 			return err
 		}
 		if seen > 0 {
@@ -266,20 +264,19 @@ func (r *outputReview) record(ctx context.Context, msg Message, kind string, upd
 		}
 	}
 	revision++
-	if _, err = tx.ExecContext(ctx, `INSERT INTO output_review_private(message_id,session_id,revision,kind,source_hash,parts) VALUES(?,?,?,?,?,?)`, msg.ID, msg.SessionID, revision, kind, hash, string(parts)); err != nil {
+	if err = qtx.CreateOutputReviewPrivate(ctx, db.CreateOutputReviewPrivateParams{MessageID: msg.ID, SessionID: msg.SessionID, Revision: revision, Kind: kind, SourceHash: hash, Parts: string(parts)}); err != nil {
 		return err
 	}
-	var state string
-	err = tx.QueryRowContext(ctx, `SELECT state FROM output_review_public WHERE message_id=?`, msg.ID).Scan(&state)
+	public, err := qtx.GetOutputReviewPublic(ctx, msg.ID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if update && state != "cancelled" {
+	if update && public.State != "cancelled" {
 		finish := sql.NullInt64{}
 		if f := msg.FinishPart(); f != nil {
 			finish = sql.NullInt64{Int64: f.Time, Valid: true}
 		}
-		if err = db.New(tx).UpdateMessage(ctx, db.UpdateMessageParams{ID: msg.ID, Parts: string(parts), FinishedAt: finish}); err != nil {
+		if err = qtx.UpdateMessage(ctx, db.UpdateMessageParams{ID: msg.ID, Parts: string(parts), FinishedAt: finish}); err != nil {
 			return err
 		}
 	}
@@ -302,10 +299,8 @@ func publicSkeleton(msg Message) Message {
 }
 
 func (r *outputReview) snapshot(ctx context.Context, msg Message) (int64, string, []byte, error) {
-	var rev int64
-	var hash, parts string
-	err := r.conn.QueryRowContext(ctx, `SELECT revision,source_hash,parts FROM output_review_private WHERE message_id=? ORDER BY revision DESC LIMIT 1`, msg.ID).Scan(&rev, &hash, &parts)
-	return rev, hash, []byte(parts), err
+	row, err := db.New(r.conn).GetLatestOutputReviewPrivate(ctx, msg.ID)
+	return row.Revision, row.SourceHash, []byte(row.Parts), err
 }
 
 // evaluate runs outside the serialization lock. The commit checks the same
@@ -320,21 +315,17 @@ func (r *outputReview) evaluate(ctx context.Context, msg Message, kind string) (
 		return Message{}, false, err
 	}
 	msg.Parts = parts
-	var oldParts, oldState string
-	oldErr := r.conn.QueryRowContext(ctx, `SELECT parts,state FROM output_review_public WHERE message_id=?`, msg.ID).Scan(&oldParts, &oldState)
+	q := db.New(r.conn)
+	old, oldErr := q.GetOutputReviewPublic(ctx, msg.ID)
+	oldParts, oldState := old.Parts, old.State
 	if oldErr != nil && !errors.Is(oldErr, sql.ErrNoRows) {
 		return Message{}, false, oldErr
 	}
 	if oldState == "cancelled" {
 		return Message{}, false, nil
 	}
-	var oldRevision int64
-	var oldHash string
 	if oldErr == nil {
-		if err = r.conn.QueryRowContext(ctx, `SELECT revision,source_hash FROM output_review_public WHERE message_id=?`, msg.ID).Scan(&oldRevision, &oldHash); err != nil {
-			return Message{}, false, err
-		}
-		if oldRevision == rev && oldHash == hash && oldState != "recovery" {
+		if old.Revision == rev && old.SourceHash == hash && oldState != "recovery" {
 			return Message{}, false, nil
 		}
 	}
@@ -368,8 +359,7 @@ func (r *outputReview) evaluate(ctx context.Context, msg Message, kind string) (
 			if complete && coherent == text {
 				state = "reviewed"
 			}
-			var corrected string
-			correctionErr := r.conn.QueryRowContext(ctx, `SELECT receipt FROM output_review_corrections WHERE message_id=? AND revision=?`, msg.ID, rev).Scan(&corrected)
+			corrected, correctionErr := q.GetOutputReviewCorrection(ctx, db.GetOutputReviewCorrectionParams{MessageID: msg.ID, Revision: rev})
 			if correctionErr == nil {
 				var result ReviewResponse
 				if err = json.Unmarshal([]byte(corrected), &result); err != nil {
@@ -384,6 +374,9 @@ func (r *outputReview) evaluate(ctx context.Context, msg Message, kind string) (
 				req := ReviewRequest{MessageID: msg.ID, SessionID: msg.SessionID, Revision: rev, Kind: kind, Text: redacted, SourceSHA256: reviewHash(coherent), Complete: complete, Protected: exactArtifacts(redacted)}
 				result, reviewErr := r.command(ctx, req)
 				if reviewErr != nil {
+					if errors.Is(reviewErr, context.Canceled) || errors.Is(reviewErr, context.DeadlineExceeded) {
+						return Message{}, false, reviewErr
+					}
 					state = "recovery"
 					receipt["error"] = reviewErr.Error()
 					candidate = ""
@@ -451,33 +444,32 @@ func (r *outputReview) evaluate(ctx context.Context, msg Message, kind string) (
 		return Message{}, false, err
 	}
 	defer tx.Rollback()
-	var currentRev int64
-	if err = tx.QueryRowContext(ctx, `SELECT MAX(revision) FROM output_review_private WHERE message_id=?`, msg.ID).Scan(&currentRev); err != nil {
-		return Message{}, false, err
-	}
-	if currentRev != rev {
-		return Message{}, false, nil
-	}
-	var currentState string
-	e := tx.QueryRowContext(ctx, `SELECT state FROM output_review_public WHERE message_id=?`, msg.ID).Scan(&currentState)
-	if e != nil && !errors.Is(e, sql.ErrNoRows) {
-		return Message{}, false, e
-	}
-	if currentState == "cancelled" {
-		return Message{}, false, nil
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO output_review_public(message_id,session_id,revision,source_hash,parts,state,receipt) VALUES(?,?,?,?,?,?,?) ON CONFLICT(message_id) DO UPDATE SET revision=excluded.revision,source_hash=excluded.source_hash,parts=excluded.parts,state=excluded.state,receipt=excluded.receipt`, msg.ID, msg.SessionID, rev, hash, string(encoded), state, string(receiptJSON))
+	qtx := db.New(tx)
+	current, err := qtx.GetLatestOutputReviewPrivate(ctx, msg.ID)
 	if err != nil {
 		return Message{}, false, err
 	}
-	var committedParts, committedState string
-	priorErr := tx.QueryRowContext(ctx, `SELECT parts,state FROM output_review_events WHERE message_id=? ORDER BY cursor DESC LIMIT 1`, msg.ID).Scan(&committedParts, &committedState)
+	if current.Revision != rev {
+		return Message{}, false, nil
+	}
+	currentPublic, e := qtx.GetOutputReviewPublic(ctx, msg.ID)
+	if e != nil && !errors.Is(e, sql.ErrNoRows) {
+		return Message{}, false, e
+	}
+	if currentPublic.State == "cancelled" {
+		return Message{}, false, nil
+	}
+	err = qtx.UpsertOutputReviewPublic(ctx, db.UpsertOutputReviewPublicParams{MessageID: msg.ID, SessionID: msg.SessionID, Revision: rev, SourceHash: hash, Parts: string(encoded), State: state, Receipt: string(receiptJSON)})
+	if err != nil {
+		return Message{}, false, err
+	}
+	committed, priorErr := qtx.GetLatestOutputReviewEvent(ctx, msg.ID)
 	if priorErr != nil && !errors.Is(priorErr, sql.ErrNoRows) {
 		return Message{}, false, priorErr
 	}
-	changed := committedParts != string(encoded) || committedState != state
+	changed := committed.Parts != string(encoded) || committed.State != state
 	if changed {
-		_, err = tx.ExecContext(ctx, `INSERT INTO output_review_events(message_id,session_id,revision,parts,state) VALUES(?,?,?,?,?)`, msg.ID, msg.SessionID, rev, string(encoded), state)
+		err = qtx.CreateOutputReviewEvent(ctx, db.CreateOutputReviewEventParams{MessageID: msg.ID, SessionID: msg.SessionID, Revision: rev, Parts: string(encoded), State: state})
 		if err != nil {
 			return Message{}, false, err
 		}
@@ -547,6 +539,9 @@ func (r *outputReview) command(ctx context.Context, request ReviewRequest) (Revi
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	if err = cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ReviewResponse{}, ctx.Err()
+		}
 		return ReviewResponse{}, fmt.Errorf("review adapter: %w", err)
 	}
 	var response ReviewResponse
@@ -611,15 +606,14 @@ func PublicGet(ctx context.Context, svc Service, id string) (Message, error) {
 	if msg.Role != Assistant {
 		return s.review.redactMessage(msg)
 	}
-	var encoded string
-	err = s.db.QueryRowContext(ctx, `SELECT parts FROM output_review_public WHERE message_id=?`, id).Scan(&encoded)
+	projection, err := db.New(s.db).GetOutputReviewPublic(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return s.review.redactMessage(publicSkeleton(msg))
 	}
 	if err != nil {
 		return Message{}, err
 	}
-	msg.Parts, err = unmarshalParts([]byte(encoded))
+	msg.Parts, err = unmarshalParts([]byte(projection.Parts))
 	if err != nil {
 		return Message{}, err
 	}
@@ -646,12 +640,12 @@ func OutputReviewStatus(ctx context.Context, svc Service, id string) (ReviewStat
 		return ReviewStatus{}, errors.New("output review not enabled")
 	}
 	result := ReviewStatus{MessageID: id}
-	var receipt string
-	err := s.db.QueryRowContext(ctx, `SELECT revision,state,source_hash,receipt FROM output_review_public WHERE message_id=?`, id).Scan(&result.Revision, &result.State, &result.SourceSHA256, &receipt)
+	row, err := db.New(s.db).GetOutputReviewPublic(ctx, id)
 	if err != nil {
 		return result, err
 	}
-	result.Receipt, err = s.review.redactJSON([]byte(receipt))
+	result.Revision, result.State, result.SourceSHA256 = row.Revision, row.State, row.SourceHash
+	result.Receipt, err = s.review.redactJSON([]byte(row.Receipt))
 	return result, err
 }
 
@@ -667,7 +661,7 @@ func FinalPublicText(ctx context.Context, svc Service, id string) (string, error
 		if e != nil {
 			return "", e
 		}
-		if status.State != "reviewed" && status.State != "legacy_visible" {
+		if status.State != "reviewed" && status.State != "legacy_visible" && status.State != "imported_visible" {
 			return "", ErrOutputReviewPending
 		}
 	}
@@ -707,20 +701,15 @@ func ReplayPublic(ctx context.Context, svc Service, sessionID string, after int6
 	if !ok || s.review == nil {
 		return nil, errors.New("output review not enabled")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT cursor,message_id,revision,parts,state FROM output_review_events WHERE session_id=? AND cursor>? ORDER BY cursor`, sessionID, after)
+	rows, err := db.New(s.db).ListOutputReviewEvents(ctx, db.ListOutputReviewEventsParams{SessionID: sessionID, Cursor: after})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var events []ReviewEvent
-	for rows.Next() {
-		var event ReviewEvent
-		var parts string
-		if err = rows.Scan(&event.Cursor, &event.MessageID, &event.Revision, &parts, &event.State); err != nil {
-			return nil, err
-		}
+	for _, row := range rows {
+		event := ReviewEvent{Cursor: row.Cursor, MessageID: row.MessageID, Revision: row.Revision, State: row.State}
 		event.Message = Message{ID: event.MessageID, SessionID: sessionID, Role: Assistant}
-		event.Message.Parts, err = unmarshalParts([]byte(parts))
+		event.Message.Parts, err = unmarshalParts([]byte(row.Parts))
 		if err != nil {
 			return nil, err
 		}
@@ -730,7 +719,7 @@ func ReplayPublic(ctx context.Context, svc Service, sessionID string, after int6
 		}
 		events = append(events, event)
 	}
-	return events, rows.Err()
+	return events, nil
 }
 
 // ExportPublic serializes only the same reviewed view clients receive.
@@ -821,8 +810,7 @@ func ReviewCandidate(ctx context.Context, svc Service, id string, response Revie
 	if err != nil {
 		return err
 	}
-	var priorReceipt string
-	e := s.db.QueryRowContext(ctx, `SELECT receipt FROM output_review_corrections WHERE message_id=? ORDER BY revision DESC LIMIT 1`, id).Scan(&priorReceipt)
+	priorReceipt, e := db.New(s.db).GetLatestOutputReviewCorrection(ctx, id)
 	if e == nil && priorReceipt == string(encodedReceipt) {
 		return nil
 	}
@@ -864,22 +852,23 @@ func ReviewCandidate(ctx context.Context, svc Service, id string, response Revie
 		return err
 	}
 	defer tx.Rollback()
-	var current int64
-	var state string
-	if err = tx.QueryRowContext(ctx, `SELECT MAX(revision) FROM output_review_private WHERE message_id=?`, id).Scan(&current); err == nil {
-		e = tx.QueryRowContext(ctx, `SELECT state FROM output_review_public WHERE message_id=?`, id).Scan(&state)
+	qtx := db.New(tx)
+	current, err := qtx.GetLatestOutputReviewPrivate(ctx, id)
+	var public db.OutputReviewPublic
+	if err == nil {
+		public, e = qtx.GetOutputReviewPublic(ctx, id)
 		if e != nil && !errors.Is(e, sql.ErrNoRows) {
 			err = e
 		}
 	}
-	if err == nil && (current != request.Revision || state == "cancelled") {
+	if err == nil && (current.Revision != request.Revision || public.State == "cancelled") {
 		err = errors.New("review candidate is stale or cancelled")
 	}
 	if err == nil {
-		_, err = tx.ExecContext(ctx, `INSERT INTO output_review_private(message_id,session_id,revision,kind,source_hash,parts) VALUES(?,?,?,?,?,?)`, id, msg.SessionID, current+1, privateKind(msg), reviewHash(string(raw)), string(raw))
+		err = qtx.CreateOutputReviewPrivate(ctx, db.CreateOutputReviewPrivateParams{MessageID: id, SessionID: msg.SessionID, Revision: current.Revision + 1, Kind: current.Kind, SourceHash: reviewHash(string(raw)), Parts: string(raw)})
 	}
 	if err == nil {
-		_, err = tx.ExecContext(ctx, `INSERT INTO output_review_corrections(message_id,revision,receipt) VALUES(?,?,?)`, id, current+1, string(encodedReceipt))
+		err = qtx.CreateOutputReviewCorrection(ctx, db.CreateOutputReviewCorrectionParams{MessageID: id, Revision: current.Revision + 1, Receipt: string(encodedReceipt)})
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -904,8 +893,7 @@ func RecordReviewAttempt(ctx context.Context, svc Service, id, source, candidate
 	if !ok || s.review == nil {
 		return errors.New("output review not enabled")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO output_review_attempts(message_id,source_hash,candidate,issue) VALUES(?,?,?,?)`, id, source, candidate, issue)
-	return err
+	return db.New(s.db).CreateOutputReviewAttempt(ctx, db.CreateOutputReviewAttemptParams{MessageID: id, SourceHash: source, Candidate: candidate, Issue: issue})
 }
 
 // BeginStandaloneReview journals generated suggestions/titles without changing
@@ -932,13 +920,11 @@ func reviewStoredMessage(ctx context.Context, svc Service, id string) (Message, 
 	if !ok || s.review == nil {
 		return msg, err
 	}
-	var parts, kind string
-	msg = Message{ID: id, Role: Assistant}
-	err = s.db.QueryRowContext(ctx, `SELECT session_id,kind,parts FROM output_review_private WHERE message_id=? ORDER BY revision DESC LIMIT 1`, id).Scan(&msg.SessionID, &kind, &parts)
+	row, err := db.New(s.db).GetLatestOutputReviewPrivate(ctx, id)
 	if err != nil {
 		return Message{}, err
 	}
-	msg.IsSummaryMessage = kind == "summary"
-	msg.Parts, err = unmarshalParts([]byte(parts))
+	msg = Message{ID: id, SessionID: row.SessionID, Role: Assistant, IsSummaryMessage: row.Kind == "summary"}
+	msg.Parts, err = unmarshalParts([]byte(row.Parts))
 	return msg, err
 }

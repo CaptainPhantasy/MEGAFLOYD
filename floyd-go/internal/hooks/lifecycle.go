@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/legacy-ai/floyd/internal/filelock"
 )
 
 // EventDetails is supplied only by native dispatch, never decoded from tool input.
@@ -139,6 +140,7 @@ func cloneJob(j AsyncJob) AsyncJob {
 }
 
 func (r *Runner) startAsync(ctx context.Context, event, sid, tool, input string, h compiledHook, mode string) string {
+	ctx = filelock.WithoutObserverLease(ctx)
 	lifetime, hasLifetime := ctx.Value(asyncContextKey{}).(context.Context)
 	if hasLifetime {
 		ctx = context.WithoutCancel(ctx)

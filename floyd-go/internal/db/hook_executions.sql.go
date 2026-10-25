@@ -35,6 +35,17 @@ func (q *Queries) CreateHookExecutionRecord(ctx context.Context, arg CreateHookE
 	return err
 }
 
+const hookExecutionRecordsExist = `-- name: HookExecutionRecordsExist :one
+SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'hook_execution_records'
+`
+
+func (q *Queries) HookExecutionRecordsExist(ctx context.Context) (int64, error) {
+	row := q.queryRow(ctx, q.hookExecutionRecordsExistStmt, hookExecutionRecordsExist)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const listHookExecutionRecords = `-- name: ListHookExecutionRecords :many
 SELECT seq, body FROM hook_execution_records
 WHERE seq > ?1

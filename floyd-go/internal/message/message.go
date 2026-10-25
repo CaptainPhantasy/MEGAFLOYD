@@ -91,6 +91,9 @@ type pendingState struct {
 	// but other flushers must back off.
 	flushing bool
 
+	// flushCancel stops in-flight output review when cancellation arrives.
+	flushCancel context.CancelFunc
+
 	// timer is the active debounce timer, or nil if no flush is
 	// scheduled. Stopped and reset when a terminal update preempts
 	// the debounce window.
@@ -254,6 +257,9 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 		}
 		p.latest = cloned
 		p.dirty = true
+		if s.review != nil && cloned.Role == Assistant && cloned.FinishReason() == FinishReasonCanceled && p.flushCancel != nil {
+			p.flushCancel()
+		}
 		s.mu.Unlock()
 		return s.flushOne(ctx, msg.ID, true)
 	}
@@ -266,6 +272,9 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 	}
 	p.latest = cloned
 	p.dirty = true
+	if s.review != nil && cloned.Role == Assistant && cloned.FinishReason() == FinishReasonCanceled && p.flushCancel != nil {
+		p.flushCancel()
+	}
 
 	var prev *Message
 	if p.hasFlushed {
@@ -338,6 +347,9 @@ func (s *service) FlushAll(ctx context.Context) error {
 // recent state.
 func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) error {
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		s.mu.Lock()
 		p, ok := s.pending[id]
 		if !ok {
@@ -375,15 +387,25 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		isTerminal := shouldFlushNow(prev, &snap)
 		p.flushing = true
 		p.dirty = false
+		publishCtx := ctx
+		var cancel context.CancelFunc
+		if s.review != nil {
+			publishCtx, cancel = context.WithCancel(ctx)
+			p.flushCancel = cancel
+		}
 		s.mu.Unlock()
 
 		err := s.write(ctx, snap)
 		if err == nil {
 			// Preserve publication order while this message owns its flush.
-			err = s.publishOutput(ctx, pubsub.UpdatedEvent, snap, isTerminal)
+			err = s.publishOutput(publishCtx, pubsub.UpdatedEvent, snap, isTerminal)
+		}
+		if cancel != nil {
+			cancel()
 		}
 
 		s.mu.Lock()
+		p.flushCancel = nil
 		p.flushing = false
 		if err == nil {
 			p.lastFlushed = snap

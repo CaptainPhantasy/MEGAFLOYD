@@ -38,7 +38,7 @@ func (r *Runtime) ExecuteRegisteredBody(ctx context.Context, info fantasy.ToolIn
 		RejectTool(ctx)
 		return fantasy.NewTextErrorResponse("Cannot resolve write target: " + err.Error()), nil
 	}
-	release, err := filelock.Acquire(ctx, paths)
+	ctx, release, err := filelock.AcquireWithContext(ctx, paths)
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}

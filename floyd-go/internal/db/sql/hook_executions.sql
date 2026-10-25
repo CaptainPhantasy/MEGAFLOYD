@@ -10,3 +10,6 @@ WHERE seq > sqlc.arg(after_seq)
   AND (sqlc.arg(event_id) = '' OR event_id = sqlc.arg(event_id))
   AND (sqlc.arg(job_id) = '' OR job_id = sqlc.arg(job_id))
 ORDER BY seq LIMIT sqlc.arg(result_limit);
+
+-- name: HookExecutionRecordsExist :one
+SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'hook_execution_records';

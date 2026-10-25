@@ -125,6 +125,14 @@ type SessionUndoRecord struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
+type SqliteMaster struct {
+	Type     string         `json:"type"`
+	Name     string         `json:"name"`
+	TblName  string         `json:"tbl_name"`
+	Rootpage int64          `json:"rootpage"`
+	Sql      sql.NullString `json:"sql"`
+}
+
 type TurnFileHistory struct {
 	SessionID     string         `json:"session_id"`
 	UserMessageID string         `json:"user_message_id"`

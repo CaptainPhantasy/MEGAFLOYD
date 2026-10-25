@@ -115,8 +115,7 @@ func (s *Store) List(ctx context.Context, query Query) (page Page, resultErr err
 		return page, nil
 	}
 	queries := db.New(s.db)
-	var exists int
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='hook_execution_records'`).Scan(&exists)
+	exists, err := queries.HookExecutionRecordsExist(ctx)
 	if err != nil {
 		return page, err
 	}

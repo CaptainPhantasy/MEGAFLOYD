@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -77,13 +78,37 @@ func (s *service) ImportEngine(ctx context.Context, id, title string, messages [
 	}
 
 	for index, msg := range messages {
-		if _, err := qtx.CreateMessage(ctx, db.CreateMessageParams{
+		stored, err := qtx.CreateMessage(ctx, db.CreateMessageParams{
 			ID:        uuid.New().String(),
 			SessionID: id,
 			Role:      msg.Role,
 			Parts:     string(msg.Parts),
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, fmt.Errorf("insert message %d: %w", index, err)
+		}
+		if msg.Role == "assistant" {
+			parts, err := importedOutputParts(msg.Parts)
+			if err != nil {
+				return nil, fmt.Errorf("project imported message %d: %w", index, err)
+			}
+			if err := qtx.UpsertOutputReviewPublic(ctx, db.UpsertOutputReviewPublicParams{
+				MessageID: stored.ID,
+				SessionID: id,
+				Parts:     parts,
+				State:     "imported_visible",
+				Receipt:   `{"reviewer":"imported-existing-history"}`,
+			}); err != nil {
+				return nil, fmt.Errorf("preserve imported display %d: %w", index, err)
+			}
+			if err := qtx.CreateOutputReviewEvent(ctx, db.CreateOutputReviewEventParams{
+				MessageID: stored.ID,
+				SessionID: id,
+				Parts:     parts,
+				State:     "imported_visible",
+			}); err != nil {
+				return nil, fmt.Errorf("preserve imported replay %d: %w", index, err)
+			}
 		}
 	}
 
@@ -94,4 +119,27 @@ func (s *service) ImportEngine(ctx context.Context, id, title string, messages [
 	imported := s.fromDBItem(dbSession)
 	s.Publish(pubsub.CreatedEvent, imported)
 	return &ImportResult{Session: imported, Copied: len(messages)}, nil
+}
+
+// importedOutputParts preserves imported display history without treating it
+// as newly reviewed generation. Signed reasoning stays in the private row.
+func importedOutputParts(parts []byte) (string, error) {
+	var original []json.RawMessage
+	if err := json.Unmarshal(parts, &original); err != nil {
+		return "", err
+	}
+	public := make([]json.RawMessage, 0, len(original))
+	for _, part := range original {
+		var envelope struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(part, &envelope); err != nil {
+			return "", err
+		}
+		if envelope.Type != "reasoning" {
+			public = append(public, part)
+		}
+	}
+	encoded, err := json.Marshal(public)
+	return string(encoded), err
 }

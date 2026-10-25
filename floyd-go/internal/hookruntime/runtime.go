@@ -14,6 +14,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/filelock"
 	"github.com/legacy-ai/floyd/internal/hooks"
 	"github.com/legacy-ai/floyd/internal/hookstore"
 	"github.com/legacy-ai/floyd/internal/permission"
@@ -362,6 +363,8 @@ func MergeMetadata(existing string, result hooks.AggregateResult) string {
 
 // ObservePermission receives native decisions and cannot answer a request.
 func (r *Runtime) ObservePermission(ctx context.Context, observation permission.Observation) {
+	ctx, finish := filelock.WithObserverLease(ctx)
+	defer finish()
 	if !observation.Requested && !observation.Granted {
 		RejectTool(ctx)
 	}

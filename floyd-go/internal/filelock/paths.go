@@ -104,28 +104,106 @@ func sameFile(a, b string) (bool, error) {
 	return leftErr == nil && rightErr == nil && os.SameFile(left, right), nil
 }
 
+type (
+	reservationKey   struct{}
+	observerLeaseKey struct{}
+)
+
+type observerLease struct {
+	owner    uint64
+	open     bool
+	children map[uint64]struct{}
+}
+
+// AcquireWithContext reserves a native action's paths and carries its identity
+// to synchronous permission observation. Ordinary nested acquisitions still
+// conflict unless WithObserverLease explicitly lends that reservation.
+func AcquireWithContext(ctx context.Context, paths []string) (context.Context, func(), error) {
+	id, release, err := acquire(ctx, paths)
+	if err != nil {
+		return ctx, nil, err
+	}
+	return context.WithValue(ctx, reservationKey{}, id), release, nil
+}
+
+// WithObserverLease permits synchronous permission observers to use their
+// waiting action's reservation. Each observer shell also owns a distinct lease,
+// so sibling observers and unrelated writers remain mutually exclusive.
+// finish closes the scope and drains actual shell leases before the parent can
+// resume, even if the hook runner has already reported a timeout or cancellation.
+func WithObserverLease(ctx context.Context) (context.Context, func()) {
+	id, _ := ctx.Value(reservationKey{}).(uint64)
+	locks.Lock()
+	_, active := locks.held[id]
+	locks.Unlock()
+	if !active {
+		return ctx, func() {}
+	}
+	scope := &observerLease{owner: id, open: true, children: map[uint64]struct{}{}}
+	var once sync.Once
+	finish := func() {
+		once.Do(func() {
+			locks.Lock()
+			scope.open = false
+			close(locks.changed)
+			locks.changed = make(chan struct{})
+			for len(scope.children) != 0 {
+				changed := locks.changed
+				locks.Unlock()
+				<-changed
+				locks.Lock()
+			}
+			locks.Unlock()
+		})
+	}
+	return context.WithValue(ctx, observerLeaseKey{}, scope), finish
+}
+
+// WithoutObserverLease prevents an asynchronous observer from sharing a
+// synchronous parent's reservation after the parent has resumed its action.
+func WithoutObserverLease(ctx context.Context) context.Context {
+	ctx = context.WithValue(ctx, reservationKey{}, uint64(0))
+	return context.WithValue(ctx, observerLeaseKey{}, (*observerLease)(nil))
+}
+
 // Acquire holds the named paths and their descendants until release. Reads
 // and unknown effects do not receive an invented workspace-wide lock.
 func Acquire(ctx context.Context, paths []string) (func(), error) {
+	_, release, err := acquire(ctx, paths)
+	return release, err
+}
+
+func acquire(ctx context.Context, paths []string) (uint64, func(), error) {
 	paths = slices.Clone(paths)
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
 	if len(paths) == 0 {
-		return func() {}, ctx.Err()
+		return 0, func() {}, ctx.Err()
 	}
+	scope, _ := ctx.Value(observerLeaseKey{}).(*observerLease)
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return 0, nil, err
 		}
 		locks.Lock()
+		if scope != nil {
+			_, parentHeld := locks.held[scope.owner]
+			if !scope.open || !parentHeld {
+				locks.Unlock()
+				return 0, nil, context.Canceled
+			}
+		}
 		conflict := false
-		for _, held := range locks.held {
+		for heldID, held := range locks.held {
+			if scope != nil && heldID == scope.owner {
+				continue
+			}
 			for _, a := range paths {
 				for _, b := range held {
 					overlap, err := overlaps(a, b)
 					if err != nil {
 						locks.Unlock()
-						return nil, err
+						return 0, nil, err
 					}
 					if overlap {
 						conflict = true
@@ -137,12 +215,18 @@ func Acquire(ctx context.Context, paths []string) (func(), error) {
 			locks.next++
 			id := locks.next
 			locks.held[id] = paths
+			if scope != nil {
+				scope.children[id] = struct{}{}
+			}
 			locks.Unlock()
 			var once sync.Once
-			return func() {
+			return id, func() {
 				once.Do(func() {
 					locks.Lock()
 					delete(locks.held, id)
+					if scope != nil {
+						delete(scope.children, id)
+					}
 					close(locks.changed)
 					locks.changed = make(chan struct{})
 					locks.Unlock()
@@ -154,7 +238,7 @@ func Acquire(ctx context.Context, paths []string) (func(), error) {
 		select {
 		case <-changed:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return 0, nil, ctx.Err()
 		}
 	}
 }
