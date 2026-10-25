@@ -1,4 +1,4 @@
-import{_ as e}from"./mermaid.core-DKNppTOJ.js";var l=e(()=>`
+import{_ as e}from"./mermaid.core-DKNppTOJ.js?v=mega-code-20261025T030200Z";var l=e(()=>`
   /* Font Awesome icon styling - consolidated */
   .label-icon {
     display: inline-block;
