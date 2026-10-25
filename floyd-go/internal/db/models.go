@@ -18,6 +18,16 @@ type File struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+type HookExecutionRecord struct {
+	Seq        int64  `json:"seq"`
+	ID         string `json:"id"`
+	SessionID  string `json:"session_id"`
+	EventID    string `json:"event_id"`
+	ToolCallID string `json:"tool_call_id"`
+	JobID      string `json:"job_id"`
+	Body       string `json:"body"`
+}
+
 type Message struct {
 	ID               string         `json:"id"`
 	SessionID        string         `json:"session_id"`

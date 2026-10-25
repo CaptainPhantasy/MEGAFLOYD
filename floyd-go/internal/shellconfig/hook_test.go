@@ -49,3 +49,14 @@ func TestHookAddRequiresCommand(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "--command is required")
 }
+
+func TestModernHookFlags(t *testing.T) {
+	result := loadScript(t, `hook add PreToolUse --command true --required --sequential
+hook add PostToolUse --command true --async`)
+	hooks := result["hooks"].(map[string]any)
+	pre := hooks["PreToolUse"].([]any)[0].(map[string]any)
+	require.Equal(t, true, pre["required"])
+	require.Equal(t, true, pre["sequential"])
+	post := hooks["PostToolUse"].([]any)[0].(map[string]any)
+	require.Equal(t, true, post["async"])
+}

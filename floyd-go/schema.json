@@ -232,6 +232,18 @@
           "type": "integer",
           "description": "Timeout in seconds for the hook command",
           "default": 30
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Require successful completion of this synchronous PreToolUse or PostToolUse check. Required handlers run in configuration order."
+        },
+        "sequential": {
+          "type": "boolean",
+          "description": "Run the matching synchronous hook batch in configuration order"
+        },
+        "async": {
+          "type": "boolean",
+          "description": "Run an observational hook asynchronously. Not allowed with required or sequential checks."
         }
       },
       "additionalProperties": false,

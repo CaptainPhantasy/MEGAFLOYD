@@ -61,6 +61,7 @@ func (c *coordinator) RuntimeProfiles() ([]RuntimeProfile, error) {
 	slices.SortFunc(out, func(a, b RuntimeProfile) int { return strings.Compare(a.ID, b.ID) })
 	return out, nil
 }
+
 func (c *coordinator) RuntimeSaveProfile(id string, in RuntimeProfile) (RuntimeProfile, error) {
 	if !profileIDPattern.MatchString(id) {
 		return in, errors.New("profile ID must contain only letters, digits, underscore or dash")
@@ -85,12 +86,12 @@ func (c *coordinator) RuntimeSaveProfile(id string, in RuntimeProfile) (RuntimeP
 		return in, err
 	}
 	dir := filepath.Join(c.cfg.WorkingDir(), megafloyd.ProjectDirName(), "agents")
-	if err = os.MkdirAll(dir, 0755); err != nil {
+	if err = os.MkdirAll(dir, 0o755); err != nil {
 		return in, err
 	}
 	path := filepath.Join(dir, id+".md")
 	if existing, err := os.ReadFile(path); err == nil {
-		if err = os.WriteFile(path+".bak-"+time.Now().UTC().Format("20060102T150405.000000000Z"), existing, 0600); err != nil {
+		if err = os.WriteFile(path+".bak-"+time.Now().UTC().Format("20060102T150405.000000000Z"), existing, 0o600); err != nil {
 			return in, err
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -174,7 +175,7 @@ func (c *coordinator) RuntimeStartSubagent(ctx context.Context, parentID, prompt
 	if err != nil {
 		return RuntimeTask{}, err
 	}
-	child := NewSessionAgent(SessionAgentOptions{LargeModel: large, SmallModel: small, SystemPromptPrefix: provider.SystemPromptPrefix, SystemPrompt: system, IsSubAgent: true, Sessions: c.sessions, History: c.history, WorkingDir: c.cfg.WorkingDir(), Messages: c.messages, Tools: tools, Notify: c.notify, RunComplete: c.runComplete, IsYolo: c.permissions.SkipRequests(), PlanService: c.planService(), DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize})
+	child := NewSessionAgent(SessionAgentOptions{LargeModel: large, SmallModel: small, SystemPromptPrefix: provider.SystemPromptPrefix, SystemPrompt: system, IsSubAgent: true, Sessions: c.sessions, History: c.history, WorkingDir: c.cfg.WorkingDir(), Messages: c.messages, Tools: tools, Notify: c.notify, RunComplete: c.runComplete, IsYolo: c.permissions.SkipRequests(), PlanService: c.planService(), Hooks: c.hookDispatcher(), DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize})
 	if description == "" {
 		description = "Subagent"
 		if selected != nil {

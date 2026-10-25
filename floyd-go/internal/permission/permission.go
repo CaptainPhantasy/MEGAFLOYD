@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -124,6 +125,9 @@ type permissionService struct {
 	requestMu       sync.Mutex
 	activeRequest   *PermissionRequest
 	activeRequestMu sync.Mutex
+
+	observerMu sync.RWMutex
+	observer   func(context.Context, Observation)
 }
 
 // resolve atomically removes the pending request entry for the given
@@ -194,7 +198,13 @@ func (s *permissionService) Deny(permission PermissionRequest) bool {
 	return s.resolve(permission, false, true, nil)
 }
 
-func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
+func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (granted bool, requestErr error) {
+	requestID := uuid.NewString()
+	observed := PermissionRequest{ID: requestID, SessionID: opts.SessionID, ToolCallID: opts.ToolCallID, ToolName: opts.ToolName, Path: opts.Path, Action: opts.Action}
+	s.observePermission(ctx, Observation{Requested: true, Request: observed})
+	defer func() {
+		s.observePermission(ctx, Observation{Request: observed, Granted: granted, Cancelled: errors.Is(requestErr, context.Canceled) || errors.Is(requestErr, context.DeadlineExceeded)})
+	}()
 	if s.skip.Load() {
 		return true, nil
 	}
@@ -256,7 +266,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		dir = s.workingDir
 	}
 	permission := PermissionRequest{
-		ID:          uuid.New().String(),
+		ID:          requestID,
 		Path:        dir,
 		SessionID:   opts.SessionID,
 		ToolCallID:  opts.ToolCallID,

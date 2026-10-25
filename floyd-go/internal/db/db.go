@@ -42,6 +42,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.createFileStmt, err = db.PrepareContext(ctx, createFile); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateFile: %w", err)
 	}
+	if q.createHookExecutionRecordStmt, err = db.PrepareContext(ctx, createHookExecutionRecord); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateHookExecutionRecord: %w", err)
+	}
 	if q.createMessageStmt, err = db.PrepareContext(ctx, createMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateMessage: %w", err)
 	}
@@ -138,6 +141,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listFilesBySessionStmt, err = db.PrepareContext(ctx, listFilesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesBySession: %w", err)
 	}
+	if q.listHookExecutionRecordsStmt, err = db.PrepareContext(ctx, listHookExecutionRecords); err != nil {
+		return nil, fmt.Errorf("error preparing query ListHookExecutionRecords: %w", err)
+	}
 	if q.listLatestSessionFilesStmt, err = db.PrepareContext(ctx, listLatestSessionFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListLatestSessionFiles: %w", err)
 	}
@@ -219,6 +225,11 @@ func (q *Queries) Close() error {
 	if q.createFileStmt != nil {
 		if cerr := q.createFileStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createFileStmt: %w", cerr)
+		}
+	}
+	if q.createHookExecutionRecordStmt != nil {
+		if cerr := q.createHookExecutionRecordStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createHookExecutionRecordStmt: %w", cerr)
 		}
 	}
 	if q.createMessageStmt != nil {
@@ -381,6 +392,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listFilesBySessionStmt: %w", cerr)
 		}
 	}
+	if q.listHookExecutionRecordsStmt != nil {
+		if cerr := q.listHookExecutionRecordsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listHookExecutionRecordsStmt: %w", cerr)
+		}
+	}
 	if q.listLatestSessionFilesStmt != nil {
 		if cerr := q.listLatestSessionFilesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listLatestSessionFilesStmt: %w", cerr)
@@ -506,6 +522,7 @@ type Queries struct {
 	completeTurnFileStmt                 *sql.Stmt
 	copySessionMessageStmt               *sql.Stmt
 	createFileStmt                       *sql.Stmt
+	createHookExecutionRecordStmt        *sql.Stmt
 	createMessageStmt                    *sql.Stmt
 	createSessionStmt                    *sql.Stmt
 	createSessionTurnStmt                *sql.Stmt
@@ -538,6 +555,7 @@ type Queries struct {
 	listAllUserMessagesStmt              *sql.Stmt
 	listFilesByPathStmt                  *sql.Stmt
 	listFilesBySessionStmt               *sql.Stmt
+	listHookExecutionRecordsStmt         *sql.Stmt
 	listLatestSessionFilesStmt           *sql.Stmt
 	listMessagesBySessionStmt            *sql.Stmt
 	listNewFilesStmt                     *sql.Stmt
@@ -566,6 +584,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		completeTurnFileStmt:                 q.completeTurnFileStmt,
 		copySessionMessageStmt:               q.copySessionMessageStmt,
 		createFileStmt:                       q.createFileStmt,
+		createHookExecutionRecordStmt:        q.createHookExecutionRecordStmt,
 		createMessageStmt:                    q.createMessageStmt,
 		createSessionStmt:                    q.createSessionStmt,
 		createSessionTurnStmt:                q.createSessionTurnStmt,
@@ -598,6 +617,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAllUserMessagesStmt:              q.listAllUserMessagesStmt,
 		listFilesByPathStmt:                  q.listFilesByPathStmt,
 		listFilesBySessionStmt:               q.listFilesBySessionStmt,
+		listHookExecutionRecordsStmt:         q.listHookExecutionRecordsStmt,
 		listLatestSessionFilesStmt:           q.listLatestSessionFilesStmt,
 		listMessagesBySessionStmt:            q.listMessagesBySessionStmt,
 		listNewFilesStmt:                     q.listNewFilesStmt,

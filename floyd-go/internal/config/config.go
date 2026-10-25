@@ -737,6 +737,12 @@ type HookConfig struct {
 	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
 	// Timeout in seconds. Default 30.
 	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the hook command,default=30"`
+	// Required makes failures explicit and orders this synchronous event batch.
+	Required bool `json:"required,omitempty" jsonschema:"description=Require successful completion of this synchronous PreToolUse or PostToolUse check. Required handlers run in configuration order."`
+	// Sequential orders the matching synchronous batch without making failures mandatory.
+	Sequential bool `json:"sequential,omitempty" jsonschema:"description=Run the matching synchronous hook batch in configuration order"`
+	// Async starts a tracked observer that cannot influence the action or permissions.
+	Async bool `json:"async,omitempty" jsonschema:"description=Run an observational hook asynchronously. Not allowed with required or sequential checks."`
 }
 
 // DisplayName returns the hook name for display purposes. It returns Name
@@ -1023,6 +1029,8 @@ func allToolNames() []string {
 		"failure_mode_enumerator",
 		"transcript_export",
 		"query_floyd_archive",
+		"hook_explain",
+		"hook_trace",
 		"symbol_index",
 		"vision",
 		"workflow",

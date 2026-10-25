@@ -15,6 +15,7 @@ type Querier interface {
 	CompleteTurnFile(ctx context.Context, arg CompleteTurnFileParams) error
 	CopySessionMessage(ctx context.Context, arg CopySessionMessageParams) (Message, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
+	CreateHookExecutionRecord(ctx context.Context, arg CreateHookExecutionRecordParams) error
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateSessionTurn(ctx context.Context, arg CreateSessionTurnParams) error
@@ -47,6 +48,7 @@ type Querier interface {
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
+	ListHookExecutionRecords(ctx context.Context, arg ListHookExecutionRecordsParams) ([]ListHookExecutionRecordsRow, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListNewFiles(ctx context.Context) ([]File, error)

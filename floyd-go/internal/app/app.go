@@ -31,6 +31,8 @@ import (
 	"github.com/legacy-ai/floyd/internal/format"
 	"github.com/legacy-ai/floyd/internal/herdr"
 	"github.com/legacy-ai/floyd/internal/history"
+	"github.com/legacy-ai/floyd/internal/hookruntime"
+	"github.com/legacy-ai/floyd/internal/hookstore"
 	"github.com/legacy-ai/floyd/internal/log"
 	"github.com/legacy-ai/floyd/internal/lsp"
 	megafloydmemory "github.com/legacy-ai/floyd/internal/megafloyd/memory"
@@ -62,6 +64,7 @@ type App struct {
 	Permissions permission.Service
 	Questions   question.Service
 	FileTracker filetracker.Service
+	Hooks       *hookruntime.Runtime
 
 	AgentCoordinator agent.Coordinator
 
@@ -113,6 +116,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	if err != nil {
 		return nil, err
 	}
+	hookRuntime := hookruntime.New(ctx, store, hookstore.New(conn))
+	if observer, ok := permissions.(interface {
+		SetLifecycleObserver(func(context.Context, permission.Observation))
+	}); ok {
+		observer.SetLifecycleObserver(hookRuntime.ObservePermission)
+	}
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
@@ -120,6 +129,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Permissions: permissions,
 		Questions:   question.NewService(),
 		FileTracker: filetracker.NewService(q),
+		Hooks:       hookRuntime,
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
 
@@ -724,6 +734,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Permissions: app.Permissions,
 		Questions:   app.Questions,
 		History:     app.History,
+		Hooks:       app.Hooks,
 		FileTracker: app.FileTracker,
 		LSPManager:  app.LSPManager,
 		Notify:      app.agentNotifications,
@@ -785,6 +796,11 @@ func (app *App) Shutdown() {
 	// Shared shutdown context for all timeout-bounded cleanup.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Hook observers must finish recording before the DB is released.
+	if err := app.Hooks.Close(shutdownCtx); err != nil {
+		slog.Error("Failed to drain hook observers on shutdown", "error", err)
+	}
 
 	// Record the checkpoint while the database is still open; the parallel
 	// cleanup funcs below release it.

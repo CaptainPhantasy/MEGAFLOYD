@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -21,6 +22,8 @@ const SupportedOutputVersion = 1
 // Claude Code hooks (which expect tool_input to be an object, not a
 // string).
 type Payload struct {
+	Version int `json:"version"`
+	EventDetails
 	Event     string          `json:"event"`
 	SessionID string          `json:"session_id"`
 	CWD       string          `json:"cwd"`
@@ -30,11 +33,18 @@ type Payload struct {
 
 // BuildPayload constructs the JSON stdin payload for a hook command.
 func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []byte {
+	return BuildPayloadContext(context.Background(), eventName, sessionID, cwd, toolName, toolInputJSON)
+}
+
+func BuildPayloadContext(ctx context.Context, eventName, sessionID, cwd, toolName, toolInputJSON string) []byte {
+	ctx = ensureEventDetails(ctx)
+	details, _ := ctx.Value(eventDetailsKey{}).(EventDetails)
 	toolInput := json.RawMessage(toolInputJSON)
 	if !json.Valid(toolInput) {
 		toolInput = json.RawMessage("{}")
 	}
 	p := Payload{
+		Version: 1, EventDetails: details,
 		Event:     eventName,
 		SessionID: sessionID,
 		CWD:       cwd,
@@ -50,8 +60,7 @@ func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []b
 
 // BuildEnv constructs the environment variable slice for a hook command.
 // It includes all current process env vars plus hook-specific ones.
-// FLOYD_* variables are primary; CRUSH_* mirrors are emitted for
-// backward compatibility with existing hook scripts.
+// MEGAFLOYD_* variables have FLOYD_* and CRUSH_* compatibility aliases.
 func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON string) []string {
 	env := os.Environ()
 	env = append(env, shell.FloydEnvMarkers()...)
@@ -64,6 +73,7 @@ func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON str
 	}
 	for _, v := range hookVars {
 		env = append(env, fmt.Sprintf("%s=%s", v.key, v.value))
+		env = append(env, fmt.Sprintf("MEGAFLOYD_%s=%s", strings.TrimPrefix(v.key, "FLOYD_"), v.value))
 		env = append(env, fmt.Sprintf("CRUSH_%s=%s", strings.TrimPrefix(v.key, "FLOYD_"), v.value))
 	}
 
@@ -71,10 +81,12 @@ func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON str
 	if toolInputJSON != "" {
 		if cmd := gjson.Get(toolInputJSON, "command"); cmd.Exists() {
 			env = append(env, fmt.Sprintf("FLOYD_TOOL_INPUT_COMMAND=%s", cmd.String()))
+			env = append(env, fmt.Sprintf("MEGAFLOYD_TOOL_INPUT_COMMAND=%s", cmd.String()))
 			env = append(env, fmt.Sprintf("CRUSH_TOOL_INPUT_COMMAND=%s", cmd.String()))
 		}
 		if fp := gjson.Get(toolInputJSON, "file_path"); fp.Exists() {
 			env = append(env, fmt.Sprintf("FLOYD_TOOL_INPUT_FILE_PATH=%s", fp.String()))
+			env = append(env, fmt.Sprintf("MEGAFLOYD_TOOL_INPUT_FILE_PATH=%s", fp.String()))
 			env = append(env, fmt.Sprintf("CRUSH_TOOL_INPUT_FILE_PATH=%s", fp.String()))
 		}
 	}

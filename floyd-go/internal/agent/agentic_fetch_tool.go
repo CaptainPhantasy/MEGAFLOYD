@@ -173,10 +173,8 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				tools.NewViewTool(c.lspManager, nil, c.filetracker, nil, tmpDir),
 			}
 
-			// Sub-agent tools run without hook interception. The top-level
-			// `agentic_fetch` call itself is already wrapped from the coder's
-			// side; firing hooks again for every inner tool call would run
-			// the user's hooks N times per delegated turn.
+			fetchTools = wrapToolsWithRuntimePre(fetchTools, c.hookDispatcher())
+			fetchTools = wrapToolsWithRuntimeObservation(fetchTools, c.hookDispatcher())
 
 			agent := NewSessionAgent(SessionAgentOptions{
 				LargeModel:           small, // Use small model for both (fetch doesn't need large)
@@ -188,6 +186,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				Sessions:             c.sessions,
 				Messages:             c.messages,
 				Tools:                fetchTools,
+				Hooks:                c.hookDispatcher(),
 			})
 
 			return c.runSubAgent(ctx, subAgentParams{

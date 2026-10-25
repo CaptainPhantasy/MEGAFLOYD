@@ -2,14 +2,19 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
+	"charm.land/fantasy"
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/agent"
 	"github.com/legacy-ai/floyd/internal/agent/notify"
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/hookruntime"
 	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/pubsub"
 	"github.com/legacy-ai/floyd/internal/shell"
@@ -331,6 +336,22 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 		return proto.ShellCommandResponse{}, err
 	}
 
+	ws.runMu.Lock()
+	if ws.closing {
+		ws.runMu.Unlock()
+		return proto.ShellCommandResponse{}, ErrWorkspaceClosing
+	}
+	ws.runWG.Add(1)
+	ws.runMu.Unlock()
+	defer ws.runWG.Done()
+	if ws.ctx != nil {
+		runCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(ws.ctx, cancel)
+		defer stop()
+		defer cancel()
+		ctx = runCtx
+	}
+
 	var persist shell.PersistFunc
 	if req.SessionID != "" {
 		persist = func(cmd, output string, exitCode int) error {
@@ -338,18 +359,40 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 		}
 	}
 
-	result, err := shell.RunAndPersist(ctx, shell.RunOptions{
-		Command:   req.Command,
-		Cwd:       ws.Path,
-		Env:       append(os.Environ(), ws.Env...),
-		TermWidth: req.TermWidth,
-	}, persist)
+	run := func(runCtx context.Context, command string) (shell.CaptureResult, error) {
+		return shell.RunAndPersist(runCtx, shell.RunOptions{Command: command, Cwd: ws.Path, Env: append(os.Environ(), ws.Env...), TermWidth: req.TermWidth}, persist)
+	}
+	var result shell.CaptureResult
+	if ws.Hooks == nil {
+		result, err = run(ctx, req.Command)
+	} else {
+		input, _ := json.Marshal(map[string]string{"command": req.Command})
+		call := fantasy.ToolCall{ID: uuid.NewString(), Name: "bash", Input: string(input)}
+		hookCtx := hookruntime.WithRun(ctx, uuid.NewString())
+		executed := false
+		response, runErr := ws.Hooks.ExecuteTool(hookCtx, req.SessionID, call, func(innerCtx context.Context, actual fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			var params struct {
+				Command string `json:"command"`
+			}
+			if err := json.Unmarshal([]byte(actual.Input), &params); err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("invalid rewritten shell input: %w", err)
+			}
+			executed = true
+			result, err = run(innerCtx, params.Command)
+			metadata, _ := json.Marshal(map[string]int{"exit_code": result.ExitCode})
+			return fantasy.ToolResponse{Content: result.Output, IsError: result.ExitCode != 0, Metadata: string(metadata)}, err
+		})
+		err = runErr
+		if err == nil && !executed {
+			return proto.ShellCommandResponse{}, errors.New(response.Content)
+		}
+		if err == nil && response.IsError && result.ExitCode == 0 {
+			result.ExitCode = 1
+		}
+		result.Output = response.Content
+	}
 	if err != nil {
 		return proto.ShellCommandResponse{}, err
 	}
-
-	return proto.ShellCommandResponse{
-		Output:   result.Output,
-		ExitCode: result.ExitCode,
-	}, nil
+	return proto.ShellCommandResponse{Output: result.Output, ExitCode: result.ExitCode}, nil
 }

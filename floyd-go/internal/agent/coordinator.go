@@ -30,7 +30,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/event"
 	"github.com/legacy-ai/floyd/internal/filetracker"
 	"github.com/legacy-ai/floyd/internal/history"
-	"github.com/legacy-ai/floyd/internal/hooks"
+	"github.com/legacy-ai/floyd/internal/hookruntime"
 	"github.com/legacy-ai/floyd/internal/log"
 	"github.com/legacy-ai/floyd/internal/lsp"
 	"github.com/legacy-ai/floyd/internal/message"
@@ -116,17 +116,19 @@ type Coordinator interface {
 }
 
 type coordinator struct {
-	cfg         *config.ConfigStore
-	sessions    session.Service
-	messages    message.Service
-	permissions permission.Service
-	questions   question.Service
-	history     history.Service
-	filetracker filetracker.Service
-	lspManager  *lsp.Manager
-	notify      pubsub.Publisher[notify.Notification]
-	runComplete pubsub.Publisher[notify.RunComplete]
-	interactive bool
+	cfg             *config.ConfigStore
+	sessions        session.Service
+	messages        message.Service
+	permissions     permission.Service
+	questions       question.Service
+	history         history.Service
+	filetracker     filetracker.Service
+	lspManager      *lsp.Manager
+	notify          pubsub.Publisher[notify.Notification]
+	runComplete     pubsub.Publisher[notify.RunComplete]
+	interactive     bool
+	hookRuntime     *hookruntime.Runtime
+	hookRuntimeOnce sync.Once
 
 	// plans is the per-session plan-mode store shared by the tools, the
 	// guard, and the reminder injection. plansOnce guards lazy creation
@@ -166,6 +168,7 @@ type CoordinatorOptions struct {
 	RunComplete pubsub.Publisher[notify.RunComplete]
 	Skills      *skills.Manager
 	Interactive bool
+	Hooks       *hookruntime.Runtime
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -199,6 +202,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
+		hookRuntime:  opts.Hooks,
 	}
 
 	selector, err := c.runtimeAgentSelector()
@@ -646,7 +650,6 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 					extraBody["enable_thinking"] = reasoningEnabled
 				}
 			}
-
 		}
 		mergedOptions["extra_body"] = extraBody
 
@@ -679,18 +682,14 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
-// eventHookRunner builds a hook runner for a non-tool hook event, or
-// returns nil when no hooks are configured for that event or when the
-// caller is a sub-agent (sub-agents never fire hooks).
-func (c *coordinator) eventHookRunner(event string, isSubAgent bool) *hooks.Runner {
-	if isSubAgent {
-		return nil
-	}
-	eventHooks := c.cfg.Config().Hooks[event]
-	if len(eventHooks) == 0 {
-		return nil
-	}
-	return hooks.NewRunner(eventHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+// hookDispatcher is shared by all tools and native child agents.
+func (c *coordinator) hookDispatcher() *hookruntime.Runtime {
+	c.hookRuntimeOnce.Do(func() {
+		if c.hookRuntime == nil {
+			c.hookRuntime = hookruntime.New(context.Background(), c.cfg, nil)
+		}
+	})
+	return c.hookRuntime
 }
 
 func (c *coordinator) buildAgent(ctx context.Context, promptTemplate *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
@@ -732,8 +731,7 @@ func (c *coordinator) buildAgent(ctx context.Context, promptTemplate *prompt.Pro
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
-		SessionStartRunner:   c.eventHookRunner(hooks.EventSessionStart, isSubAgent),
-		StopRunner:           c.eventHookRunner(hooks.EventStop, isSubAgent),
+		Hooks:                c.hookDispatcher(),
 		DataDirectory:        dataDir,
 		PlanService:          c.planService(),
 		Budget:               budget,
@@ -834,6 +832,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
 		tools.NewFloydInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
+		tools.NewHookExplainTool(c.cfg),
+		tools.NewHookTraceTool(c.hookDispatcher().Store()),
 		tools.NewFloydLogsTool(logFile),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
@@ -987,23 +987,9 @@ func (c *coordinator) buildMCPTools(agent config.Agent, isSubAgent bool) []fanta
 
 func (c *coordinator) wrapAgentTools(filteredTools []fantasy.AgentTool, isSubAgent bool) []fantasy.AgentTool {
 	plans := c.planService()
-	// Build hook runner if PreToolUse hooks are configured.
-	var hookRunner *hooks.Runner
-	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
-	}
-
-	var postToolHookRunner *hooks.Runner
-	if postHooks := c.cfg.Config().Hooks[hooks.EventPostToolUse]; len(postHooks) > 0 {
-		postToolHookRunner = hooks.NewRunner(postHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
-	}
-
-	// Wrap tools with hook interception for the top-level agent only.
-	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
-	// without hook interception to avoid firing the user's hook N times
-	// per delegated turn. The top-level invocation of the sub-agent tool
-	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, postToolHookRunner, isSubAgent)
+	// Pre hooks run inside the existing guards; terminal observation wraps
+	// those guards so native rejections also emit a correlated event.
+	filteredTools = wrapToolsWithRuntimePre(filteredTools, c.hookDispatcher())
 
 	// Active-job scope enforcement runs inside the plan guard so plan mode
 	// remains authoritative for its own file, and outside the hook wrapper
@@ -1019,7 +1005,7 @@ func (c *coordinator) wrapAgentTools(filteredTools []fantasy.AgentTool, isSubAge
 	// denial is decided before user hooks and tool permissions.
 	filteredTools = wrapToolsWithPlanGuard(filteredTools, plans, c.permissions, c.cfg.WorkingDir())
 
-	return filteredTools
+	return wrapToolsWithRuntimeObservation(filteredTools, c.hookDispatcher())
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
@@ -1096,16 +1082,16 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	}
 
 	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
-		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
-		}, nil
+		Model:      largeModel,
+		CatwalkCfg: *largeCatwalkModel,
+		ModelCfg:   largeModelCfg,
+		FlatRate:   largeProviderCfg.FlatRate,
+	}, Model{
+		Model:      smallModel,
+		CatwalkCfg: *smallCatwalkModel,
+		ModelCfg:   smallModelCfg,
+		FlatRate:   smallProviderCfg.FlatRate,
+	}, nil
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
@@ -1713,7 +1699,7 @@ func (c *coordinator) runSubAgentInline(ctx context.Context, params subAgentPara
 
 	// Run the agent
 	run := func() (*fantasy.AgentResult, error) {
-		return params.Agent.Run(ctx, SessionAgentCall{
+		return params.Agent.Run(hookruntime.WithParent(ctx, params.ToolCallID), SessionAgentCall{
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
 			MaxOutputTokens:  maxTokens,

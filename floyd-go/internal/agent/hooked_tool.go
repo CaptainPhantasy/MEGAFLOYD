@@ -13,8 +13,8 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// hookedTool wraps a fantasy.AgentTool to run PreToolUse hooks before
-// delegating to the inner tool and PostToolUse hooks after.
+// hookedTool retains the legacy direct-runner adapter. Application tools use
+// runtimePreTool and runtimeObservedTool with the shared lifecycle dispatcher.
 type hookedTool struct {
 	inner fantasy.AgentTool
 	// pre runs PreToolUse hooks (built from the PreToolUse event group).
@@ -30,11 +30,9 @@ func newHookedTool(inner fantasy.AgentTool, pre, post *hooks.Runner) *hookedTool
 	return &hookedTool{inner: inner, pre: pre, post: post}
 }
 
-// wrapToolsWithHooks returns a tool slice with each entry wrapped in a
-// hookedTool. Returns the original slice unchanged when both runners are
-// nil or when isSubAgent is true — sub-agents never fire hooks, the
-// top-level invocation of the sub-agent tool itself is wrapped on the
-// caller's side.
+// wrapToolsWithHooks preserves the legacy adapter contract for direct callers.
+// The application does not use it: native child and parent tools both use the
+// shared runtime wrappers, including terminal failure and cancellation events.
 func wrapToolsWithHooks(tools []fantasy.AgentTool, pre, post *hooks.Runner, isSubAgent bool) []fantasy.AgentTool {
 	if (pre == nil && post == nil) || isSubAgent {
 		return tools

@@ -12,8 +12,13 @@ import (
 
 // Hook event name constants.
 const (
-	EventPreToolUse  = "PreToolUse"
-	EventPostToolUse = "PostToolUse"
+	EventPreToolUse         = "PreToolUse"
+	EventPostToolUse        = "PostToolUse"
+	EventPostToolUseFailure = "PostToolUseFailure"
+	EventActionRejected     = "ActionRejected"
+	EventToolCancelled      = "ToolCancelled"
+	EventPermissionRequest  = "PermissionRequest"
+	EventPermissionResolved = "PermissionResolved"
 	// EventSessionStart fires when a session begins processing its first
 	// run. SessionStart hooks cannot block; their context is prepended to
 	// the run.
@@ -76,22 +81,29 @@ func (d Decision) String() string {
 
 // HookResult holds the parsed output of a single hook execution.
 type HookResult struct {
-	Decision     Decision
-	Halt         bool   // If true, halt the whole turn.
-	Reason       string // Deny or halt reason (same field, different audience).
-	Context      string
-	UpdatedInput string // Shallow-merge patch against tool_input (opaque JSON).
+	Decision       Decision
+	Halt           bool   // If true, halt the whole turn.
+	Reason         string // Deny or halt reason (same field, different audience).
+	Context        string
+	UpdatedInput   string // Shallow-merge patch against tool_input (opaque JSON).
+	ExecutionError string // Safe category, never raw command stderr.
+	Cancelled      bool
+	TimedOut       bool
+	ExitCode       *int
 }
 
 // AggregateResult holds the combined outcome of all hooks for an event.
 type AggregateResult struct {
-	Decision     Decision
-	Halt         bool       // Any hook requested halt.
-	HookCount    int        // Number of hooks that ran.
-	Hooks        []HookInfo // Info about each hook that ran (config order).
-	Reason       string     // Concatenated deny/halt reasons (newline-separated).
-	Context      string     // Concatenated context from all hooks.
-	UpdatedInput string     // Merged tool_input JSON (empty if no patches).
+	Decision        Decision
+	Halt            bool       // Any hook requested halt.
+	HookCount       int        // Number of hooks that ran.
+	Hooks           []HookInfo // Info about each hook that ran (config order).
+	Reason          string     // Concatenated deny/halt reasons (newline-separated).
+	Context         string     // Concatenated context from all hooks.
+	UpdatedInput    string     // Merged tool_input JSON (empty if no patches).
+	RequiredFailure bool       // An explicitly mandatory check failed.
+	Cancelled       bool
+	AsyncJobs       []string // Tracked observer IDs; their decisions never affect this result.
 }
 
 // aggregate merges multiple HookResults into a single AggregateResult.
@@ -140,7 +152,6 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 				slog.Warn(
 					"Hook updated_input patch rejected; ignoring",
 					"error", err,
-					"patch", r.UpdatedInput,
 				)
 				continue
 			}
@@ -188,7 +199,7 @@ func shallowMerge(base, patch string) (string, error) {
 	}
 	out := base
 	for k, v := range patchMap {
-		next, err := sjson.SetRawBytes([]byte(out), k, v)
+		next, err := sjson.SetRawBytes([]byte(out), escapeKey(k), v)
 		if err != nil {
 			return "", err
 		}
@@ -200,3 +211,9 @@ func shallowMerge(base, patch string) (string, error) {
 type errNotObject string
 
 func (e errNotObject) Error() string { return string(e) + " is not a JSON object" }
+
+// sjson paths are expressions; hook patches name literal top-level JSON keys.
+func escapeKey(key string) string {
+	r := strings.NewReplacer("\\", "\\\\", ".", "\\.", ":", "\\:")
+	return r.Replace(key)
+}
