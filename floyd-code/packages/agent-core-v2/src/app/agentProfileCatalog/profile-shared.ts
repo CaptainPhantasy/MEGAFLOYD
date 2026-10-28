@@ -1,5 +1,3 @@
-import { gunzipSync } from 'node:zlib';
-
 import { renderPrompt } from '#/_base/utils/render-prompt';
 
 import {
@@ -10,8 +8,14 @@ import {
   type SystemPromptRenderResult,
 } from './agentProfileCatalog';
 import { BUILTIN_AGENT_PROFILE_SOURCE_ID } from './builtinAgentProfileLoader';
+import {
+  inheritedRoleAdditional,
+  redundantWithInheritedStandard,
+} from './inheritedStandard';
 
 import SYSTEM_PROMPT_TEMPLATE from './system.md?raw';
+
+export { inheritedRoleAdditional };
 
 export const TASK_AGENT_ROLE_PREFIX =
   'You are now running as a subagent. All the `user` messages are sent by the main agent. ' +
@@ -145,6 +149,7 @@ export function systemPromptVars(
   const skills = skillActive ? (context.skills ?? '') : '';
   const pluginSections = context.pluginSections ?? '';
   const additionalDirsInfo = context.additionalDirsInfo ?? '';
+  const agentsMd = context.agentsMd ?? '';
   return {
     role_additional: '',
     product_name: context.productName ?? DEFAULT_PRODUCT_NAME,
@@ -155,7 +160,7 @@ export function systemPromptVars(
     shell: shellName.length > 0 ? `${shellName} (\`${shellPath}\`)` : '',
     cwd: context.cwd ?? '',
     cwd_listing: context.cwdListing ?? '',
-    agents_md: context.agentsMd ?? '',
+    agents_md: redundantWithInheritedStandard(agentsMd) ? '' : agentsMd,
     additional_dirs_info: additionalDirsInfo,
     additional_dirs_section:
       additionalDirsInfo.length > 0
@@ -197,29 +202,17 @@ export function renderSystemPromptResult(
   return {
     text: renderPrompt(SYSTEM_PROMPT_TEMPLATE, {
       ...systemPromptVars(context, options),
-      role_additional: roleAdditional.length > 0 ? roleAdditional : inheritedRoleAdditional(),
+      role_additional: composeRoleAdditional(roleAdditional),
     }),
     environment: environmentForTemplate(context),
   };
 }
 
-// inheritedRoleAdditional decodes the identity stack handed down by the Go
-// chassis in FLOYD_ROLE_ADDITIONAL (gz1: + gzip + base64). It is decoded once
-// per process; an absent, malformed, or unsupported value yields '' so the
-// agent still starts with its generic prompt.
-let cachedRoleAdditional: string | undefined;
-
-export function inheritedRoleAdditional(): string {
-  if (cachedRoleAdditional !== undefined) return cachedRoleAdditional;
-  cachedRoleAdditional = '';
-  const raw = process.env['FLOYD_ROLE_ADDITIONAL'];
-  if (raw === undefined || !raw.startsWith('gz1:')) return cachedRoleAdditional;
-  try {
-    cachedRoleAdditional = gunzipSync(Buffer.from(raw.slice(4), 'base64')).toString('utf8').trim();
-  } catch {
-    cachedRoleAdditional = '';
-  }
-  return cachedRoleAdditional;
+function composeRoleAdditional(roleAdditional: string): string {
+  const inherited = inheritedRoleAdditional();
+  if (inherited.length === 0) return roleAdditional;
+  if (roleAdditional.length === 0) return inherited;
+  return `${inherited}\n\n${roleAdditional}`;
 }
 
 function environmentForTemplate(context: AgentProfileContext): EnvironmentDisclosureSnapshot {

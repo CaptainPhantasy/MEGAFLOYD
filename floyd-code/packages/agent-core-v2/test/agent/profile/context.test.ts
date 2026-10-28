@@ -1,8 +1,9 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { gzipSync } from 'node:zlib';
 import { join, normalize } from 'pathe';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HostFileSystem } from '#/os/backends/node-local/hostFsService';
 import type { IHostFileSystem } from '#/os/interface/hostFileSystem';
@@ -306,5 +307,98 @@ describe('loadAgentsMdDetailed discovered paths', () => {
     const result = await prepareSystemPromptContext({ fs, homeDir }, workDir);
 
     expect(result.agentsMdPaths).toEqual([normalize(join(workDir, 'AGENTS.md'))]);
+  });
+});
+
+const INHERITED_STANDARD =
+  '# Approved Standard\n\nThe owner rules apply.\n\nINHERITED-STANDARD-SENTINEL-5d1e83c2\n';
+
+const PROJECT_GUIDE = '# Repository guide\n\nUse pnpm and never commit dist/.\n';
+
+function inheritedPayload(text: string): string {
+  return `gz1:${gzipSync(Buffer.from(text, 'utf8')).toString('base64')}`;
+}
+
+async function loadModulesFresh() {
+  vi.resetModules();
+  const [context, shared] = await Promise.all([
+    import('#/agent/profile/context'),
+    import('#/app/agentProfileCatalog/profile-shared'),
+  ]);
+  return { context, shared };
+}
+
+async function writeStandardProject(standard: string, guide: string) {
+  const projectRoot = await mkdtemp(join(tmpdir(), 'floyd-agents-project-'));
+  extraDirs.push(projectRoot);
+  const nested = join(projectRoot, 'floyd-code');
+  await mkdir(nested, { recursive: true });
+  await mkdir(join(projectRoot, '.git'));
+  await writeFile(join(projectRoot, 'AGENTS.md'), standard, 'utf-8');
+  await writeFile(join(nested, 'AGENTS.md'), guide, 'utf-8');
+  return { projectRoot, nested };
+}
+
+describe('loadAgentsMd inherited standard de-duplication', () => {
+  it('drops a single instruction file that duplicates the inherited standard', async () => {
+    await writeFile(join(workDir, 'AGENTS.md'), INHERITED_STANDARD, 'utf-8');
+    vi.stubEnv('FLOYD_ROLE_ADDITIONAL', inheritedPayload(INHERITED_STANDARD));
+    const { context } = await loadModulesFresh();
+
+    const result = await context.loadAgentsMdDetailed({ fs, homeDir }, workDir);
+
+    expect(result.content).toBe('');
+    expect(result.paths).toEqual([]);
+    vi.unstubAllEnvs();
+  });
+
+  it('drops only the duplicated file and keeps the genuine guide verbatim', async () => {
+    const { nested } = await writeStandardProject(INHERITED_STANDARD, PROJECT_GUIDE);
+    vi.stubEnv('FLOYD_ROLE_ADDITIONAL', inheritedPayload(INHERITED_STANDARD));
+    const { context } = await loadModulesFresh();
+
+    const result = await context.loadAgentsMdDetailed({ fs, homeDir }, nested);
+    const guidePath = normalize(join(nested, 'AGENTS.md'));
+
+    expect(result.content).toBe(`<!-- From: ${guidePath} -->\n${PROJECT_GUIDE.trim()}`);
+    expect(result.paths).toEqual([guidePath]);
+    vi.unstubAllEnvs();
+  });
+
+  it('keeps every instruction file in order when no standard is inherited', async () => {
+    const { projectRoot, nested } = await writeStandardProject(INHERITED_STANDARD, PROJECT_GUIDE);
+    vi.stubEnv('FLOYD_ROLE_ADDITIONAL', '');
+    const { context } = await loadModulesFresh();
+
+    const result = await context.loadAgentsMdDetailed({ fs, homeDir }, nested);
+
+    expect(result.content).toBe(
+      `<!-- From: ${normalize(join(projectRoot, 'AGENTS.md'))} -->\n${INHERITED_STANDARD.trim()}` +
+        `\n\n<!-- From: ${normalize(join(nested, 'AGENTS.md'))} -->\n${PROJECT_GUIDE.trim()}`,
+    );
+    expect(result.paths).toEqual([
+      normalize(join(projectRoot, 'AGENTS.md')),
+      normalize(join(nested, 'AGENTS.md')),
+    ]);
+    vi.unstubAllEnvs();
+  });
+
+  it('renders one copy of the standard with the genuine guide intact', async () => {
+    const { nested } = await writeStandardProject(INHERITED_STANDARD, PROJECT_GUIDE);
+    vi.stubEnv('FLOYD_ROLE_ADDITIONAL', inheritedPayload(INHERITED_STANDARD));
+    const { context, shared } = await loadModulesFresh();
+
+    const loaded = await context.loadAgentsMdDetailed({ fs, homeDir }, nested);
+    const text = shared.renderSystemPromptResult(
+      '',
+      { cwd: nested, agentsMd: loaded.content },
+      { skillActive: false },
+    ).text;
+
+    expect(text.split('INHERITED-STANDARD-SENTINEL-5d1e83c2')).toHaveLength(2);
+    expect(text).toContain(
+      `<!-- From: ${normalize(join(nested, 'AGENTS.md'))} -->\n${PROJECT_GUIDE.trim()}`,
+    );
+    vi.unstubAllEnvs();
   });
 });
