@@ -25,6 +25,7 @@ RESOURCES = APP + "/Contents/Resources/megafloyd"
 NATIVE = RESOURCES + "/bin/megafloyd"
 WEB = RESOURCES + "/web"
 POLICY = RESOURCES + "/MegaFloyd.md"
+POLICY_SOURCE = "MegaFloyd.md"
 DESTINATION_ERROR = "Error: No destination folder specified. Supply an output path within your user space."
 
 
@@ -108,6 +109,10 @@ def host_target():
     return system + "-" + arch
 
 
+def warn(message):
+    print("Warning: " + message, file=sys.stderr)
+
+
 def source_receipt(root):
     paths = subprocess.check_output(["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"])
     selected = []
@@ -117,7 +122,10 @@ def source_receipt(root):
         rel = raw.decode()
         if ".bak" in rel or rel.startswith(".tmp/"):
             continue
-        source = (rel.startswith("floyd-go/") or rel.startswith("scripts/") or
+        # The reviewed standard at the repository root is a build input: the
+        # desktop bundle ships it and the engine enforces it, so a release
+        # receipt that omits it cannot show which policy the build consumed.
+        source = (rel == POLICY_SOURCE or rel.startswith("floyd-go/") or rel.startswith("scripts/") or
                   rel.startswith("desktop/desktop/") or
                   (rel.startswith("floyd-code/") and ("/src/" in rel or rel.endswith("pnpm-lock.yaml"))))
         path = root / rel
@@ -317,6 +325,32 @@ def extract(archive, destination, byte_limit):
                 path.symlink_to(member.linkname)
 
 
+def verify_policy(path, manifest):
+    """Prove the shipped standard is the one the shipped binary enforces.
+
+    A manifest without the policy component was produced before the standard
+    was bound into the release chain. That is an old, already published
+    release rather than a packaging defect, and the component cannot be
+    reconstructed after the fact, so verification warns loudly instead of
+    refusing an otherwise intact archive. Everything packaged by this script
+    carries the component, so the warning can only fire for legacy manifests.
+    """
+    policy = (manifest.get("components") or {}).get("policy")
+    if policy is None:
+        warn("release " + str(manifest.get("release_id")) + " declares no components.policy: "
+             "the MegaFloyd standard it ships is not proven to match the standard its binary enforces")
+        return
+    if policy.get("path") != POLICY or sha256(path / POLICY) != policy.get("sha256"):
+        raise ValueError("installed MegaFloyd standard differs from the release manifest")
+    try:
+        embedded = run([str(path / NATIVE), "prompt", "policy", "--sha256"])
+    except subprocess.CalledProcessError:
+        raise ValueError("installed binary is pre-policy: it does not answer "
+                         "'prompt policy --sha256': " + str(path / NATIVE)) from None
+    if embedded != policy["sha256"]:
+        raise ValueError("installed native prompt differs from the release manifest")
+
+
 def verify_tree(path, manifest):
     check_identity(manifest)
     release_file = path / "release.json"
@@ -329,12 +363,7 @@ def verify_tree(path, manifest):
     actual = inventory(path)
     if actual != release["inventory"] or digest(actual) != manifest["components"]["inventory_sha256"]:
         raise ValueError("package files do not match the manifest inventory")
-    policy = manifest["components"].get("policy")
-    if policy is not None:
-        if policy.get("path") != POLICY or sha256(path / POLICY) != policy.get("sha256"):
-            raise ValueError("installed MegaFloyd standard differs from the release manifest")
-        if run([str(path / NATIVE), "prompt", "policy", "--sha256"]) != policy["sha256"]:
-            raise ValueError("installed native prompt differs from the release manifest")
+    verify_policy(path, manifest)
     result = run([str(path / "bin/megafloyd"), "--version"])
     if result not in ("MegaFloyd version " + manifest["version"], "megafloyd version " + manifest["version"]):
         raise ValueError("package version check failed: " + result)
