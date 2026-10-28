@@ -47,8 +47,8 @@ The owner's advance-notice requirement still applies to any future final build. 
 | 2 | `apps/vis/web/src/components/logs/LogsTab.tsx` | root `logs/` | **fixed** `f8c4541` |
 | 3 | `packages/agent-core-v2/src/human/credentials/*` | root `credentials` | **fixed** `f8c4541` |
 | 4 | `migration-legacy/test/fixtures/**/.floyd/*` | root `.floyd/` | **fixed** `f8c4541` |
-| 5 | `packages/klient/Dockerfile` | `floyd-code/.gitignore:26` bare `Dockerfile` | **open** |
-| 6 | `apps/floyd-code/dist-web/**` (524 files) | copy exclusion + root `dist-web/` | **open** — blocks build gate |
+| 5 | `packages/klient/Dockerfile` | `floyd-code/.gitignore:33` bare `Dockerfile` | **fixed** — `!packages/klient/Dockerfile` at `:38`; file tracked |
+| 6 | `apps/floyd-code/dist-web/**` (524 files) | copy exclusion + root `dist-web/` | **fixed** — 567 entries tracked; web-assets gate passes |
 
 Sweep proof (VERIFIED): `comm` of source-tree tracked files vs MEGAFLOYD tracked files under
 `floyd-code/` = **525 paths = 524 × dist-web + 1 × klient/Dockerfile**. Nothing else is missing.
@@ -60,10 +60,10 @@ Sweep proof (VERIFIED): `comm` of source-tree tracked files vs MEGAFLOYD tracked
 | Phase | Task | Gate |
 |---|---|---|
 | A1 | Fix the ignore-rule defect class (instances 1–4) | `check-ignore` clean; files tracked | **done** `f8c4541` |
-| A2 | Restore instance 5: force-add `packages/klient/Dockerfile` | file tracked; `git ls-files` shows it | open |
-| A3 | Restore instance 6: copy `apps/floyd-code/dist-web/` from source, force-add | `check-web-assets.mjs` prints "Web assets OK" | open |
+| A2 | Restore instance 5: force-add `packages/klient/Dockerfile` | file tracked; `git ls-files` shows it | **done** — `git ls-files --error-unmatch floyd-code/packages/klient/Dockerfile` returns the path and `git check-ignore -v` returns nothing (2026-10-28) |
+| A3 | Restore instance 6: copy `apps/floyd-code/dist-web/` from source, force-add | `check-web-assets.mjs` passes | **done** — `node scripts/check-web-assets.mjs` in `floyd-code/apps/floyd-code` → "Canonical MegaFloyd web assets preserved: 567 files verified", exit 0; `git ls-files` counts 567 entries (2026-10-28) |
 | A4 | Exhaustive "hidden artifact" sweep vs source tree | `comm` diff = ∅ beyond known exclusions | **done** (this plan) |
-| A5 | Fresh-clone build proof: `pnpm install` → `pnpm -r run build` → `main.mjs --version` | exit 0 + version string | open |
+| A5 | Fresh-clone build proof: `pnpm install` → `pnpm -r run build` → `main.mjs --version` | exit 0 + version string | open — note: the pointer at the end of this file says A5 landed in `62c0c0c`; that claim was not re-checked here, so this row stays open |
 | A6 | Record proof + update findings/progress/supercache; commit + push | gates table appended | open |
 
 ### Track B — The merge itself (P2–P5)
@@ -243,3 +243,25 @@ Intermediate builds are authorized. The owner has supplied the behavior examples
 
 Committed summaries: [completion](docs/megafloyd-completion.md), [release verification](docs/megafloyd-release-verification.md), [startup and telemetry](docs/megafloyd-startup-telemetry-verification.md), [frontend preservation](docs/megafloyd-web-branding-preservation.md), [MCP onboarding](docs/megafloyd-mcp-onboarding.md), and [review corrections](docs/megafloyd-review-fixes.md). Detailed private receipts remain outside Git.
 <!-- owner-repair-plan-20261024:end -->
+
+<!-- solidification-plan-pointer-20261027:start -->
+## Active phase pointer (2026-10-27)
+
+The platform-wide audit is complete; the next phase of work is defined by
+[docs/megafloyd-solidification-plan.md](docs/megafloyd-solidification-plan.md)
+(23 defects, 5 ordered phases, per-item definitions of completion, 6 owner decisions in its §5).
+Tracks A–F above remain the historical record; where this plan and the tables above conflict,
+the solidification plan's measured 2026-10-27 baseline wins (e.g. A2/A3 are closed; the
+committed HEAD carries 14 red Go tests; `current` installs the pre-policy release).
+<!-- solidification-plan-pointer-20261027:end -->
+
+<!-- record-repair-pointer-20261028:start -->
+## Current work pointer (2026-10-28)
+
+The approved `MegaFloyd.md` revision (`5bf0bb4a…`, 464 lines) is now pinned in
+[docs/DECISIONS.md](docs/DECISIONS.md) **D-9**, with the prompt-pack manifest regenerated in
+[docs/prompt-pack/MANIFEST.md](docs/prompt-pack/MANIFEST.md); evidence for both is the command
+output quoted in those files, plus the preserved prior edition at
+`docs/prompt-pack/MANIFEST.md.20261028T162620Z.bak-manifest-regenerate`.
+<!-- record-repair-pointer-20261028:end -->
+

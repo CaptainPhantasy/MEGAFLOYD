@@ -32,8 +32,43 @@ jobs:
           go-version-file: floyd-go/go.mod
           cache-dependency-path: floyd-go/go.sum
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: floyd-code/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: floyd-code/.nvmrc
+          cache: pnpm
+          cache-dependency-path: floyd-code/pnpm-lock.yaml
+
       - name: Report toolchain
-        run: go version
+        run: |
+          set -euo pipefail
+          go version
+          node --version
+          pnpm --version
+
+      - name: Verify the prompt packs match the canonical pack
+        run: node scripts/verify-prompt-pack.mjs
+
+      - name: Verify the ship manifest policy pin
+        run: node scripts/verify-ship-manifest.mjs --checkout-only
+
+      - name: Test the prompt and config packages
+        working-directory: floyd-go
+        run: |
+          set -euo pipefail
+          go test ./internal/agent/prompt/... ./internal/config/... ./internal/agent/...
+
+      - name: Check the comment-free packages
+        working-directory: floyd-code
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          node scripts/check-no-comments.mjs
 
       - name: Build linux/amd64
         working-directory: floyd-go

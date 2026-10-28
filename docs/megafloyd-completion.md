@@ -1,8 +1,29 @@
 # MegaFloyd installed completion — 24 October 2026
 
+> **Scope note (added 2026-10-28).** This is the completion record for release
+> `megafloyd-20261024T235658Z`, dated 24 October 2026. It is retained as historical evidence, not
+> as a description of the current installation.
+>
+> - **Remote state is unverifiable from this machine.** `gh auth status` reports "The token in
+>   default is invalid" (checked 2026-10-28), so nothing about PR #1, branch heads, review threads,
+>   or CI runs can be re-read. Every PR/CI statement in this file is a **historical claim from
+>   2026-10-24**, marked as such where it appears; none is re-verified, and none should be quoted as
+>   current.
+> - **The current policy-bearing release is `2026.10.25-megafloyd-20261026T023648Z`**, which is what
+>   `current` links to. It bundles `Resources/megafloyd/MegaFloyd.md` with SHA-256
+>   `6fe55c50…` — the 468-line prior edition, not the standard approved on 2026-10-28
+>   (`5bf0bb4a…`, 464 lines; see `DECISIONS.md` D-9). Of the seventeen directories under
+>   `releases/`, it is the only one carrying a bundled `MegaFloyd.md` at all, and the 24 October
+>   release described below carries none.
+> - **No completion record yet exists for a policy-bearing install.** No released build has been
+>   verified as carrying the approved 464-line standard, so the requirements table below describes
+>   the 24 October build and cannot be read as evidence for the approved policy revision.
+
 The combined release **megafloyd-20261024T235658Z** is installed in the canonical SanDisk project. It includes the animated MegaFloyd wordmark, enlarged founder heads with smooth pointer tracking beside the composer, and the keyboard handoff correction. This is an installed application, not a development-server launch. The actual desktop, native coordinator and web adapter report the new release; the preserved session is left open and idle.
 
 The current package was built from clean review-fix commit `67deb1ae9723e77d7cdc52b3ce23fb430a7af509`, following implementation commit `8c4876a3d166d9ac1ddd9952f27b2ab0bed3dfd3`. [PR #1](https://github.com/CaptainPhantasy/MEGAFLOYD/pull/1) is open for review. All six code-review findings were fixed and their threads resolved; security review completed with zero findings. CI passed for the review-fix commit. Later documentation/package-metadata commits do not change the installed executable.
+
+*(Historical, 2026-10-24, **unverifiable 2026-10-28**: "PR #1 is open for review", "their threads resolved", "CI passed for the review-fix commit". The GitHub token is invalid, so remote PR, thread and CI state cannot be read; treat these as the day's record, not current facts.)*
 
 The owner received advance notice before this combined build. The separate artwork agent’s local 231541 installation preserved the source changes but copied the older web server bundle. The combined release explicitly includes the corrected server bundle alongside the finished artwork. Earlier interrupted/failed package and keyboard attempts remain recorded with their original dates.
 
@@ -21,6 +42,11 @@ The owner received advance notice before this combined build. The separate artwo
 | Optional telemetry | The scheduled job now invokes the signed native executable in canonical `current`, with MegaFloyd’s own state. Its actual launchd tick exited 0; the earlier failed shell-launcher attempt is retained. |
 
 Installed release directory: `/Volumes/SanDisk1Tb/MEGAFLOYD/releases/2026.10.24-megafloyd-20261024T235658Z`. The canonical `current` link, terminal launcher and desktop aliases select this release. The final native message hash is `42d58a749bd2615bcc920241e24b95c4344e1a5f41cb33d493e0918e5d8861c9`.
+
+*(Corrected 2026-10-28: `current` no longer selects this release. `ls -la current` shows
+`current -> releases/2026.10.25-megafloyd-20261026T023648Z`, so the launcher and desktop aliases
+follow that release instead. The directory and message hash above remain this record's evidence at
+its own date; only the "`current` selects this release" sentence is superseded.)*
 
 The final package is published to the existing MegaFloyd update feed. The complete served HTTPS archive matches the local checksum; the installed updater reports this BuildID with no update available. The owner's existing Chrome tab was checked before and after its guarded refresh, without connection errors. The unchanged startup helper/configuration and loaded job were rechecked read-only on this amendment; the actual six-mount launchd execution retains its earlier 234343 timestamp.
 
