@@ -595,8 +595,7 @@ func (c *Config) NormalizeOptions() {
 func megaFloydPolicyPaths(paths []string) []string {
 	var result []string
 	for _, path := range paths {
-		name := filepath.Base(path)
-		if len(name) == len("MegaFloyd.md") && strings.EqualFold(name, "MegaFloyd.md") {
+		if isPolicyFilename(filepath.Base(path)) {
 			result = append(result, path)
 		}
 	}
@@ -620,7 +619,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.NormalizeOptions()
 	c.Options.GlobalContextPaths = megaFloydPolicyPaths(c.Options.GlobalContextPaths)
 	if len(c.Options.GlobalContextPaths) == 0 {
-		c.Options.GlobalContextPaths = []string{filepath.Join(filepath.Dir(GlobalConfig()), "MegaFloyd.md")}
+		c.Options.GlobalContextPaths = []string{filepath.Join(filepath.Dir(GlobalConfig()), megaFloydPolicyFile)}
 	}
 	c.Options.GlobalContextPaths = stableContextPaths(c.Options.GlobalContextPaths)
 
@@ -661,7 +660,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.applyLSPDefaults()
 
 	// This distribution always uses its reviewed policy, regardless of alias.
-	c.Options.ContextPaths = append([]string{"MegaFloyd.md"}, megaFloydPolicyPaths(c.Options.ContextPaths)...)
+	c.Options.ContextPaths = append([]string{megaFloydPolicyFile}, megaFloydPolicyPaths(c.Options.ContextPaths)...)
 	c.Options.ContextPaths = stableContextPaths(c.Options.ContextPaths)
 
 	// Add the default skills directories if not already present.
@@ -700,7 +699,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 
-	c.Options.InitializeAs = "MegaFloyd.md"
+	c.Options.InitializeAs = megaFloydPolicyFile
 }
 
 // powernapDefaults caches the powernap default LSP server catalog. The

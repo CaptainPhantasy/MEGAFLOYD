@@ -72,9 +72,15 @@ func contextPathsExist(dir string) (bool, error) {
 	// Create a slice of lowercase filenames for lookup with slices.Contains
 	var files []string
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			files = append(files, strings.ToLower(entry.Name()))
+		if entry.IsDir() {
+			continue
 		}
+		// This distribution always initializes projects with MegaFloyd.md,
+		// so that exact filename is an existing policy file.
+		if isPolicyFilename(entry.Name()) {
+			return true, nil
+		}
+		files = append(files, strings.ToLower(entry.Name()))
 	}
 
 	// Check if any of the default context paths exist in the directory
