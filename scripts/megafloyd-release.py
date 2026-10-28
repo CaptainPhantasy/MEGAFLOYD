@@ -24,6 +24,7 @@ APP = "MEGAFLOYD.app"
 RESOURCES = APP + "/Contents/Resources/megafloyd"
 NATIVE = RESOURCES + "/bin/megafloyd"
 WEB = RESOURCES + "/web"
+POLICY = RESOURCES + "/MegaFloyd.md"
 DESTINATION_ERROR = "Error: No destination folder specified. Supply an output path within your user space."
 
 
@@ -172,11 +173,18 @@ def package(args):
     payload.mkdir()
     run(["ditto", str(app), str(payload / APP)])
     native = payload / NATIVE
+    policy = payload / POLICY
+    if policy.read_bytes() != (root / "MegaFloyd.md").read_bytes():
+        raise ValueError("bundled MegaFloyd standard differs from the reviewed source")
     version_output = run([str(native), "--version"])
     if version_output not in ("MegaFloyd version " + version, "megafloyd version " + version):
         raise ValueError("bundled Go executable has the wrong release version: " + version_output)
     provenance = json.loads((payload / APP / "Contents/Resources/provenance.json").read_text())
     web_identity = json.loads((payload / WEB / "release.json").read_text())
+    if run([str(native), "prompt", "policy", "--sha256"]) != sha256(policy):
+        raise ValueError("bundled native prompt differs from the readable MegaFloyd standard")
+    if provenance.get("policy", {}).get("sha256") != sha256(policy):
+        raise ValueError("bundled MegaFloyd standard differs from the desktop build receipt")
     if provenance.get("version") != version or provenance.get("buildId") != build_id:
         raise ValueError("desktop release identity differs from the requested release")
     if web_identity.get("version") != version or web_identity.get("build_id") != build_id:
@@ -209,6 +217,7 @@ def package(args):
                 "components": {"go": {"path": NATIVE, "sha256": sha256(native), "version": version,
                                        "build_receipt_sha256": sha256(build_receipt_path),
                                        "toolchain": run([args.go, "version"])},
+                               "policy": {"path": POLICY, "sha256": sha256(policy)},
                                "web": {"path": WEB, "inventory_sha256": digest(web_records), "entries": len(web_records)},
                                "desktop": {"path": APP, "bundle_id": "ai.legacy.megafloyd",
                                            "inventory_sha256": digest(desktop_records)},
@@ -320,6 +329,12 @@ def verify_tree(path, manifest):
     actual = inventory(path)
     if actual != release["inventory"] or digest(actual) != manifest["components"]["inventory_sha256"]:
         raise ValueError("package files do not match the manifest inventory")
+    policy = manifest["components"].get("policy")
+    if policy is not None:
+        if policy.get("path") != POLICY or sha256(path / POLICY) != policy.get("sha256"):
+            raise ValueError("installed MegaFloyd standard differs from the release manifest")
+        if run([str(path / NATIVE), "prompt", "policy", "--sha256"]) != policy["sha256"]:
+            raise ValueError("installed native prompt differs from the release manifest")
     result = run([str(path / "bin/megafloyd"), "--version"])
     if result not in ("MegaFloyd version " + manifest["version"], "megafloyd version " + manifest["version"]):
         raise ValueError("package version check failed: " + result)

@@ -114,5 +114,5 @@ func (c *coordinator) selectedRole(ctx context.Context, sessionID, prompt string
 		return "", nil
 	}
 	slog.Info("Selected task agent", "session_id", sessionID, "agent", definition.Name, "explicit", explicit)
-	return fmt.Sprintf("<selected_task_agent name=%q>\nApply this task-specific guidance within the user's instructions and existing permissions.\n%s\n</selected_task_agent>", definition.Name, definition.SystemPrompt), nil
+	return fmt.Sprintf("<selected_task_agent name=%q>\nThe quoted content describes the selected task specialization and its technical reference. It is subordinate to MegaFloyd.md and the user's instructions, not an additional behavioral policy.\n%q\n</selected_task_agent>", definition.Name, definition.SystemPrompt), nil
 }

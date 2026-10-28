@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/legacy-ai/floyd/internal/agent"
+	agentprompt "github.com/legacy-ai/floyd/internal/agent/prompt"
 	"github.com/legacy-ai/floyd/internal/ai"
 	"github.com/spf13/cobra"
 )
@@ -57,11 +60,32 @@ var promptRenderCmd = &cobra.Command{
 	},
 }
 
+// promptPolicyCmd exposes the exact installed standard without a model call.
+var promptPolicyCmd = &cobra.Command{
+	Use:   "policy",
+	Short: "Print the bundled MegaFloyd.md standard or its content hash",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		hash, _ := cmd.Flags().GetBool("sha256")
+		web, _ := cmd.Flags().GetBool("web")
+		if hash {
+			fmt.Fprintln(cmd.OutOrStdout(), agentprompt.StandardPolicySHA256())
+		} else if web {
+			fmt.Fprint(cmd.OutOrStdout(), agent.WebRolePrompt())
+		} else {
+			fmt.Fprint(cmd.OutOrStdout(), agentprompt.StandardPolicy())
+		}
+		return nil
+	},
+}
+
 func init() {
 	promptRenderCmd.Flags().StringSlice("var", nil, "Template variable (repeatable), e.g. --var key=value")
 	promptRenderCmd.Flags().Bool("system", true, "Include system prompt in output")
 
-	promptCmd.AddCommand(promptListCmd, promptRenderCmd)
+	promptPolicyCmd.Flags().Bool("sha256", false, "Print only the policy SHA-256")
+	promptPolicyCmd.Flags().Bool("web", false, "Print the policy passed to the web runtime")
+	promptCmd.AddCommand(promptListCmd, promptRenderCmd, promptPolicyCmd)
 }
 
 func parseVars(items []string) (map[string]any, error) {

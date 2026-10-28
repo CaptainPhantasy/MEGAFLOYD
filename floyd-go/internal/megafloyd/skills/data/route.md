@@ -14,9 +14,9 @@ Classify the incoming task and route it: handle inline, dispatch a sub-agent, or
    - Deep/slow (repo-wide research, risky refactor): dispatch to the `task` sub-agent (coordinator's named agents — internal/agent/coordinator.go) so heavy tool output stays out of the main window.
    - Independent parallel work (N unrelated checks): `parallel_bash` in one call.
    - Competitive/evaluative (compare approaches): /arena via the swarm coordinator.
-3. For model fit, adjust the dial before dispatch: /effort low for mechanical work, high for architecture (see /effort).
+3. Use the user's configured models and reasoning settings when dispatching. Routing work does not authorize changing those settings.
 4. Report the routing decision in one line: task type, route, executor. Then execute.
 5. Track dispatched work: `mcp_task_status` for MCP tasks; the dispatch returns a task id for swarm submissions (see /arena).
 
 ## Rules
-- Routing is a decision, not a question — never ask the caller which route; classify and act, and say what you chose.
+- Choose routine routing within the authorized task and report the choice. For a remaining material user decision, apply MegaFloyd.md section 3; do not guess or ask an already answered question.

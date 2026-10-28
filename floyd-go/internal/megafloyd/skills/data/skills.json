@@ -46,7 +46,7 @@
     { "name": "why", "file": "why.md", "wraps": ["git log", "transcript_export", "query_floyd_archive"], "mechanism": "workflow-template", "note": "deep rationale records pending; transcripts+git today" },
     { "name": "compare", "file": "compare.md", "wraps": ["git diff --no-index", "get_active_diff", "complexity_estimator", "symbol_index", "transcript_export"], "mechanism": "wraps-existing" },
     { "name": "promote", "file": "promote.md", "wraps": ["apply_patch", "smart_replace", "git worktree", "todos"], "mechanism": "workflow-template" },
-    { "name": "learn", "file": "learn.md", "wraps": ["write (.floyd/commands/<name>.md)", "edit (AGENTS.md)"], "mechanism": "wraps-existing" },
+    { "name": "learn", "file": "learn.md", "wraps": ["write (<selected-project-data-directory>/commands/<name>.md)", "edit (<ProjectName>_SSOT.md)"], "mechanism": "wraps-existing" },
     { "name": "test", "file": "test.md", "wraps": ["task test", "go test -race", "job_output"], "mechanism": "workflow-template" },
     { "name": "lint", "file": "lint.md", "wraps": ["task fmt (gofumpt)", "task lint (golangci-lint)", "task lint:log"], "mechanism": "workflow-template" },
     { "name": "security-review", "file": "security-review.md", "wraps": ["get_active_diff", "project_map", "grep", "failure_mode_enumerator"], "mechanism": "workflow-template" },

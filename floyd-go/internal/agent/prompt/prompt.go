@@ -3,11 +3,14 @@ package prompt
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -21,6 +24,15 @@ import (
 	"github.com/legacy-ai/floyd/internal/skills"
 )
 
+//go:embed megafloyd_standard.md
+var standardPolicy string
+
+// StandardPolicy returns the complete reviewed policy shipped with the harness.
+func StandardPolicy() string { return standardPolicy }
+
+// StandardPolicySHA256 identifies the exact policy bytes loaded by this binary.
+func StandardPolicySHA256() string { return fmt.Sprintf("%x", sha256.Sum256([]byte(standardPolicy))) }
+
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
 	name       string
@@ -31,6 +43,7 @@ type Prompt struct {
 }
 
 type PromptDat struct {
+	StandardPolicy     string
 	Provider           string
 	Model              string
 	Config             config.Config
@@ -161,18 +174,86 @@ func expandPath(path string, store *config.ConfigStore) string {
 	return path
 }
 
-// loadContextFiles loads and deduplicates context files from a list of paths.
-func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]ContextFile {
-	files := map[string][]ContextFile{}
+// policyName matches the complete ASCII filename, regardless of capitalization.
+func policyName(name string) bool {
+	return len(name) == len("MegaFloyd.md") && strings.EqualFold(name, "MegaFloyd.md")
+}
+
+// projectPolicyPaths searches only the current project and its ancestors.
+func projectPolicyPaths(workingDir string) []string {
+	dir, err := filepath.Abs(workingDir)
+	if err != nil {
+		return nil
+	}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	if policyRoot(dir) {
+		return nil
+	}
+	projectRoot, nearestManifest := "", ""
+	for candidate := dir; !policyRoot(candidate); candidate = filepath.Dir(candidate) {
+		if _, err := os.Stat(filepath.Join(candidate, ".git")); err == nil {
+			projectRoot = candidate
+			break
+		}
+		if nearestManifest == "" {
+			for _, name := range []string{"go.mod", "package.json", "pyproject.toml", "Cargo.toml", "pom.xml", "build.gradle"} {
+				if _, err := os.Stat(filepath.Join(candidate, name)); err == nil {
+					nearestManifest = candidate
+					break
+				}
+			}
+		}
+	}
+	if projectRoot == "" {
+		projectRoot = cmp.Or(nearestManifest, dir)
+	}
+	var paths []string
+	for candidate := dir; ; candidate = filepath.Dir(candidate) {
+		paths = append(paths, filepath.Join(candidate, "MegaFloyd.md"))
+		if candidate == projectRoot {
+			break
+		}
+	}
+	return paths
+}
+
+// loadContextFiles preserves input order and resolves MegaFloyd policy names by
+// directory enumeration, including on case-sensitive filesystems.
+func loadContextFiles(paths []string, store *config.ConfigStore) ([]ContextFile, error) {
+	var files []ContextFile
+	seen := map[string]bool{}
 	for _, pth := range paths {
 		expanded := expandPath(pth, store)
-		pathKey := strings.ToLower(expanded)
-		if _, ok := files[pathKey]; ok {
+		fullPath := filepathext.SmartJoin(store.WorkingDir(), expanded)
+		if !policyName(filepath.Base(fullPath)) || policyRoot(filepath.Dir(fullPath)) {
 			continue
 		}
-		files[pathKey] = processContextPath(expanded, store)
+		entries, err := os.ReadDir(filepath.Dir(fullPath))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading policy directory %s: %w", filepath.Dir(fullPath), err)
+		}
+		for _, entry := range entries {
+			if !policyName(entry.Name()) || entry.IsDir() {
+				continue
+			}
+			path := filepath.Join(filepath.Dir(fullPath), entry.Name())
+			if seen[path] {
+				continue
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("reading policy %s: %w", path, err)
+			}
+			seen[path] = true
+			files = append(files, ContextFile{Path: path, Content: string(content)})
+		}
 	}
-	return files
+	return files, nil
 }
 
 func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
@@ -180,8 +261,16 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	platform := cmp.Or(p.platform, runtime.GOOS)
 
 	cfg := store.Config()
-	contextFiles := loadContextFiles(cfg.Options.ContextPaths, store)
-	globalContextFiles := loadContextFiles(cfg.Options.GlobalContextPaths, store)
+	contextPaths := slices.Clone(cfg.Options.ContextPaths)
+	contextPaths = append(projectPolicyPaths(workingDir), contextPaths...)
+	contextFiles, err := loadContextFiles(contextPaths, store)
+	if err != nil {
+		return PromptDat{}, err
+	}
+	globalContextFiles, err := loadContextFiles(cfg.Options.GlobalContextPaths, store)
+	if err != nil {
+		return PromptDat{}, err
+	}
 
 	// Discover and load skills metadata.
 	var availSkillXML string
@@ -229,7 +318,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		}
 		discovered := plugins.Discover(expandedPaths)
 		availPluginXML = plugins.ToPromptXML(discovered)
-		pluginInstrXML = plugins.ToInstructionsXML(discovered)
+
 	}
 
 	isGit := isGitRepo(store.WorkingDir())
@@ -260,12 +349,22 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		}
 	}
 
-	for _, files := range contextFiles {
-		data.ContextFiles = append(data.ContextFiles, files...)
+	data.StandardPolicy = StandardPolicy()
+	// The bundled standard is emitted once; aliases carry no second copy.
+	seenContent := map[string]bool{data.StandardPolicy: true}
+	unique := func(files []ContextFile) []ContextFile {
+		var result []ContextFile
+		for _, file := range files {
+			if seenContent[file.Content] {
+				continue
+			}
+			seenContent[file.Content] = true
+			result = append(result, file)
+		}
+		return result
 	}
-	for _, files := range globalContextFiles {
-		data.GlobalContextFiles = append(data.GlobalContextFiles, files...)
-	}
+	data.GlobalContextFiles = unique(globalContextFiles)
+	data.ContextFiles = unique(contextFiles)
 	return data, nil
 }
 

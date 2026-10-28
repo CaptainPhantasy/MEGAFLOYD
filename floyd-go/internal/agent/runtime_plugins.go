@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -18,17 +17,9 @@ func (c *coordinator) RuntimePluginPrompt(ctx context.Context, sessionID string)
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	snapshot, err := pluginruntime.Read(c.cfg.Config())
-	if err != nil {
-		return "", err
-	}
-	var out []string
-	for _, item := range snapshot.SystemPrompts {
-		if strings.TrimSpace(item.Content) != "" {
-			out = append(out, fmt.Sprintf("<plugin_guidance name=%q>\n%s\n</plugin_guidance>", item.PluginID, item.Content))
-		}
-	}
-	return strings.Join(out, "\n\n"), nil
+	// Plugin tools, schemas, skills and agent metadata remain discoverable.
+	// Plugin-authored system prompts are not another behavioral policy.
+	return "", nil
 }
 
 func (c *coordinator) runtimeAgentSelector() (*AgentSelector, error) {

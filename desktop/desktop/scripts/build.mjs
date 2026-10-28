@@ -8,6 +8,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +17,7 @@ import { signApp, loadSigningIdentity } from './stable-sign.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
 const DESKTOP_SRC = path.join(ROOT, 'desktop');
+const POLICY = path.join(ROOT, '..', 'MegaFloyd.md');
 const BASE = process.env.MEGAFLOYD_BASE ?? path.join(ROOT, 'vendor', 'Kimi-3.2.17-arm64.app');
 const INSTALLED_PLATFORM_BIN = path.join(ROOT, '..', 'current', 'MEGAFLOYD.app', 'Contents', 'Resources', 'megafloyd', 'bin', 'megafloyd');
 const PLATFORM_BIN = process.env.MEGAFLOYD_PLATFORM_BIN ??
@@ -218,6 +220,7 @@ function main() {
   if (path.resolve(OUT) === path.resolve(BASE)) throw new Error('desktop output must differ from its base');
   assertExists(BASE, 'base app');
   assertExists(PLATFORM_BIN, 'platform binary');
+  assertExists(POLICY, 'reviewed MegaFloyd standard');
   assertExists(path.join(PLATFORM_WEB, 'dist', 'main.mjs'), 'platform web server');
   assertExists(path.join(PLATFORM_WEB, 'dist-web', 'index.html'), 'platform web bundle');
   step('verifying preserved custom web assets');
@@ -313,6 +316,8 @@ function main() {
   fs.mkdirSync(path.join(platformDir, 'bin'), { recursive: true });
   fs.copyFileSync(PLATFORM_BIN, path.join(platformDir, 'bin', 'megafloyd'));
   fs.chmodSync(path.join(platformDir, 'bin', 'megafloyd'), 0o755);
+  fs.copyFileSync(POLICY, path.join(platformDir, 'MegaFloyd.md'));
+  const policySHA256 = createHash('sha256').update(fs.readFileSync(POLICY)).digest('hex');
 
   const nodeWrapper = path.join(platformDir, 'bin', 'node');
   fs.writeFileSync(
@@ -386,6 +391,7 @@ function main() {
     product: PRODUCT,
     bundleId: BUNDLE_ID,
     signing: { kind: 'persistent-local-certificate', certificate_sha1: signingIdentity.certificate_sha1 },
+    policy: { path: 'megafloyd/MegaFloyd.md', sha256: policySHA256 },
     version: VERSION,
     buildId: BUILD_ID,
     builtAt: new Date().toISOString(),
@@ -421,6 +427,7 @@ function main() {
   fs.writeFileSync(path.join(BUILD, 'build-receipt.json'), `${JSON.stringify({
     version: VERSION, build_id: BUILD_ID, output: OUT, backup: replacing ? backup : null,
     source_commit: SOURCE_COMMIT, binary: PLATFORM_BIN, web: PLATFORM_WEB,
+    policy: { path: 'Contents/Resources/megafloyd/MegaFloyd.md', sha256: policySHA256 },
   }, null, 2)}\n`);
 
   step(`built ${OUT}`);

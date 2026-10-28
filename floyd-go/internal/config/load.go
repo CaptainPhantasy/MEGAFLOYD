@@ -591,21 +591,38 @@ func (c *Config) NormalizeOptions() {
 	}
 }
 
-func (c *Config) setDefaults(workingDir, dataDir string) {
-	c.NormalizeOptions()
-	if len(c.Options.GlobalContextPaths) == 0 {
-		floydConfigDir := filepath.Dir(GlobalConfig())
-		contextName := "FLOYD.md"
-		if megafloyd.IsActive() {
-			contextName = "MEGAFLOYD.md"
-		}
-		c.Options.GlobalContextPaths = []string{
-			filepath.Join(floydConfigDir, contextName),
-			filepath.Join(filepath.Dir(floydConfigDir), "AGENTS.md"),
+// megaFloydPolicyPaths excludes instructions belonging to other harnesses.
+func megaFloydPolicyPaths(paths []string) []string {
+	var result []string
+	for _, path := range paths {
+		name := filepath.Base(path)
+		if len(name) == len("MegaFloyd.md") && strings.EqualFold(name, "MegaFloyd.md") {
+			result = append(result, path)
 		}
 	}
-	slices.Sort(c.Options.GlobalContextPaths)
-	c.Options.GlobalContextPaths = slices.Compact(c.Options.GlobalContextPaths)
+	return result
+}
+
+// stableContextPaths retains declared precedence while removing exact duplicates.
+func stableContextPaths(paths []string) []string {
+	seen := map[string]bool{}
+	var result []string
+	for _, path := range paths {
+		if !seen[path] {
+			result = append(result, path)
+			seen[path] = true
+		}
+	}
+	return result
+}
+
+func (c *Config) setDefaults(workingDir, dataDir string) {
+	c.NormalizeOptions()
+	c.Options.GlobalContextPaths = megaFloydPolicyPaths(c.Options.GlobalContextPaths)
+	if len(c.Options.GlobalContextPaths) == 0 {
+		c.Options.GlobalContextPaths = []string{filepath.Join(filepath.Dir(GlobalConfig()), "MegaFloyd.md")}
+	}
+	c.Options.GlobalContextPaths = stableContextPaths(c.Options.GlobalContextPaths)
 
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
@@ -643,15 +660,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	// Apply defaults to LSP configurations
 	c.applyLSPDefaults()
 
-	// Add the default context paths if they are not already present
-	contextPaths := defaultContextPaths
-	if megafloyd.IsActive() {
-		contextPaths = []string{"AGENTS.md", "AGENTS.local.md", "MEGAFLOYD.md", "MEGAFLOYD.local.md"}
-	}
-	c.Options.ContextPaths = append(slices.Clone(contextPaths), c.Options.ContextPaths...)
-
-	slices.Sort(c.Options.ContextPaths)
-	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
+	// This distribution always uses its reviewed policy, regardless of alias.
+	c.Options.ContextPaths = append([]string{"MegaFloyd.md"}, megaFloydPolicyPaths(c.Options.ContextPaths)...)
+	c.Options.ContextPaths = stableContextPaths(c.Options.ContextPaths)
 
 	// Add the default skills directories if not already present.
 	for _, dir := range GlobalSkillsDirs() {
@@ -689,7 +700,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 
-	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
+	c.Options.InitializeAs = "MegaFloyd.md"
 }
 
 // powernapDefaults caches the powernap default LSP server catalog. The

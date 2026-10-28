@@ -6,9 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
-	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/legacy-ai/floyd/internal/agent/prompt"
@@ -64,34 +62,15 @@ func mustDecodeTemplate(name string) []byte {
 	return b
 }
 
-// promptTemplate returns the template for the given prompt name. A template
-// found in <global config dir>/prompts/<name>.md.tpl overrides the embedded
-// default, so the engine's prompts are fully external and config-controlled.
-func promptTemplate(name string, embedded []byte) string {
-	overridePath := filepath.Join(filepath.Dir(config.GlobalConfig()), "prompts", name+".md.tpl")
-	if b, err := os.ReadFile(overridePath); err == nil {
-		slog.Info("Using external prompt template", "name", name, "path", overridePath)
-		return string(b)
-	}
+// promptTemplate uses the bundled template generated from MegaFloyd.md.
+// Project policy is discovered by the shared prompt loader.
+func promptTemplate(_ string, embedded []byte) string {
 	return string(embedded)
 }
 
-// roleTemplateFor selects the role template for the running binary. The
-// superfloyd profile carries the SuperFloyd identity; anything else falls back
-// to the general Floyd agent. Selection is pure so it can be tested without
-// environment mutation.
-func roleTemplateFor(profile, binaryName string) []byte {
-	if strings.Contains(strings.ToLower(filepath.Base(binaryName)), "megafloyd") || strings.EqualFold(strings.TrimSpace(profile), "megafloyd") {
-		return megafloydCoderPromptTmpl
-	}
-	if strings.EqualFold(strings.TrimSpace(profile), "superfloyd") {
-		return superfloydCoderPromptTmpl
-	}
-	bin := strings.ToLower(filepath.Base(binaryName))
-	if strings.Contains(bin, "superfloyd") {
-		return superfloydCoderPromptTmpl
-	}
-	return floydGeneralPromptTmpl
+// roleTemplateFor keeps every executable alias on this distribution's policy.
+func roleTemplateFor(_, _ string) []byte {
+	return megafloydCoderPromptTmpl
 }
 
 func coderPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
@@ -120,9 +99,9 @@ func InitializePrompt(cfg *config.ConfigStore) (string, error) {
 	return systemPrompt.Build(context.Background(), "", "", cfg)
 }
 
-// FloydProtocol returns the standard FLOYD.md protocol content.
+// FloydProtocol returns the complete bundled MegaFloyd standard.
 func FloydProtocol() string {
-	return string(floydProtocolTmpl)
+	return prompt.StandardPolicy()
 }
 
 // ProtocolKernel returns the protocol kernel with the owner-mandated output
@@ -131,15 +110,7 @@ func ProtocolKernel() string {
 	return protocolKernelPrompt()
 }
 
-// WebRolePrompt returns the complete authored identity stack for consumers
-// outside the Go session loop — currently the Node web agent, which otherwise
-// runs with a generic system prompt and none of these layers. The order
-// matches the Go session: protocol kernel, FLOYD protocol, selected role
-// template.
+// WebRolePrompt supplies the same approved standard to the Node runtime.
 func WebRolePrompt() string {
-	return strings.Join([]string{
-		strings.TrimSpace(protocolKernelPrompt()),
-		strings.TrimSpace(FloydProtocol()),
-		strings.TrimSpace(promptTemplate("coder", roleTemplateFor(os.Getenv("FLOYD_RUNTIME_PROFILE"), os.Args[0]))),
-	}, "\n\n")
+	return strings.TrimSpace(protocolKernelPrompt()) + "\n\n" + prompt.StandardPolicy()
 }

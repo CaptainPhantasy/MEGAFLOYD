@@ -66,6 +66,8 @@ func TestCanonicalAgentSelectionReachesModel(t *testing.T) {
 	role, err := coordinator.selectedRole(t.Context(), sess.ID, "review this change")
 	require.NoError(t, err)
 	require.Contains(t, role, "CANONICAL_REVIEW_INSTRUCTION")
+	require.Contains(t, role, "subordinate to MegaFloyd.md")
+	require.Contains(t, role, "not an additional behavioral policy")
 	model := &intelligenceModel{finishStreamModel: finishStreamModel{text: "done"}}
 	a := testSessionAgent(env, model, model, "base prompt")
 	_, err = a.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "review this change", SystemPromptAddition: role})
