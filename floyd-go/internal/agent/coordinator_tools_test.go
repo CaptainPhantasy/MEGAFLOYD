@@ -107,7 +107,9 @@ func buildToolNames(t *testing.T, coord *coordinator) []string {
 // TestBuildToolsRegistersCompleteToolSet pins the full tool palette for
 // the default coder agent. It exists because the 2026-10-19 audit
 // counted files instead of registered constructors and concluded that
-// three tools were missing when only vision is a tool.
+// three tools were missing when only vision is a tool. The palette now
+// also carries goal, run_skill, and the two hook-inspection tools, so it
+// is 51 tools; an unexpected extra name still fails this test.
 func TestBuildToolsRegistersCompleteToolSet(t *testing.T) {
 	coord := newToolSetTestCoordinator(t)
 
@@ -124,11 +126,15 @@ func TestBuildToolsRegistersCompleteToolSet(t *testing.T) {
 		"floyd_info",
 		"floyd_logs",
 		"glob",
+		"goal",
 		"grep",
+		"hook_explain",
+		"hook_trace",
 		"job_kill",
 		"job_output",
 		"ls",
 		"multiedit",
+		"run_skill",
 		"sourcegraph",
 		"todos",
 		"view",

@@ -61,14 +61,38 @@ func TestModernHooksDirectShellUsesWorkspaceDispatcher(t *testing.T) {
 			require.NoFileExists(t, filepath.Join(cwd, "original.txt"))
 			page, err := runtime.Store().List(t.Context(), hookstore.Query{SessionID: sess.ID})
 			require.NoError(t, err)
-			require.Len(t, page.Records, 4)
+			// Every configured hook appends a start and a terminal record under
+			// one execution ID. The accepted rewrite also runs through the
+			// mechanical dispatcher, which retains two native receipts: the
+			// registered schema check and the tool result. A rejected rewrite
+			// never reaches the tool body, so it only has hook records.
+			wantHooks := []string{
+				"hook[0]", "hook[0]", "registered-tool-schema", "native-tool-result", "hook[0]", "hook[0]",
+			}
+			wantEvents := []string{
+				hooks.EventPreToolUse, hooks.EventPreToolUse, hooks.EventPreToolUse,
+				hooks.EventPostToolUse, hooks.EventPostToolUse, hooks.EventPostToolUse,
+			}
+			if blocked {
+				wantHooks = []string{"hook[0]", "hook[0]", "hook[0]", "hook[0]"}
+				wantEvents = []string{
+					hooks.EventPreToolUse, hooks.EventPreToolUse,
+					hooks.EventActionRejected, hooks.EventActionRejected,
+				}
+			}
+			require.Len(t, page.Records, len(wantEvents))
+			for i, record := range page.Records {
+				require.Equal(t, wantHooks[i], record.HookName, "record %d hook", i)
+				require.Equal(t, wantEvents[i], record.Event, "record %d event", i)
+			}
+			require.Equal(t, "running", page.Records[0].State)
+			require.Equal(t, "succeeded", page.Records[len(page.Records)-1].State)
 			require.NotEmpty(t, page.Records[0].ToolCallID)
 			require.NotEmpty(t, page.Records[0].RunID)
-			want := hooks.EventPostToolUse
-			if blocked {
-				want = hooks.EventActionRejected
+			if !blocked {
+				require.Equal(t, "builtin", page.Records[2].Mode)
+				require.Equal(t, "builtin", page.Records[3].Mode)
 			}
-			require.Equal(t, want, page.Records[3].Event)
 			msgs, err := messages.List(t.Context(), sess.ID)
 			require.NoError(t, err)
 			if blocked {

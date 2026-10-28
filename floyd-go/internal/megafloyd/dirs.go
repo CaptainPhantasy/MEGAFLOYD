@@ -55,8 +55,9 @@ func DataDir(home string) string {
 	return filepath.Join(home, "data")
 }
 
-// CacheDir returns the cache directory. Precedence: MEGAFLOYD_CACHE_DIR, then
-// an existing FLOYD_CACHE_DIR, then $MEGAFLOYD_HOME/cache.
+// CacheDir returns the cache directory. Precedence: MEGAFLOYD_CACHE_DIR,
+// then $MEGAFLOYD_HOME/cache. An inherited FLOYD_CACHE_DIR is ignored; that
+// chassis mirror is written from this value by [ChassisEnv].
 func CacheDir(home string) string {
 	if dir := os.Getenv(CacheEnv); dir != "" {
 		return mustExpand(dir)

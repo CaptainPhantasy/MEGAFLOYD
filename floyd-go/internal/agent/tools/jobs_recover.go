@@ -39,7 +39,10 @@ func NewRecoverTool(dataDir, workingDir string) fantasy.AgentTool {
 		RecoverToolName,
 		recoverDescription,
 		func(ctx context.Context, params RecoverParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			root := jobsDataDirectory(dataDir, workingDir)
+			root, err := jobsDataDirectory(dataDir, workingDir)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
 			if strings.TrimSpace(params.JobID) != "" {
 				report, text, err := recoverOne(root, params.JobID)
 				if err != nil {

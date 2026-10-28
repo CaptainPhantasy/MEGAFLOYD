@@ -33,7 +33,10 @@ func NewReplayTool(dataDir, workingDir string) fantasy.AgentTool {
 		ReplayToolName,
 		replayDescription,
 		func(ctx context.Context, params ReplayParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			root := jobsDataDirectory(dataDir, workingDir)
+			root, err := jobsDataDirectory(dataDir, workingDir)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
 			if strings.TrimSpace(params.JobID) == "" {
 				return fantasy.NewTextErrorResponse("job_id is required"), nil
 			}

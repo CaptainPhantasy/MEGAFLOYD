@@ -11,12 +11,15 @@ import (
 	"github.com/legacy-ai/floyd/internal/permission"
 )
 
-// jobsDataDirectory resolves the directory that owns the jobs/ subtree.
-func jobsDataDirectory(dataDir, workingDir string) string {
+// jobsDataDirectory resolves the directory that owns the jobs/ subtree. An
+// explicit data directory wins; otherwise job records follow the same
+// account-private workspace store as the scratchpad, so one person's job
+// records are never discovered inside a shared project directory.
+func jobsDataDirectory(dataDir, workingDir string) (string, error) {
 	if dataDir != "" {
-		return dataDir
+		return dataDir, nil
 	}
-	return filepath.Join(workingDir, megafloyd.ProjectDirName())
+	return megafloyd.PersonalDataDir(workingDir, "")
 }
 
 // requestJobsPermission routes a job-record mutation through the same

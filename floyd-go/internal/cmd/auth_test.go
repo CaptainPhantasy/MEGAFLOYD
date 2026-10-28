@@ -453,6 +453,7 @@ func TestBuildAuthRuntimeRequiresHost(t *testing.T) {
 	t.Setenv("MEGAFLOYD_AUTH_HOST", "")
 	t.Setenv("FLOYD_CODE_OAUTH_HOST", "")
 	t.Setenv("FLOYD_OAUTH_HOST", "")
+	t.Setenv("MEGAFLOYD_HOME", t.TempDir())
 
 	_, err := buildAuthRuntime()
 	require.ErrorIs(t, err, megafloydauth.ErrNotConfigured)
