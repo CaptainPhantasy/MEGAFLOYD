@@ -163,8 +163,6 @@ func (c *coordinator) RuntimeReloadPlugins(ctx context.Context, manager *skills.
 	if a, ok := c.currentAgent.(*sessionAgent); ok {
 		a.SetDynamicContext(cacheable.DynamicContext)
 		a.hookRuntime = c.hookDispatcher()
-		a.sessionStartRunner = nil
-		a.stopRunner = nil
 	}
 	return nil
 }

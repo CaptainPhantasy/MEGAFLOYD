@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/legacy-ai/floyd/internal/agent/prompt"
@@ -19,14 +18,10 @@ import (
 // Decoding happens once, in memory, so a shipped binary contains no readable
 // identity text.
 var (
-	floydGeneralPromptTmpl    = mustDecodeTemplate("floyd-general.md.tpl")
-	superfloydCoderPromptTmpl = mustDecodeTemplate("superfloyd-coder.md.tpl")
-	megafloydCoderPromptTmpl  = mustDecodeTemplate("megafloyd-coder.md.tpl")
-	coderPromptTmpl           = mustDecodeTemplate("coder.md.tpl")
-	taskPromptTmpl            = mustDecodeTemplate("task.md.tpl")
-	initializePromptTmpl      = mustDecodeTemplate("initialize.md.tpl")
-	floydProtocolTmpl         = mustDecodeTemplate("floyd_protocol.md.tpl")
-	protocolKernelTmpl        = mustDecodeTemplate("protocol_kernel.md.tpl")
+	megafloydCoderPromptTmpl = mustDecodeTemplate("megafloyd-coder.md.tpl")
+	taskPromptTmpl           = mustDecodeTemplate("task.md.tpl")
+	initializePromptTmpl     = mustDecodeTemplate("initialize.md.tpl")
+	protocolKernelTmpl       = mustDecodeTemplate("protocol_kernel.md.tpl")
 )
 
 // decodeTemplate inflates one encoded template. It returns nil when the name
@@ -62,20 +57,12 @@ func mustDecodeTemplate(name string) []byte {
 	return b
 }
 
-// promptTemplate uses the bundled template generated from MegaFloyd.md.
-// Project policy is discovered by the shared prompt loader.
-func promptTemplate(_ string, embedded []byte) string {
-	return string(embedded)
-}
-
-// roleTemplateFor keeps every executable alias on this distribution's policy.
-func roleTemplateFor(_, _ string) []byte {
-	return megafloydCoderPromptTmpl
-}
-
+// coderPrompt renders the one policy-bearing role template. Every executable
+// alias shares it: there is no profile or binary-name dispatch left, so no
+// alias can select a different behavioral policy. Project policy is discovered
+// by the shared prompt loader; external prompt files are never read.
 func coderPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
-	tmpl := roleTemplateFor(os.Getenv("FLOYD_RUNTIME_PROFILE"), os.Args[0])
-	systemPrompt, err := prompt.NewPrompt("coder", promptTemplate("coder", tmpl), opts...)
+	systemPrompt, err := prompt.NewPrompt("coder", string(megafloydCoderPromptTmpl), opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +70,7 @@ func coderPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 }
 
 func taskPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
-	systemPrompt, err := prompt.NewPrompt("task", promptTemplate("task", taskPromptTmpl), opts...)
+	systemPrompt, err := prompt.NewPrompt("task", string(taskPromptTmpl), opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +79,7 @@ func taskPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 
 // InitializePrompt builds the project-initialization prompt.
 func InitializePrompt(cfg *config.ConfigStore) (string, error) {
-	systemPrompt, err := prompt.NewPrompt("initialize", promptTemplate("initialize", initializePromptTmpl))
+	systemPrompt, err := prompt.NewPrompt("initialize", string(initializePromptTmpl))
 	if err != nil {
 		return "", err
 	}

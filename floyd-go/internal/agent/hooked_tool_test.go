@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/legacy-ai/floyd/internal/agent/tools"
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/hookruntime"
 	"github.com/legacy-ai/floyd/internal/hooks"
 	"github.com/legacy-ai/floyd/internal/permission"
 	"github.com/stretchr/testify/require"
@@ -114,37 +116,35 @@ func TestHookedTool_DenySkipsInnerTool(t *testing.T) {
 	require.Contains(t, resp.Content, "blocked")
 }
 
-func TestWrapToolsWithHooks(t *testing.T) {
+// TestRuntimeWrappersCoverEveryTool guards the live tool-dispatch path: the
+// coordinator and the agentic-fetch tool wrap with the runtime variants, so
+// every non-diagnostic tool must be wrapped for both hooks phases while the
+// hook diagnostics stay read-only.
+func TestRuntimeWrappersCoverEveryTool(t *testing.T) {
 	t.Parallel()
 
-	runner := newRunner(t, `exit 0`)
-	inputs := []fantasy.AgentTool{&fakeTool{name: "a"}, &fakeTool{name: "b"}}
+	runtime := hookruntime.New(t.Context(), config.NewTestStoreWithWorkingDir(&config.Config{Hooks: map[string][]config.HookConfig{}}, t.TempDir()), nil)
+	defer runtime.Close(context.Background())
 
-	t.Run("top-level agent wraps every tool", func(t *testing.T) {
-		t.Parallel()
-		out := wrapToolsWithHooks(inputs, runner, nil, false)
-		require.Len(t, out, len(inputs))
-		for i, tool := range out {
-			_, ok := tool.(*hookedTool)
-			require.Truef(t, ok, "tool %d should be a *hookedTool", i)
-		}
-	})
+	inputs := []fantasy.AgentTool{
+		&fakeTool{name: "view"},
+		&fakeTool{name: tools.HookExplainToolName},
+		&fakeTool{name: tools.HookTraceToolName},
+	}
 
-	t.Run("sub-agent skips the wrap", func(t *testing.T) {
-		t.Parallel()
-		out := wrapToolsWithHooks(inputs, runner, nil, true)
-		require.Equal(t, inputs, out, "sub-agent tools should be returned unwrapped")
-		for _, tool := range out {
-			_, isHooked := tool.(*hookedTool)
-			require.False(t, isHooked, "sub-agent tool should not be wrapped")
-		}
-	})
+	pre := wrapToolsWithRuntimePre(inputs, runtime)
+	require.Len(t, pre, len(inputs))
+	_, isPre := pre[0].(*runtimePreTool)
+	require.True(t, isPre, "an ordinary tool must be wrapped for PreToolUse")
+	require.Equal(t, inputs[1], pre[1], "hook diagnostics stay read-only")
+	require.Equal(t, inputs[2], pre[2], "hook diagnostics stay read-only")
 
-	t.Run("nil runner skips the wrap for both agent kinds", func(t *testing.T) {
-		t.Parallel()
-		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, nil, false))
-		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, nil, true))
-	})
+	observed := wrapToolsWithRuntimeObservation(inputs, runtime)
+	require.Len(t, observed, len(inputs))
+	_, isObserved := observed[0].(*runtimeObservedTool)
+	require.True(t, isObserved, "an ordinary tool must be observed after the call")
+	require.Equal(t, inputs[1], observed[1], "hook diagnostics stay read-only")
+	require.Equal(t, inputs[2], observed[2], "hook diagnostics stay read-only")
 }
 
 // newEventRunner builds a hooks.Runner for an arbitrary event, running

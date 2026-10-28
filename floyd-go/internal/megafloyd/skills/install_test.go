@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +37,17 @@ func TestInstallCommands(t *testing.T) {
 	commandsDir := filepath.Join(dataDir, "commands")
 	entries, err := os.ReadDir(commandsDir)
 	require.NoError(t, err)
-	require.Len(t, entries, wantSkills+wantAliases)
+	var markdown []string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".md") {
+			markdown = append(markdown, entry.Name())
+		}
+	}
+	require.Len(t, markdown, wantSkills+wantAliases)
+
+	claimed, err := readManifest(commandsDir)
+	require.NoError(t, err)
+	require.Len(t, claimed, wantSkills+wantAliases, "the manifest must claim every installed command")
 
 	for name, want := range commands {
 		got, readErr := os.ReadFile(filepath.Join(commandsDir, name))
@@ -90,6 +101,46 @@ func TestInstallCommandsReadOnlyDataDir(t *testing.T) {
 
 	err := InstallCommands(dataDir)
 	require.Error(t, err)
+}
+
+// TestInstallFilesPrunesRetiredSkills proves the install path removes only the
+// commands a previous install claimed: a skill dropped from the data set
+// disappears, a surviving skill stays, and a user's own command file is
+// untouched.
+func TestInstallFilesPrunesRetiredSkills(t *testing.T) {
+	t.Parallel()
+
+	dataDir := t.TempDir()
+	commandsDir := filepath.Join(dataDir, "commands")
+
+	alpha := []byte("# Alpha\n\nAlpha skill.\n")
+	beta := []byte("# Beta\n\nBeta skill.\n")
+	require.NoError(t, installFiles(dataDir, map[string][]byte{
+		"alpha.md": alpha,
+		"beta.md":  beta,
+	}))
+
+	foreign := filepath.Join(commandsDir, "mine.md")
+	foreignContent := []byte("# Mine\n\nA command this installer never wrote.\n")
+	require.NoError(t, os.WriteFile(foreign, foreignContent, 0o644))
+
+	// Beta retires from the source data set.
+	require.NoError(t, installFiles(dataDir, map[string][]byte{"alpha.md": alpha}))
+
+	_, err := os.Stat(filepath.Join(commandsDir, "beta.md"))
+	require.ErrorIs(t, err, fs.ErrNotExist, "the retired skill's command file must be removed")
+
+	kept, err := os.ReadFile(filepath.Join(commandsDir, "alpha.md"))
+	require.NoError(t, err, "the surviving skill must still be installed")
+	require.Equal(t, alpha, kept)
+
+	untouched, err := os.ReadFile(foreign)
+	require.NoError(t, err, "a file the manifest never claimed must survive")
+	require.Equal(t, foreignContent, untouched)
+
+	claimed, err := readManifest(commandsDir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"alpha.md"}, claimed, "the manifest must describe the current install")
 }
 
 // TestInstalledCommandsLoad proves the runtime loader sees every installed

@@ -15,5 +15,5 @@ Run a full self-diagnostic of the floyd installation: config, providers, session
 5. Report as three lists: HEALTHY (component, evidence), DEGRADED (component, exact error, suggested fix), UNKNOWN (could not be checked, why).
 
 ## Notes
-- The dedicated `megafloyd doctor` CLI subcommand arrives with wave 3 (SSOT §3D); when it exists, run it first and use these steps for anything it does not cover.
+- Start with the `megafloyd doctor` CLI subcommand (`internal/cmd/doctor.go`, registered on the root command): it reports runtime health, quality gates, degradation controls, consistency lock and recent failure/circuit state. Use the steps above for what it does not cover — config paths, providers, sessions and logs.
 - Doctor never mutates: read-only checks, fixes proposed not applied.

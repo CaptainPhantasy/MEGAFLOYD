@@ -206,8 +206,6 @@ type sessionAgent struct {
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
-	sessionStartRunner   *hooks.Runner
-	stopRunner           *hooks.Runner
 	hookRuntime          *hookruntime.Runtime
 	dataDirectory        string
 
@@ -287,12 +285,6 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
-	// SessionStartRunner fires SessionStart hooks on a session's first
-	// run. Nil retains the legacy disabled behavior.
-	SessionStartRunner *hooks.Runner
-	// StopRunner fires Stop hooks at every terminal run state. Nil
-	// disables the legacy event.
-	StopRunner *hooks.Runner
 	// Hooks is the application-owned lifecycle dispatcher, including sub-agents.
 	Hooks *hookruntime.Runtime
 	// DataDirectory is the .floyd directory path used to persist ralph
@@ -327,8 +319,6 @@ func NewSessionAgent(
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
-		sessionStartRunner:   opts.SessionStartRunner,
-		stopRunner:           opts.StopRunner,
 		hookRuntime:          opts.Hooks,
 		dataDirectory:        opts.DataDirectory,
 		planService:          opts.PlanService,
@@ -826,7 +816,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		// Stop hooks observe every terminal run state. They cannot
 		// block; their context is logged (the run is already over).
-		if a.hookRuntime != nil || a.stopRunner != nil {
+		if a.hookRuntime != nil {
 			stopData, _ := json.Marshal(map[string]any{
 				"session_id": call.SessionID,
 				"run_id":     call.RunID,
@@ -834,19 +824,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				"cancelled":  complete.Cancelled,
 			})
 			stopCtx := context.WithoutCancel(ctx)
-			var stop hooks.AggregateResult
-			var stopErr error
-			if a.hookRuntime != nil {
-				outcome := "completed"
-				if complete.Cancelled || genCtx.Err() != nil {
-					outcome = "cancelled"
-				} else if complete.Error != "" {
-					outcome = "failed"
-				}
-				stop, stopErr = a.hookRuntime.Run(stopCtx, hooks.EventStop, call.SessionID, "", string(stopData), hooks.EventDetails{Outcome: outcome, IsInterrupt: outcome == "cancelled", Error: complete.Error})
-			} else {
-				stop, stopErr = a.stopRunner.Run(stopCtx, hooks.EventStop, call.SessionID, "", string(stopData))
+			outcome := "completed"
+			if complete.Cancelled || genCtx.Err() != nil {
+				outcome = "cancelled"
+			} else if complete.Error != "" {
+				outcome = "failed"
 			}
+			stop, stopErr := a.hookRuntime.Run(stopCtx, hooks.EventStop, call.SessionID, "", string(stopData), hooks.EventDetails{Outcome: outcome, IsInterrupt: outcome == "cancelled", Error: complete.Error})
 			if stopErr != nil {
 				slog.Warn("Stop hook execution error", "error", stopErr)
 			}
@@ -959,15 +943,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// SessionStart hooks: only on a session's first run. They cannot
 		// block; their context is prepended to the prompt so the model
 		// sees it before its first response.
-		if a.hookRuntime != nil || a.sessionStartRunner != nil {
+		if a.hookRuntime != nil {
 			ssCtx := genCtx
-			var ss hooks.AggregateResult
-			var ssErr error
-			if a.hookRuntime != nil {
-				ss, ssErr = a.hookRuntime.Run(ssCtx, hooks.EventSessionStart, call.SessionID, "", "{}", hooks.EventDetails{Outcome: "started"})
-			} else {
-				ss, ssErr = a.sessionStartRunner.Run(ssCtx, hooks.EventSessionStart, call.SessionID, "", "")
-			}
+			ss, ssErr := a.hookRuntime.Run(ssCtx, hooks.EventSessionStart, call.SessionID, "", "{}", hooks.EventDetails{Outcome: "started"})
 			if ssErr != nil {
 				slog.Warn("SessionStart hook execution error", "error", ssErr)
 			}

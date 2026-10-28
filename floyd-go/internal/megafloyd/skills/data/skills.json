@@ -2,11 +2,6 @@
   "$schema": "https://json-schema.org/draft/07/schema#",
   "title": "megafloyd skills registry",
   "description": "Maps every skill name mandated by SSOT.md §3E to its command file. Skills are markdown prompt commands loaded from .floyd/commands/ (loader: internal/commands/commands.go). One file may answer to several names per the §3E combining rule.",
-  "load_paths": [
-    "~/.config/floyd/commands",
-    "~/.floyd/commands",
-    "<DataDirectory>/commands"
-  ],
   "skills": [
     { "name": "btw", "file": "btw.md", "wraps": [], "mechanism": "protocol-only" },
     { "name": "compact", "file": "compact.md", "wraps": ["context_status", "transcript_export", "manage_scratchpad", "summarizer (internal/agent/summarizer.go)"], "mechanism": "wraps-existing" },
@@ -20,7 +15,7 @@
     { "name": "effort", "file": "effort.md", "wraps": ["reasoning_effort config (internal/config)", "floyd_info"], "mechanism": "wraps-existing" },
     { "name": "fast", "file": "fast.md", "wraps": ["model picker", "reasoning_effort", "parallel_bash"], "mechanism": "workflow-template" },
     { "name": "mcp", "file": "mcp.md", "wraps": ["floyd_info", "list_mcp_resources", "read_mcp_resource", "mcp_task_status"], "mechanism": "wraps-existing" },
-    { "name": "doctor", "file": "doctor.md", "wraps": ["floyd_info", "megafloyd models", "megafloyd session list", "floyd_logs"], "mechanism": "workflow-template", "note": "megafloyd doctor CLI lands wave 3" },
+    { "name": "doctor", "file": "doctor.md", "wraps": ["floyd_info", "megafloyd doctor", "megafloyd models", "megafloyd session list", "floyd_logs"], "mechanism": "workflow-template" },
     { "name": "bisect", "file": "bisect.md", "wraps": ["bash (git bisect)", "get_active_diff", "job_output"], "mechanism": "workflow-template" },
     { "name": "handoff", "file": "handoff.md", "wraps": ["transcript_export", "session fork", "todos", "write"], "mechanism": "wraps-existing" },
     { "name": "arena", "file": "arena.md", "aliases": ["race"], "wraps": ["swarm coordinator (internal/agent/swarm_coordinator.go: Submit/Await)", "git worktree", "get_active_diff"], "mechanism": "wraps-existing", "combined_with": "race (synonyms — SSOT §3E)" },
@@ -36,8 +31,8 @@
     { "name": "spec-sync", "file": "spec-sync.md", "wraps": ["grep", "symbol_index", "list_symbols", "project_map", "edit"], "mechanism": "workflow-template" },
     { "name": "route", "file": "route.md", "wraps": ["complexity_estimator", "task agent (internal/agent/coordinator.go)", "parallel_bash", "mcp_task_status"], "mechanism": "wraps-existing" },
     { "name": "retro", "file": "retro.md", "wraps": ["transcript_export", "write"], "mechanism": "workflow-template" },
-    { "name": "contract", "file": "contract.md", "wraps": ["bash", "write"], "mechanism": "workflow-template", "note": "deep Go plumbing pending; JSON contract template under .harness/contracts/" },
-    { "name": "prove", "file": "prove.md", "wraps": ["bash", "shasum", "write"], "mechanism": "workflow-template", "note": "deep Go plumbing pending; proof records under .harness/proofs/" },
+    { "name": "contract", "file": "contract.md", "wraps": ["bash", "write"], "mechanism": "workflow-template", "note": "records under <data-directory>/jobs/<job_id>/ (contract tool)" },
+    { "name": "prove", "file": "prove.md", "wraps": ["bash", "shasum", "write"], "mechanism": "workflow-template", "note": "receipts under <data-directory>/jobs/<job_id>/ (prove tool)" },
     { "name": "recover", "file": "recover.md", "wraps": ["megafloyd session list/show", "/ralph-status", "floyd_logs", "run markers (internal/agent/run_marker.go)", "transcript_export", "get_active_diff"], "mechanism": "wraps-existing" },
     { "name": "budget", "file": "budget.md", "wraps": ["TokenBudget (internal/agent/budget.go)", "context_status", "manage_scratchpad", "mcp_task_status"], "mechanism": "wraps-existing" },
     { "name": "drift", "file": "drift.md", "wraps": ["grep", "glob", "get_active_diff", "git log", "edit"], "mechanism": "workflow-template" },
