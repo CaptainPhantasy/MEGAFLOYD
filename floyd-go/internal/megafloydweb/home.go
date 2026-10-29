@@ -35,6 +35,7 @@ const (
 	rolePromptEnv   = "FLOYD_ROLE_ADDITIONAL"
 	homeEnv         = "MEGAFLOYD_HOME"
 	nodeEnv         = "MEGAFLOYD_WEB_NODE"
+	electronNodeEnv = "ELECTRON_RUN_AS_NODE"
 	scriptEnv       = "MEGAFLOYD_WEB_SCRIPT"
 	bundleEnv       = "MEGAFLOYD_WEB_BUNDLE"
 	codeRootEnv     = "MEGAFLOYD_CODE_ROOT"
