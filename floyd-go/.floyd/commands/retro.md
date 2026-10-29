@@ -14,7 +14,7 @@ Review the completed task honestly: what happened, what worked, what failed, wha
    - What failed or cost more than it should (with the root cause, not the symptom)?
    - What surprised us (unknown unknowns that became known)?
    - What will we do differently next time (one concrete change)?
-3. Write the record to `.harness/retros/<date>-<slug>.md` with the `write` tool — half a page maximum.
+3. Write the record to the SSOT's recorded evidence folder (`docs/evidence/retros/<date>-<slug>.md` when none is recorded) with the `write` tool — half a page maximum.
 4. Feed the durable insights into /learn; the retro file keeps the story, the skill keeps the pattern.
 5. Report the four answers compactly. No ceremony, no blame — mechanism talk only.
 

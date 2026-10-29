@@ -3310,6 +3310,10 @@ const docTemplate = `{
         "config.HookConfig": {
             "type": "object",
             "properties": {
+                "async": {
+                    "description": "Async starts a tracked observer that cannot influence the action or permissions.",
+                    "type": "boolean"
+                },
                 "command": {
                     "description": "Shell command to execute.",
                     "type": "string"
@@ -3321,6 +3325,14 @@ const docTemplate = `{
                 "name": {
                     "description": "Friendly display name shown in the TUI. Falls back to Command when empty.",
                     "type": "string"
+                },
+                "required": {
+                    "description": "Required makes failures explicit and orders this synchronous event batch.",
+                    "type": "boolean"
+                },
+                "sequential": {
+                    "description": "Sequential orders the matching synchronous batch without making failures mandatory.",
+                    "type": "boolean"
                 },
                 "timeout": {
                     "description": "Timeout in seconds. Default 30.",
@@ -3516,6 +3528,14 @@ const docTemplate = `{
                 },
                 "token_path": {
                     "type": "string"
+                }
+            }
+        },
+        "config.OutputReviewConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
                 }
             }
         },
@@ -3748,6 +3768,9 @@ const docTemplate = `{
                 },
                 "options": {
                     "$ref": "#/definitions/github_com_legacy-ai_floyd_internal_config.Options"
+                },
+                "output_review": {
+                    "$ref": "#/definitions/config.OutputReviewConfig"
                 },
                 "permissions": {
                     "$ref": "#/definitions/config.Permissions"
