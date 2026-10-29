@@ -328,18 +328,19 @@ def extract(archive, destination, byte_limit):
 def verify_policy(path, manifest):
     """Prove the shipped standard is the one the shipped binary enforces.
 
-    A manifest without the policy component was produced before the standard
-    was bound into the release chain. That is an old, already published
-    release rather than a packaging defect, and the component cannot be
-    reconstructed after the fact, so verification warns loudly instead of
-    refusing an otherwise intact archive. Everything packaged by this script
-    carries the component, so the warning can only fire for legacy manifests.
+    The standard is mandatory: a release is only installable when its manifest
+    names the policy it ships and the shipped binary demonstrably enforces the
+    same bytes. A manifest without the component was produced before the
+    standard was bound into the release chain, which means the standard it
+    ships cannot be proven at all, so it is refused rather than downgraded to a
+    warning. There is deliberately no override: a check that can be bypassed is
+    not a check.
     """
     policy = (manifest.get("components") or {}).get("policy")
     if policy is None:
-        warn("release " + str(manifest.get("release_id")) + " declares no components.policy: "
-             "the MegaFloyd standard it ships is not proven to match the standard its binary enforces")
-        return
+        raise ValueError("release " + str(manifest.get("release_id")) + " declares no components.policy: "
+                         "the MegaFloyd standard it ships cannot be proven to match the standard its "
+                         "binary enforces, so the release is refused")
     if policy.get("path") != POLICY or sha256(path / POLICY) != policy.get("sha256"):
         raise ValueError("installed MegaFloyd standard differs from the release manifest")
     try:
