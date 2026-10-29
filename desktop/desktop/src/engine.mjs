@@ -219,7 +219,12 @@ export class Engine extends EventEmitter {
       this.handshakePending = true;
       let meta;
       try {
-        meta = await fetchMeta({ port, token: tokenFromUrl(url) });
+        meta = await fetchMeta({
+          port,
+          token: tokenFromUrl(url),
+          workspace: this.workspace,
+          dataDir: this.dataDir || undefined,
+        });
         if (meta.ok) {
           const target = await requestHandoff(url, sessionFromURL(url));
           if (path.resolve(target.cwd) !== path.resolve(this.workspace)) throw new Error('Handoff selected a different workspace');

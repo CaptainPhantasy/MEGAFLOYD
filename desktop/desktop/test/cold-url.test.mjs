@@ -185,6 +185,8 @@ test('shared adapter startup accepts its actual registered port and desktop rele
   await tick();
   assert.equal(engine.snapshot().port, 57876, 'registered adapter port wins over a newly reserved free port');
   assert.equal(metaPorts[0].port, 57876);
+  assert.equal(metaPorts[0].workspace, '/fixture/workspace', 'the handshake proves the selected workspace');
+  assert.equal(metaPorts[0].dataDir, '/fixture/custom-state', 'the handshake proves the selected store');
   assert.equal(engine.snapshot().handoff.data_dir, '/fixture/custom-state');
   assert.equal(engine.snapshot().runtime.cwd, '/fixture/different-primary-workspace');
   engine.release();
