@@ -104,6 +104,9 @@ func (s *service) clone(ctx context.Context, sourceID string, upToMessage int, t
 			}
 			ids[msg.ID] = id
 		}
+		if err := cloneOutputReview(ctx, tx, sourceID, newID, ids); err != nil {
+			return nil, err
+		}
 		if err := history.CloneTurns(ctx, qtx, sourceID, newID, ids); err != nil {
 			return nil, err
 		}

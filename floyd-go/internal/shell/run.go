@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/legacy-ai/floyd/internal/filelock"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -85,6 +86,15 @@ func Run(ctx context.Context, opts RunOptions) (err error) {
 	if err := validateRedirs(line); err != nil {
 		return err
 	}
+	paths, err := filelock.ShellTargets(line, opts.Cwd)
+	if err != nil {
+		return err
+	}
+	release, err := filelock.Acquire(ctx, paths)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	runner, err := newRunner(opts.Cwd, opts.Env, opts.Stdin, stdout, stderr, opts.BlockFuncs)
 	if err != nil {

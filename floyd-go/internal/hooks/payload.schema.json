@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://megafloyd.local/schemas/hook-event-v1.json",
+  "title": "MegaFloyd hook event v1",
+  "type": "object",
+  "required": ["version", "event", "event_id", "timestamp", "session_id", "cwd", "tool_name", "tool_input"],
+  "properties": {
+    "version": {"const": 1},
+    "event": {"enum": ["PreToolUse", "PostToolUse", "PostToolUseFailure", "ActionRejected", "ToolCancelled", "PermissionRequest", "PermissionResolved", "SessionStart", "Stop"]},
+    "event_id": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "session_id": {"type": "string"},
+    "cwd": {"type": "string"},
+    "tool_name": {"type": "string"},
+    "tool_input": {},
+    "tool_use_id": {"type": "string"},
+    "run_id": {"type": "string"},
+    "parent_tool_use_id": {"type": "string"},
+    "outcome": {"type": "string"},
+    "duration_ms": {"type": "integer", "minimum": 0},
+    "exit_code": {"type": "integer"},
+    "tool_response": {},
+    "error": {"type": "string"},
+    "is_interrupt": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

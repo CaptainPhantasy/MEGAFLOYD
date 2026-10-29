@@ -11,11 +11,25 @@ import (
 type Querier interface {
 	AddSessionUsage(ctx context.Context, arg AddSessionUsageParams) error
 	ClearSessionSummary(ctx context.Context, id string) error
+	CloneOutputReviewAttempts(ctx context.Context, arg CloneOutputReviewAttemptsParams) error
+	CloneOutputReviewCorrections(ctx context.Context, arg CloneOutputReviewCorrectionsParams) error
+	CloneOutputReviewPrivate(ctx context.Context, arg CloneOutputReviewPrivateParams) error
+	CloneOutputReviewPublic(ctx context.Context, arg CloneOutputReviewPublicParams) error
 	CompleteSessionTurn(ctx context.Context, arg CompleteSessionTurnParams) error
 	CompleteTurnFile(ctx context.Context, arg CompleteTurnFileParams) error
 	CopySessionMessage(ctx context.Context, arg CopySessionMessageParams) (Message, error)
+	CountOutputReviewActivations(ctx context.Context) (int64, error)
+	CountOutputReviewCorrections(ctx context.Context, arg CountOutputReviewCorrectionsParams) (int64, error)
+	CountOutputReviewSource(ctx context.Context, arg CountOutputReviewSourceParams) (int64, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
+	CreateHookExecutionRecord(ctx context.Context, arg CreateHookExecutionRecordParams) error
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
+	CreateOutputReviewActivation(ctx context.Context) error
+	CreateOutputReviewAttempt(ctx context.Context, arg CreateOutputReviewAttemptParams) error
+	CreateOutputReviewCloneEvent(ctx context.Context, arg CreateOutputReviewCloneEventParams) error
+	CreateOutputReviewCorrection(ctx context.Context, arg CreateOutputReviewCorrectionParams) error
+	CreateOutputReviewEvent(ctx context.Context, arg CreateOutputReviewEventParams) error
+	CreateOutputReviewPrivate(ctx context.Context, arg CreateOutputReviewPrivateParams) error
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateSessionTurn(ctx context.Context, arg CreateSessionTurnParams) error
 	DeleteFile(ctx context.Context, id string) error
@@ -30,7 +44,12 @@ type Querier interface {
 	GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow, error)
 	GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (Message, error)
 	GetLastSession(ctx context.Context) (Session, error)
+	GetLatestOutputReviewCorrection(ctx context.Context, messageID string) (string, error)
+	GetLatestOutputReviewEvent(ctx context.Context, messageID string) (OutputReviewEvent, error)
+	GetLatestOutputReviewPrivate(ctx context.Context, messageID string) (OutputReviewPrivate, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
+	GetOutputReviewCorrection(ctx context.Context, arg GetOutputReviewCorrectionParams) (string, error)
+	GetOutputReviewPublic(ctx context.Context, messageID string) (OutputReviewPublic, error)
 	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
 	GetSessionTurn(ctx context.Context, arg GetSessionTurnParams) (SessionTurn, error)
@@ -42,14 +61,18 @@ type Querier interface {
 	GetUsageByDayOfWeek(ctx context.Context) ([]GetUsageByDayOfWeekRow, error)
 	GetUsageByHour(ctx context.Context) ([]GetUsageByHourRow, error)
 	GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error)
+	HookExecutionRecordsExist(ctx context.Context) (int64, error)
 	InsertSessionUndoRecord(ctx context.Context, arg InsertSessionUndoRecordParams) error
 	InsertTurnFile(ctx context.Context, arg InsertTurnFileParams) error
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
+	ListHookExecutionRecords(ctx context.Context, arg ListHookExecutionRecordsParams) ([]ListHookExecutionRecordsRow, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListNewFiles(ctx context.Context) ([]File, error)
+	ListOutputReviewCloneEvents(ctx context.Context, sessionID string) ([]ListOutputReviewCloneEventsRow, error)
+	ListOutputReviewEvents(ctx context.Context, arg ListOutputReviewEventsParams) ([]OutputReviewEvent, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessionTurns(ctx context.Context, sessionID string) ([]SessionTurn, error)
 	ListSessions(ctx context.Context) ([]Session, error)
@@ -58,11 +81,13 @@ type Querier interface {
 	MarkSessionBranch(ctx context.Context, arg MarkSessionBranchParams) error
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
+	SeedLegacyOutputReviewPublic(ctx context.Context) error
 	SetSessionArchived(ctx context.Context, arg SetSessionArchivedParams) (Session, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionMetadata(ctx context.Context, arg UpdateSessionMetadataParams) error
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
+	UpsertOutputReviewPublic(ctx context.Context, arg UpsertOutputReviewPublicParams) error
 }
 
 var _ Querier = (*Queries)(nil)

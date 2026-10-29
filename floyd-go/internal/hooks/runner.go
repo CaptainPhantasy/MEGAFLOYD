@@ -3,263 +3,371 @@ package hooks
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/shell"
 )
 
-// abandonGrace is how long runOne waits after ctx cancellation for the
-// shell goroutine to yield before returning control to the caller and
-// letting the goroutine finish on its own. Mirrors the historical
-// cmd.WaitDelay = time.Second behavior of the previous os/exec path.
 const abandonGrace = time.Second
 
-// runShell is the shell executor used by runOne. It is a package-level
-// variable so tests can substitute a blocking or non-yielding
-// implementation to exercise the abandon-on-timeout path without
-// depending on the scheduling behavior of the real interpreter.
 var runShell = shell.Run
 
-// compiledHook pairs a HookConfig with its compiled matcher regex. A nil
-// matcher means "match every tool".
 type compiledHook struct {
 	cfg     config.HookConfig
+	index   int
 	matcher *regexp.Regexp
+	invalid string
 }
-
-// Runner executes hook commands and aggregates their results.
 type Runner struct {
 	hooks      []compiledHook
 	cwd        string
 	projectDir string
+	mu         sync.Mutex
+	recorder   func(Execution)
+	async      map[string]*asyncState
 }
 
-// NewRunner creates a Runner from the given hook configs. Each hook's
-// Matcher is compiled here so the Runner is self-sufficient; callers do
-// not have to pre-compile matchers on the config, and reloads or merges
-// that rebuild HookConfig values can't silently strip compiled state.
-//
-// Hooks whose matcher fails to compile are skipped with a warning rather
-// than treated as match-everything. ValidateHooks is expected to have
-// caught syntax errors earlier, so this is defense in depth.
-func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
-	compiled := make([]compiledHook, 0, len(hooks))
-	for _, h := range hooks {
-		ch := compiledHook{cfg: h}
+func NewRunner(hs []config.HookConfig, cwd, projectDir string) *Runner {
+	r := &Runner{cwd: cwd, projectDir: projectDir}
+	for i, h := range hs {
+		ch := compiledHook{cfg: h, index: i}
 		if h.Matcher != "" {
-			re, err := regexp.Compile(h.Matcher)
+			var err error
+			ch.matcher, err = regexp.Compile(h.Matcher)
 			if err != nil {
-				slog.Warn(
-					"Hook matcher failed to compile; skipping hook",
-					"matcher", h.Matcher,
-					"command", h.Command,
-					"error", err,
-				)
-				continue
+				ch.invalid = "invalid matcher"
+				slog.Warn("Hook matcher failed to compile; skipping hook", "config_index", i, "command_hash", commandHash(h.Command))
 			}
-			ch.matcher = re
 		}
-		compiled = append(compiled, ch)
+		r.hooks = append(r.hooks, ch)
 	}
-	return &Runner{
-		hooks:      compiled,
-		cwd:        cwd,
-		projectDir: projectDir,
-	}
+	return r
 }
 
-// Hooks returns the hook configs the runner was created with, in config
-// order. Hooks whose matcher failed to compile at construction are
-// omitted. Intended for diagnostics; callers should not rely on ordering
-// or identity beyond that.
 func (r *Runner) Hooks() []config.HookConfig {
-	out := make([]config.HookConfig, len(r.hooks))
+	out := []config.HookConfig{}
+	for _, h := range r.hooks {
+		if h.invalid == "" {
+			out = append(out, h.cfg)
+		}
+	}
+	return out
+}
+func commandHash(command string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(command))) }
+func safeName(h compiledHook) string {
+	if h.cfg.Name != "" {
+		return h.cfg.Name
+	}
+	return fmt.Sprintf("hook[%d]", h.index)
+}
+
+type PlanEntry struct {
+	CanApprove    bool   `json:"can_approve"`
+	ConfigIndex   int    `json:"config_index"`
+	Order         int    `json:"order"`
+	Name          string `json:"name"`
+	CommandHash   string `json:"command_hash"`
+	Matcher       string `json:"matcher,omitempty"`
+	Matched       bool   `json:"matched"`
+	DuplicateOf   *int   `json:"duplicate_of,omitempty"`
+	Mode          string `json:"mode"`
+	Required      bool   `json:"required"`
+	CanBlock      bool   `json:"can_block"`
+	CanRewrite    bool   `json:"can_rewrite"`
+	Observational bool   `json:"observational"`
+	Error         string `json:"error,omitempty"`
+}
+
+func invalidMode(event string, h config.HookConfig) string {
+	s, known := EventSemantics(event)
+	if strings.TrimSpace(h.Command) == "" {
+		return "command is required"
+	}
+	if h.Async && (h.Required || h.Sequential) {
+		return "async observers cannot be required or sequential"
+	}
+	if h.Required && !s.CanRequire {
+		return "event does not support required checks"
+	}
+	if h.Async && !s.CanAsync {
+		return "event does not support async observers"
+	}
+	if h.Sequential && !known {
+		return "unknown event does not support ordered checks"
+	}
+	return ""
+}
+
+// Preview uses the execution planner without executing commands or loading files.
+// Duplicate commands with different authority or timeout are separate checks.
+func (r *Runner) Preview(event, tool string) []PlanEntry {
+	s, _ := EventSemantics(event)
+	out := make([]PlanEntry, len(r.hooks))
+	seen := map[string]int{}
+	ordered := false
+	order := 0
 	for i, h := range r.hooks {
-		out[i] = h.cfg
+		row := PlanEntry{ConfigIndex: h.index, Name: safeName(h), CommandHash: commandHash(h.cfg.Command), Matcher: h.cfg.Matcher, Required: h.cfg.Required, Mode: "parallel", CanBlock: s.CanBlock, CanApprove: s.CanApprove, CanRewrite: s.CanRewrite, Observational: s.Observational}
+		if h.cfg.Async {
+			row.Mode = "async"
+			row.CanBlock = false
+			row.CanApprove = false
+			row.CanRewrite = false
+			row.Observational = true
+		}
+		row.Error = h.invalid
+		if row.Error == "" {
+			row.Error = invalidMode(event, h.cfg)
+		}
+		row.Matched = row.Error == "" && (h.matcher == nil || h.matcher.MatchString(tool))
+		if row.Matched {
+			key := fmt.Sprintf("%s\x00%d\x00%t\x00%t\x00%t", h.cfg.Command, h.cfg.Timeout, h.cfg.Required, h.cfg.Sequential, h.cfg.Async)
+			if prev, ok := seen[key]; ok {
+				v := prev
+				row.DuplicateOf = &v
+			} else {
+				seen[key] = h.index
+				order++
+				row.Order = order
+				if !h.cfg.Async && (h.cfg.Required || h.cfg.Sequential) {
+					ordered = true
+				}
+			}
+		}
+		out[i] = row
+	}
+	if ordered {
+		for i := range out {
+			if out[i].Mode != "async" {
+				out[i].Mode = "ordered"
+			}
+		}
 	}
 	return out
 }
 
-// Run executes all matching hooks for the given event and tool, returning
-// an aggregated result.
-func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolInputJSON string) (AggregateResult, error) {
-	matching := r.matchingHooks(toolName)
-	if len(matching) == 0 {
-		return AggregateResult{Decision: DecisionNone}, nil
+func (r *Runner) matchingHooks(tool string) []config.HookConfig {
+	var out []config.HookConfig
+	for _, h := range r.hooks {
+		if h.invalid == "" && (h.matcher == nil || h.matcher.MatchString(tool)) {
+			out = append(out, h.cfg)
+		}
 	}
+	return out
+}
 
-	// Deduplicate by command string.
-	seen := make(map[string]bool, len(matching))
-	var deduped []config.HookConfig
-	for _, h := range matching {
-		if seen[h.Command] {
+func (r *Runner) Run(ctx context.Context, event, sid, tool, input string) (AggregateResult, error) {
+	if canonical, err := config.NormalizeHookEvent(event); err == nil {
+		event = canonical
+	}
+	ctx = ensureEventDetails(ctx)
+	plan := r.Preview(event, tool)
+	s, _ := EventSemantics(event)
+	for i, row := range plan {
+		if row.Error != "" && r.hooks[i].cfg.Required {
+			a := AggregateResult{RequiredFailure: true, Reason: "Required hook configuration is invalid: " + row.Error}
+			if s.CanBlock {
+				a.Decision = DecisionDeny
+			}
+			return a, nil
+		}
+	}
+	type item struct {
+		hook   compiledHook
+		plan   PlanEntry
+		result HookResult
+		ran    bool
+	}
+	var syncItems []*item
+	agg := AggregateResult{Decision: DecisionNone}
+	for i, row := range plan {
+		if !row.Matched || row.DuplicateOf != nil {
 			continue
 		}
-		seen[h.Command] = true
-		deduped = append(deduped, h)
+		h := r.hooks[i]
+		if h.cfg.Async {
+			agg.AsyncJobs = append(agg.AsyncJobs, r.startAsync(ctx, event, sid, tool, input, h, row.Mode))
+			continue
+		}
+		syncItems = append(syncItems, &item{hook: h, plan: row})
 	}
-
-	envVars := BuildEnv(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
-	payload := BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
-
-	results := make([]HookResult, len(deduped))
-	var wg sync.WaitGroup
-	wg.Add(len(deduped))
-
-	for i, h := range deduped {
-		go func(idx int, hook config.HookConfig) {
-			defer wg.Done()
-			results[idx] = r.runOne(ctx, hook, envVars, payload)
-		}(i, h)
+	ordered := len(syncItems) > 0 && syncItems[0].plan.Mode == "ordered"
+	currentInput := input
+	if ordered {
+		for _, it := range syncItems {
+			if ctx.Err() != nil {
+				agg.Cancelled = true
+				break
+			}
+			it.ran = true
+			it.result = r.execute(ctx, event, sid, tool, currentInput, it.hook, it.plan.Mode, "")
+			if s.CanRewrite && it.result.UpdatedInput != "" {
+				if next, err := shallowMerge(currentInput, it.result.UpdatedInput); err == nil {
+					currentInput = next
+				}
+			}
+			if it.hook.cfg.Required && failed(it.result) {
+				agg.RequiredFailure = true
+				break
+			}
+			if it.result.Cancelled {
+				agg.Cancelled = true
+				break
+			}
+			if s.CanBlock && (it.result.Decision == DecisionDeny || it.result.Halt) {
+				break
+			}
+		}
+	} else {
+		var wg sync.WaitGroup
+		for _, it := range syncItems {
+			it.ran = true
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				it.result = r.execute(ctx, event, sid, tool, input, it.hook, it.plan.Mode, "")
+			}()
+		}
+		wg.Wait()
 	}
-	wg.Wait()
-
-	agg := aggregate(results, toolInputJSON)
-	agg.Hooks = make([]HookInfo, len(deduped))
-	for i, h := range deduped {
-		agg.Hooks[i] = HookInfo{
-			Name:         h.DisplayName(),
-			Matcher:      h.Matcher,
-			Decision:     results[i].Decision.String(),
-			Halt:         results[i].Halt,
-			Reason:       results[i].Reason,
-			InputRewrite: results[i].UpdatedInput != "",
+	var results []HookResult
+	for _, it := range syncItems {
+		if !it.ran {
+			continue
+		}
+		result := it.result
+		if result.Cancelled {
+			agg.Cancelled = true
+		}
+		if it.hook.cfg.Required && failed(result) {
+			agg.RequiredFailure = true
+		}
+		if !s.CanBlock {
+			result.Decision = DecisionNone
+			result.Halt = false
+		}
+		if !s.CanRewrite {
+			result.UpdatedInput = ""
+		}
+		results = append(results, result)
+		agg.Hooks = append(agg.Hooks, HookInfo{Name: safeName(it.hook), Matcher: it.hook.cfg.Matcher, Decision: it.result.Decision.String(), Halt: it.result.Halt, Reason: it.result.Reason, InputRewrite: s.CanRewrite && it.result.UpdatedInput != ""})
+	}
+	if agg.Cancelled {
+		for _, it := range syncItems {
+			if it.hook.cfg.Required && !it.ran {
+				agg.RequiredFailure = true
+			}
 		}
 	}
-	slog.Info(
-		"Hook completed",
-		"event", eventName,
-		"tool", toolName,
-		"hooks", len(deduped),
-		"decision", agg.Decision.String(),
-	)
+	merged := aggregate(results, input)
+	agg.Decision = merged.Decision
+	agg.Halt = merged.Halt
+	agg.Reason = merged.Reason
+	agg.Context = merged.Context
+	agg.UpdatedInput = merged.UpdatedInput
+	agg.HookCount = len(results) + len(agg.AsyncJobs)
+	if agg.RequiredFailure && agg.Reason == "" {
+		agg.Reason = "Required hook check did not succeed"
+	}
+	if s.CanBlock && (agg.RequiredFailure || agg.Cancelled) {
+		agg.Decision = DecisionDeny
+	}
 	return agg, nil
 }
 
-// matchingHooks returns hooks whose matcher matches the tool name (or has
-// no matcher, which matches everything).
-func (r *Runner) matchingHooks(toolName string) []config.HookConfig {
-	var matched []config.HookConfig
-	for _, h := range r.hooks {
-		if h.matcher == nil || h.matcher.MatchString(toolName) {
-			matched = append(matched, h.cfg)
-		}
-	}
-	return matched
+func failed(result HookResult) bool {
+	return result.ExecutionError != "" || result.Cancelled || result.TimedOut || result.Decision == DecisionDeny || result.Halt
 }
 
-// runOne executes a single hook command and returns its result.
-//
-// Execution goes through Floyd's embedded POSIX shell (shell.Run) so the
-// same interpreter, builtins, and coreutils are visible to hooks as to
-// the bash tool. BlockFuncs are intentionally omitted: hooks are
-// user-authored config that carry the same trust as a shell alias.
-//
-// A hook that fails to yield after its deadline has passed is abandoned
-// after abandonGrace so the caller never blocks longer than
-// timeout + abandonGrace. Ownership of the stdout and stderr buffers is
-// strictly single-goroutine:
-//   - before receiving from `done`, only the goroutine writes to them;
-//   - after `done` delivers a value, the goroutine is finished and the
-//     outer frame reads them;
-//   - on the abandon path, the goroutine may still be writing and the
-//     outer frame must not touch them again.
-func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVars []string, payload []byte) HookResult {
-	timeout := hook.TimeoutDuration()
-	ctx, cancel := context.WithTimeout(parentCtx, timeout)
-	defer cancel()
+func (r *Runner) execute(ctx context.Context, event, sid, tool, input string, h compiledHook, mode, jobID string) HookResult {
+	d, _ := ctx.Value(eventDetailsKey{}).(EventDetails)
+	e := Execution{Outcome: d.Outcome, ID: uuid.NewString(), EventID: d.EventID, Event: event, SessionID: sid, ToolName: tool, ToolCallID: d.ToolCallID, RunID: d.RunID, ParentToolCallID: d.ParentToolCallID, ConfigIndex: h.index, HookName: safeName(h), CommandHash: commandHash(h.cfg.Command), Mode: mode, Required: h.cfg.Required, State: "running", StartedAt: time.Now().UnixNano(), Decision: "none", AsyncJobID: jobID}
+	r.record(e)
+	result := r.runOne(ctx, h.cfg, BuildEnv(event, tool, sid, r.cwd, r.projectDir, input), BuildPayloadContext(ctx, event, sid, r.cwd, tool, input))
+	if h.cfg.Required && result.UpdatedInput != "" {
+		if _, err := shallowMerge(input, result.UpdatedInput); err != nil {
+			result.ExecutionError = "invalid_rewrite"
+			result.Decision = DecisionDeny
+			result.UpdatedInput = ""
+		}
+	}
+	e.State = resultState(result)
+	e.FinishedAt = time.Now().UnixNano()
+	e.Decision = result.Decision.String()
+	e.ExitCode = result.ExitCode
+	semantics, _ := EventSemantics(event)
+	e.Rewritten = semantics.CanRewrite && result.UpdatedInput != ""
+	e.ErrorKind = result.ExecutionError
+	r.record(e)
+	return result
+}
 
+// Hooks execute trusted user-authored shell configuration. They are not a sandbox.
+// Cancellation never reads buffers until the interpreter yields; an uncooperative
+// runner is abandoned after the same historical one-second grace period.
+func (r *Runner) runOne(parent context.Context, h config.HookConfig, env []string, payload []byte) HookResult {
+	ctx, cancel := context.WithTimeout(parent, h.TimeoutDuration())
+	defer cancel()
 	var stdout, stderr bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		done <- runShell(ctx, shell.RunOptions{
-			Command: hook.Command,
-			Cwd:     r.cwd,
-			Env:     envVars,
-			Stdin:   bytes.NewReader(payload),
-			Stdout:  &stdout,
-			Stderr:  &stderr,
-		})
+		done <- runShell(ctx, shell.RunOptions{Command: h.Command, Cwd: r.cwd, Env: env, Stdin: bytes.NewReader(payload), Stdout: &stdout, Stderr: &stderr})
 	}()
-
 	var err error
 	select {
 	case err = <-done:
-		// Normal path: goroutine has finished, buffers are safe to read.
 	case <-ctx.Done():
 		select {
 		case err = <-done:
-			// Interpreter yielded within the grace period; safe to read.
 		case <-time.After(abandonGrace):
-			slog.Warn(
-				"Hook did not yield after cancel; abandoning goroutine",
-				"command", hook.Command,
-				"timeout", timeout,
-			)
-			// The goroutine may still be writing to stdout/stderr; do
-			// not read either buffer below this point.
-			return HookResult{Decision: DecisionNone}
+			return interrupted(parent)
 		}
 	}
-
-	if shell.IsInterrupt(err) {
-		// Distinguish timeout from parent cancellation.
-		if parentCtx.Err() != nil {
-			slog.Debug("Hook cancelled by parent context", "command", hook.Command)
-		} else {
-			slog.Warn("Hook timed out", "command", hook.Command, "timeout", timeout)
-		}
-		return HookResult{Decision: DecisionNone}
+	if ctx.Err() != nil || shell.IsInterrupt(err) {
+		return interrupted(parent)
 	}
-
+	code := shell.ExitCode(err)
 	if err != nil {
-		exitCode := shell.ExitCode(err)
-		switch exitCode {
-		case 2:
-			// Exit code 2 = block this tool call. Stderr is the reason.
-			reason := strings.TrimSpace(stderr.String())
-			if reason == "" {
-				reason = "blocked by hook"
-			}
-			return HookResult{
-				Decision: DecisionDeny,
-				Reason:   reason,
-			}
-		case HaltExitCode:
-			// Exit code 49 = halt the whole turn. Stderr is the reason.
-			reason := strings.TrimSpace(stderr.String())
-			if reason == "" {
-				reason = "turn halted by hook"
-			}
-			return HookResult{
-				Decision: DecisionDeny,
-				Halt:     true,
-				Reason:   reason,
+		result := HookResult{ExitCode: &code}
+		switch code {
+		case 2, HaltExitCode:
+			result.Decision = DecisionDeny
+			result.Halt = code == HaltExitCode
+			result.Reason = strings.TrimSpace(stderr.String())
+			if result.Reason == "" {
+				result.Reason = "blocked by hook"
 			}
 		default:
-			// Other non-zero exits are non-blocking errors.
-			slog.Warn(
-				"Hook failed with non-blocking error",
-				"command", hook.Command,
-				"exit_code", exitCode,
-				"stderr", strings.TrimSpace(stderr.String()),
-				"error", err,
-			)
-			return HookResult{Decision: DecisionNone}
+			result.ExecutionError = "nonzero_exit"
+			if h.Required {
+				result.Decision = DecisionDeny
+				result.Reason = "Required hook command failed"
+			}
+			slog.Warn("Hook command failed", "command_hash", commandHash(h.Command), "exit_code", code)
+		}
+		return result
+	}
+	if h.Required {
+		if err := validateRequiredOutput(stdout.String()); err != nil {
+			return HookResult{Decision: DecisionDeny, Reason: "Required hook returned invalid output", ExecutionError: "invalid_output", ExitCode: &code}
 		}
 	}
-
-	// Exit code 0 — parse stdout JSON.
 	result := parseStdout(stdout.String())
-	slog.Debug(
-		"Hook executed",
-		"command", hook.Command,
-		"decision", result.Decision.String(),
-	)
+	result.ExitCode = &code
 	return result
+}
+
+func interrupted(parent context.Context) HookResult {
+	if parent.Err() != nil {
+		return HookResult{Cancelled: true, ExecutionError: "cancelled"}
+	}
+	return HookResult{TimedOut: true, ExecutionError: "timeout"}
 }

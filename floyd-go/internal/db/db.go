@@ -30,6 +30,18 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.clearSessionSummaryStmt, err = db.PrepareContext(ctx, clearSessionSummary); err != nil {
 		return nil, fmt.Errorf("error preparing query ClearSessionSummary: %w", err)
 	}
+	if q.cloneOutputReviewAttemptsStmt, err = db.PrepareContext(ctx, cloneOutputReviewAttempts); err != nil {
+		return nil, fmt.Errorf("error preparing query CloneOutputReviewAttempts: %w", err)
+	}
+	if q.cloneOutputReviewCorrectionsStmt, err = db.PrepareContext(ctx, cloneOutputReviewCorrections); err != nil {
+		return nil, fmt.Errorf("error preparing query CloneOutputReviewCorrections: %w", err)
+	}
+	if q.cloneOutputReviewPrivateStmt, err = db.PrepareContext(ctx, cloneOutputReviewPrivate); err != nil {
+		return nil, fmt.Errorf("error preparing query CloneOutputReviewPrivate: %w", err)
+	}
+	if q.cloneOutputReviewPublicStmt, err = db.PrepareContext(ctx, cloneOutputReviewPublic); err != nil {
+		return nil, fmt.Errorf("error preparing query CloneOutputReviewPublic: %w", err)
+	}
 	if q.completeSessionTurnStmt, err = db.PrepareContext(ctx, completeSessionTurn); err != nil {
 		return nil, fmt.Errorf("error preparing query CompleteSessionTurn: %w", err)
 	}
@@ -39,11 +51,41 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.copySessionMessageStmt, err = db.PrepareContext(ctx, copySessionMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query CopySessionMessage: %w", err)
 	}
+	if q.countOutputReviewActivationsStmt, err = db.PrepareContext(ctx, countOutputReviewActivations); err != nil {
+		return nil, fmt.Errorf("error preparing query CountOutputReviewActivations: %w", err)
+	}
+	if q.countOutputReviewCorrectionsStmt, err = db.PrepareContext(ctx, countOutputReviewCorrections); err != nil {
+		return nil, fmt.Errorf("error preparing query CountOutputReviewCorrections: %w", err)
+	}
+	if q.countOutputReviewSourceStmt, err = db.PrepareContext(ctx, countOutputReviewSource); err != nil {
+		return nil, fmt.Errorf("error preparing query CountOutputReviewSource: %w", err)
+	}
 	if q.createFileStmt, err = db.PrepareContext(ctx, createFile); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateFile: %w", err)
 	}
+	if q.createHookExecutionRecordStmt, err = db.PrepareContext(ctx, createHookExecutionRecord); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateHookExecutionRecord: %w", err)
+	}
 	if q.createMessageStmt, err = db.PrepareContext(ctx, createMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateMessage: %w", err)
+	}
+	if q.createOutputReviewActivationStmt, err = db.PrepareContext(ctx, createOutputReviewActivation); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateOutputReviewActivation: %w", err)
+	}
+	if q.createOutputReviewAttemptStmt, err = db.PrepareContext(ctx, createOutputReviewAttempt); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateOutputReviewAttempt: %w", err)
+	}
+	if q.createOutputReviewCloneEventStmt, err = db.PrepareContext(ctx, createOutputReviewCloneEvent); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateOutputReviewCloneEvent: %w", err)
+	}
+	if q.createOutputReviewCorrectionStmt, err = db.PrepareContext(ctx, createOutputReviewCorrection); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateOutputReviewCorrection: %w", err)
+	}
+	if q.createOutputReviewEventStmt, err = db.PrepareContext(ctx, createOutputReviewEvent); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateOutputReviewEvent: %w", err)
+	}
+	if q.createOutputReviewPrivateStmt, err = db.PrepareContext(ctx, createOutputReviewPrivate); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateOutputReviewPrivate: %w", err)
 	}
 	if q.createSessionStmt, err = db.PrepareContext(ctx, createSession); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateSession: %w", err)
@@ -87,8 +129,23 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getLastSessionStmt, err = db.PrepareContext(ctx, getLastSession); err != nil {
 		return nil, fmt.Errorf("error preparing query GetLastSession: %w", err)
 	}
+	if q.getLatestOutputReviewCorrectionStmt, err = db.PrepareContext(ctx, getLatestOutputReviewCorrection); err != nil {
+		return nil, fmt.Errorf("error preparing query GetLatestOutputReviewCorrection: %w", err)
+	}
+	if q.getLatestOutputReviewEventStmt, err = db.PrepareContext(ctx, getLatestOutputReviewEvent); err != nil {
+		return nil, fmt.Errorf("error preparing query GetLatestOutputReviewEvent: %w", err)
+	}
+	if q.getLatestOutputReviewPrivateStmt, err = db.PrepareContext(ctx, getLatestOutputReviewPrivate); err != nil {
+		return nil, fmt.Errorf("error preparing query GetLatestOutputReviewPrivate: %w", err)
+	}
 	if q.getMessageStmt, err = db.PrepareContext(ctx, getMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query GetMessage: %w", err)
+	}
+	if q.getOutputReviewCorrectionStmt, err = db.PrepareContext(ctx, getOutputReviewCorrection); err != nil {
+		return nil, fmt.Errorf("error preparing query GetOutputReviewCorrection: %w", err)
+	}
+	if q.getOutputReviewPublicStmt, err = db.PrepareContext(ctx, getOutputReviewPublic); err != nil {
+		return nil, fmt.Errorf("error preparing query GetOutputReviewPublic: %w", err)
 	}
 	if q.getRecentActivityStmt, err = db.PrepareContext(ctx, getRecentActivity); err != nil {
 		return nil, fmt.Errorf("error preparing query GetRecentActivity: %w", err)
@@ -123,6 +180,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getUsageByModelStmt, err = db.PrepareContext(ctx, getUsageByModel); err != nil {
 		return nil, fmt.Errorf("error preparing query GetUsageByModel: %w", err)
 	}
+	if q.hookExecutionRecordsExistStmt, err = db.PrepareContext(ctx, hookExecutionRecordsExist); err != nil {
+		return nil, fmt.Errorf("error preparing query HookExecutionRecordsExist: %w", err)
+	}
 	if q.insertSessionUndoRecordStmt, err = db.PrepareContext(ctx, insertSessionUndoRecord); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertSessionUndoRecord: %w", err)
 	}
@@ -138,6 +198,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listFilesBySessionStmt, err = db.PrepareContext(ctx, listFilesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesBySession: %w", err)
 	}
+	if q.listHookExecutionRecordsStmt, err = db.PrepareContext(ctx, listHookExecutionRecords); err != nil {
+		return nil, fmt.Errorf("error preparing query ListHookExecutionRecords: %w", err)
+	}
 	if q.listLatestSessionFilesStmt, err = db.PrepareContext(ctx, listLatestSessionFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListLatestSessionFiles: %w", err)
 	}
@@ -146,6 +209,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listNewFilesStmt, err = db.PrepareContext(ctx, listNewFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListNewFiles: %w", err)
+	}
+	if q.listOutputReviewCloneEventsStmt, err = db.PrepareContext(ctx, listOutputReviewCloneEvents); err != nil {
+		return nil, fmt.Errorf("error preparing query ListOutputReviewCloneEvents: %w", err)
+	}
+	if q.listOutputReviewEventsStmt, err = db.PrepareContext(ctx, listOutputReviewEvents); err != nil {
+		return nil, fmt.Errorf("error preparing query ListOutputReviewEvents: %w", err)
 	}
 	if q.listSessionReadFilesStmt, err = db.PrepareContext(ctx, listSessionReadFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessionReadFiles: %w", err)
@@ -171,6 +240,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.renameSessionStmt, err = db.PrepareContext(ctx, renameSession); err != nil {
 		return nil, fmt.Errorf("error preparing query RenameSession: %w", err)
 	}
+	if q.seedLegacyOutputReviewPublicStmt, err = db.PrepareContext(ctx, seedLegacyOutputReviewPublic); err != nil {
+		return nil, fmt.Errorf("error preparing query SeedLegacyOutputReviewPublic: %w", err)
+	}
 	if q.setSessionArchivedStmt, err = db.PrepareContext(ctx, setSessionArchived); err != nil {
 		return nil, fmt.Errorf("error preparing query SetSessionArchived: %w", err)
 	}
@@ -186,6 +258,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateSessionTitleAndUsageStmt, err = db.PrepareContext(ctx, updateSessionTitleAndUsage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSessionTitleAndUsage: %w", err)
 	}
+	if q.upsertOutputReviewPublicStmt, err = db.PrepareContext(ctx, upsertOutputReviewPublic); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertOutputReviewPublic: %w", err)
+	}
 	return &q, nil
 }
 
@@ -199,6 +274,26 @@ func (q *Queries) Close() error {
 	if q.clearSessionSummaryStmt != nil {
 		if cerr := q.clearSessionSummaryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing clearSessionSummaryStmt: %w", cerr)
+		}
+	}
+	if q.cloneOutputReviewAttemptsStmt != nil {
+		if cerr := q.cloneOutputReviewAttemptsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing cloneOutputReviewAttemptsStmt: %w", cerr)
+		}
+	}
+	if q.cloneOutputReviewCorrectionsStmt != nil {
+		if cerr := q.cloneOutputReviewCorrectionsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing cloneOutputReviewCorrectionsStmt: %w", cerr)
+		}
+	}
+	if q.cloneOutputReviewPrivateStmt != nil {
+		if cerr := q.cloneOutputReviewPrivateStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing cloneOutputReviewPrivateStmt: %w", cerr)
+		}
+	}
+	if q.cloneOutputReviewPublicStmt != nil {
+		if cerr := q.cloneOutputReviewPublicStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing cloneOutputReviewPublicStmt: %w", cerr)
 		}
 	}
 	if q.completeSessionTurnStmt != nil {
@@ -216,14 +311,64 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing copySessionMessageStmt: %w", cerr)
 		}
 	}
+	if q.countOutputReviewActivationsStmt != nil {
+		if cerr := q.countOutputReviewActivationsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countOutputReviewActivationsStmt: %w", cerr)
+		}
+	}
+	if q.countOutputReviewCorrectionsStmt != nil {
+		if cerr := q.countOutputReviewCorrectionsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countOutputReviewCorrectionsStmt: %w", cerr)
+		}
+	}
+	if q.countOutputReviewSourceStmt != nil {
+		if cerr := q.countOutputReviewSourceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countOutputReviewSourceStmt: %w", cerr)
+		}
+	}
 	if q.createFileStmt != nil {
 		if cerr := q.createFileStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createFileStmt: %w", cerr)
 		}
 	}
+	if q.createHookExecutionRecordStmt != nil {
+		if cerr := q.createHookExecutionRecordStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createHookExecutionRecordStmt: %w", cerr)
+		}
+	}
 	if q.createMessageStmt != nil {
 		if cerr := q.createMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createMessageStmt: %w", cerr)
+		}
+	}
+	if q.createOutputReviewActivationStmt != nil {
+		if cerr := q.createOutputReviewActivationStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createOutputReviewActivationStmt: %w", cerr)
+		}
+	}
+	if q.createOutputReviewAttemptStmt != nil {
+		if cerr := q.createOutputReviewAttemptStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createOutputReviewAttemptStmt: %w", cerr)
+		}
+	}
+	if q.createOutputReviewCloneEventStmt != nil {
+		if cerr := q.createOutputReviewCloneEventStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createOutputReviewCloneEventStmt: %w", cerr)
+		}
+	}
+	if q.createOutputReviewCorrectionStmt != nil {
+		if cerr := q.createOutputReviewCorrectionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createOutputReviewCorrectionStmt: %w", cerr)
+		}
+	}
+	if q.createOutputReviewEventStmt != nil {
+		if cerr := q.createOutputReviewEventStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createOutputReviewEventStmt: %w", cerr)
+		}
+	}
+	if q.createOutputReviewPrivateStmt != nil {
+		if cerr := q.createOutputReviewPrivateStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createOutputReviewPrivateStmt: %w", cerr)
 		}
 	}
 	if q.createSessionStmt != nil {
@@ -296,9 +441,34 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getLastSessionStmt: %w", cerr)
 		}
 	}
+	if q.getLatestOutputReviewCorrectionStmt != nil {
+		if cerr := q.getLatestOutputReviewCorrectionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getLatestOutputReviewCorrectionStmt: %w", cerr)
+		}
+	}
+	if q.getLatestOutputReviewEventStmt != nil {
+		if cerr := q.getLatestOutputReviewEventStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getLatestOutputReviewEventStmt: %w", cerr)
+		}
+	}
+	if q.getLatestOutputReviewPrivateStmt != nil {
+		if cerr := q.getLatestOutputReviewPrivateStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getLatestOutputReviewPrivateStmt: %w", cerr)
+		}
+	}
 	if q.getMessageStmt != nil {
 		if cerr := q.getMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getMessageStmt: %w", cerr)
+		}
+	}
+	if q.getOutputReviewCorrectionStmt != nil {
+		if cerr := q.getOutputReviewCorrectionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getOutputReviewCorrectionStmt: %w", cerr)
+		}
+	}
+	if q.getOutputReviewPublicStmt != nil {
+		if cerr := q.getOutputReviewPublicStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getOutputReviewPublicStmt: %w", cerr)
 		}
 	}
 	if q.getRecentActivityStmt != nil {
@@ -356,6 +526,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getUsageByModelStmt: %w", cerr)
 		}
 	}
+	if q.hookExecutionRecordsExistStmt != nil {
+		if cerr := q.hookExecutionRecordsExistStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing hookExecutionRecordsExistStmt: %w", cerr)
+		}
+	}
 	if q.insertSessionUndoRecordStmt != nil {
 		if cerr := q.insertSessionUndoRecordStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing insertSessionUndoRecordStmt: %w", cerr)
@@ -381,6 +556,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listFilesBySessionStmt: %w", cerr)
 		}
 	}
+	if q.listHookExecutionRecordsStmt != nil {
+		if cerr := q.listHookExecutionRecordsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listHookExecutionRecordsStmt: %w", cerr)
+		}
+	}
 	if q.listLatestSessionFilesStmt != nil {
 		if cerr := q.listLatestSessionFilesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listLatestSessionFilesStmt: %w", cerr)
@@ -394,6 +574,16 @@ func (q *Queries) Close() error {
 	if q.listNewFilesStmt != nil {
 		if cerr := q.listNewFilesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listNewFilesStmt: %w", cerr)
+		}
+	}
+	if q.listOutputReviewCloneEventsStmt != nil {
+		if cerr := q.listOutputReviewCloneEventsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listOutputReviewCloneEventsStmt: %w", cerr)
+		}
+	}
+	if q.listOutputReviewEventsStmt != nil {
+		if cerr := q.listOutputReviewEventsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listOutputReviewEventsStmt: %w", cerr)
 		}
 	}
 	if q.listSessionReadFilesStmt != nil {
@@ -436,6 +626,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing renameSessionStmt: %w", cerr)
 		}
 	}
+	if q.seedLegacyOutputReviewPublicStmt != nil {
+		if cerr := q.seedLegacyOutputReviewPublicStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing seedLegacyOutputReviewPublicStmt: %w", cerr)
+		}
+	}
 	if q.setSessionArchivedStmt != nil {
 		if cerr := q.setSessionArchivedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing setSessionArchivedStmt: %w", cerr)
@@ -459,6 +654,11 @@ func (q *Queries) Close() error {
 	if q.updateSessionTitleAndUsageStmt != nil {
 		if cerr := q.updateSessionTitleAndUsageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateSessionTitleAndUsageStmt: %w", cerr)
+		}
+	}
+	if q.upsertOutputReviewPublicStmt != nil {
+		if cerr := q.upsertOutputReviewPublicStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertOutputReviewPublicStmt: %w", cerr)
 		}
 	}
 	return err
@@ -502,11 +702,25 @@ type Queries struct {
 	tx                                   *sql.Tx
 	addSessionUsageStmt                  *sql.Stmt
 	clearSessionSummaryStmt              *sql.Stmt
+	cloneOutputReviewAttemptsStmt        *sql.Stmt
+	cloneOutputReviewCorrectionsStmt     *sql.Stmt
+	cloneOutputReviewPrivateStmt         *sql.Stmt
+	cloneOutputReviewPublicStmt          *sql.Stmt
 	completeSessionTurnStmt              *sql.Stmt
 	completeTurnFileStmt                 *sql.Stmt
 	copySessionMessageStmt               *sql.Stmt
+	countOutputReviewActivationsStmt     *sql.Stmt
+	countOutputReviewCorrectionsStmt     *sql.Stmt
+	countOutputReviewSourceStmt          *sql.Stmt
 	createFileStmt                       *sql.Stmt
+	createHookExecutionRecordStmt        *sql.Stmt
 	createMessageStmt                    *sql.Stmt
+	createOutputReviewActivationStmt     *sql.Stmt
+	createOutputReviewAttemptStmt        *sql.Stmt
+	createOutputReviewCloneEventStmt     *sql.Stmt
+	createOutputReviewCorrectionStmt     *sql.Stmt
+	createOutputReviewEventStmt          *sql.Stmt
+	createOutputReviewPrivateStmt        *sql.Stmt
 	createSessionStmt                    *sql.Stmt
 	createSessionTurnStmt                *sql.Stmt
 	deleteFileStmt                       *sql.Stmt
@@ -521,7 +735,12 @@ type Queries struct {
 	getHourDayHeatmapStmt                *sql.Stmt
 	getLastAssistantMessageBySessionStmt *sql.Stmt
 	getLastSessionStmt                   *sql.Stmt
+	getLatestOutputReviewCorrectionStmt  *sql.Stmt
+	getLatestOutputReviewEventStmt       *sql.Stmt
+	getLatestOutputReviewPrivateStmt     *sql.Stmt
 	getMessageStmt                       *sql.Stmt
+	getOutputReviewCorrectionStmt        *sql.Stmt
+	getOutputReviewPublicStmt            *sql.Stmt
 	getRecentActivityStmt                *sql.Stmt
 	getSessionByIDStmt                   *sql.Stmt
 	getSessionTurnStmt                   *sql.Stmt
@@ -533,14 +752,18 @@ type Queries struct {
 	getUsageByDayOfWeekStmt              *sql.Stmt
 	getUsageByHourStmt                   *sql.Stmt
 	getUsageByModelStmt                  *sql.Stmt
+	hookExecutionRecordsExistStmt        *sql.Stmt
 	insertSessionUndoRecordStmt          *sql.Stmt
 	insertTurnFileStmt                   *sql.Stmt
 	listAllUserMessagesStmt              *sql.Stmt
 	listFilesByPathStmt                  *sql.Stmt
 	listFilesBySessionStmt               *sql.Stmt
+	listHookExecutionRecordsStmt         *sql.Stmt
 	listLatestSessionFilesStmt           *sql.Stmt
 	listMessagesBySessionStmt            *sql.Stmt
 	listNewFilesStmt                     *sql.Stmt
+	listOutputReviewCloneEventsStmt      *sql.Stmt
+	listOutputReviewEventsStmt           *sql.Stmt
 	listSessionReadFilesStmt             *sql.Stmt
 	listSessionTurnsStmt                 *sql.Stmt
 	listSessionsStmt                     *sql.Stmt
@@ -549,11 +772,13 @@ type Queries struct {
 	markSessionBranchStmt                *sql.Stmt
 	recordFileReadStmt                   *sql.Stmt
 	renameSessionStmt                    *sql.Stmt
+	seedLegacyOutputReviewPublicStmt     *sql.Stmt
 	setSessionArchivedStmt               *sql.Stmt
 	updateMessageStmt                    *sql.Stmt
 	updateSessionStmt                    *sql.Stmt
 	updateSessionMetadataStmt            *sql.Stmt
 	updateSessionTitleAndUsageStmt       *sql.Stmt
+	upsertOutputReviewPublicStmt         *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
@@ -562,11 +787,25 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		tx:                                   tx,
 		addSessionUsageStmt:                  q.addSessionUsageStmt,
 		clearSessionSummaryStmt:              q.clearSessionSummaryStmt,
+		cloneOutputReviewAttemptsStmt:        q.cloneOutputReviewAttemptsStmt,
+		cloneOutputReviewCorrectionsStmt:     q.cloneOutputReviewCorrectionsStmt,
+		cloneOutputReviewPrivateStmt:         q.cloneOutputReviewPrivateStmt,
+		cloneOutputReviewPublicStmt:          q.cloneOutputReviewPublicStmt,
 		completeSessionTurnStmt:              q.completeSessionTurnStmt,
 		completeTurnFileStmt:                 q.completeTurnFileStmt,
 		copySessionMessageStmt:               q.copySessionMessageStmt,
+		countOutputReviewActivationsStmt:     q.countOutputReviewActivationsStmt,
+		countOutputReviewCorrectionsStmt:     q.countOutputReviewCorrectionsStmt,
+		countOutputReviewSourceStmt:          q.countOutputReviewSourceStmt,
 		createFileStmt:                       q.createFileStmt,
+		createHookExecutionRecordStmt:        q.createHookExecutionRecordStmt,
 		createMessageStmt:                    q.createMessageStmt,
+		createOutputReviewActivationStmt:     q.createOutputReviewActivationStmt,
+		createOutputReviewAttemptStmt:        q.createOutputReviewAttemptStmt,
+		createOutputReviewCloneEventStmt:     q.createOutputReviewCloneEventStmt,
+		createOutputReviewCorrectionStmt:     q.createOutputReviewCorrectionStmt,
+		createOutputReviewEventStmt:          q.createOutputReviewEventStmt,
+		createOutputReviewPrivateStmt:        q.createOutputReviewPrivateStmt,
 		createSessionStmt:                    q.createSessionStmt,
 		createSessionTurnStmt:                q.createSessionTurnStmt,
 		deleteFileStmt:                       q.deleteFileStmt,
@@ -581,7 +820,12 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getHourDayHeatmapStmt:                q.getHourDayHeatmapStmt,
 		getLastAssistantMessageBySessionStmt: q.getLastAssistantMessageBySessionStmt,
 		getLastSessionStmt:                   q.getLastSessionStmt,
+		getLatestOutputReviewCorrectionStmt:  q.getLatestOutputReviewCorrectionStmt,
+		getLatestOutputReviewEventStmt:       q.getLatestOutputReviewEventStmt,
+		getLatestOutputReviewPrivateStmt:     q.getLatestOutputReviewPrivateStmt,
 		getMessageStmt:                       q.getMessageStmt,
+		getOutputReviewCorrectionStmt:        q.getOutputReviewCorrectionStmt,
+		getOutputReviewPublicStmt:            q.getOutputReviewPublicStmt,
 		getRecentActivityStmt:                q.getRecentActivityStmt,
 		getSessionByIDStmt:                   q.getSessionByIDStmt,
 		getSessionTurnStmt:                   q.getSessionTurnStmt,
@@ -593,14 +837,18 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUsageByDayOfWeekStmt:              q.getUsageByDayOfWeekStmt,
 		getUsageByHourStmt:                   q.getUsageByHourStmt,
 		getUsageByModelStmt:                  q.getUsageByModelStmt,
+		hookExecutionRecordsExistStmt:        q.hookExecutionRecordsExistStmt,
 		insertSessionUndoRecordStmt:          q.insertSessionUndoRecordStmt,
 		insertTurnFileStmt:                   q.insertTurnFileStmt,
 		listAllUserMessagesStmt:              q.listAllUserMessagesStmt,
 		listFilesByPathStmt:                  q.listFilesByPathStmt,
 		listFilesBySessionStmt:               q.listFilesBySessionStmt,
+		listHookExecutionRecordsStmt:         q.listHookExecutionRecordsStmt,
 		listLatestSessionFilesStmt:           q.listLatestSessionFilesStmt,
 		listMessagesBySessionStmt:            q.listMessagesBySessionStmt,
 		listNewFilesStmt:                     q.listNewFilesStmt,
+		listOutputReviewCloneEventsStmt:      q.listOutputReviewCloneEventsStmt,
+		listOutputReviewEventsStmt:           q.listOutputReviewEventsStmt,
 		listSessionReadFilesStmt:             q.listSessionReadFilesStmt,
 		listSessionTurnsStmt:                 q.listSessionTurnsStmt,
 		listSessionsStmt:                     q.listSessionsStmt,
@@ -609,10 +857,12 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		markSessionBranchStmt:                q.markSessionBranchStmt,
 		recordFileReadStmt:                   q.recordFileReadStmt,
 		renameSessionStmt:                    q.renameSessionStmt,
+		seedLegacyOutputReviewPublicStmt:     q.seedLegacyOutputReviewPublicStmt,
 		setSessionArchivedStmt:               q.setSessionArchivedStmt,
 		updateMessageStmt:                    q.updateMessageStmt,
 		updateSessionStmt:                    q.updateSessionStmt,
 		updateSessionMetadataStmt:            q.updateSessionMetadataStmt,
 		updateSessionTitleAndUsageStmt:       q.updateSessionTitleAndUsageStmt,
+		upsertOutputReviewPublicStmt:         q.upsertOutputReviewPublicStmt,
 	}
 }

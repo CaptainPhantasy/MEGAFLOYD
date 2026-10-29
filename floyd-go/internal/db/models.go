@@ -18,6 +18,16 @@ type File struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+type HookExecutionRecord struct {
+	Seq        int64  `json:"seq"`
+	ID         string `json:"id"`
+	SessionID  string `json:"session_id"`
+	EventID    string `json:"event_id"`
+	ToolCallID string `json:"tool_call_id"`
+	JobID      string `json:"job_id"`
+	Body       string `json:"body"`
+}
+
 type Message struct {
 	ID               string         `json:"id"`
 	SessionID        string         `json:"session_id"`
@@ -29,6 +39,53 @@ type Message struct {
 	FinishedAt       sql.NullInt64  `json:"finished_at"`
 	Provider         sql.NullString `json:"provider"`
 	IsSummaryMessage int64          `json:"is_summary_message"`
+}
+
+type OutputReviewActivation struct {
+	ID          int64 `json:"id"`
+	ActivatedAt int64 `json:"activated_at"`
+}
+
+type OutputReviewAttempt struct {
+	ID         int64  `json:"id"`
+	MessageID  string `json:"message_id"`
+	SourceHash string `json:"source_hash"`
+	Candidate  string `json:"candidate"`
+	Issue      string `json:"issue"`
+}
+
+type OutputReviewCorrection struct {
+	MessageID string `json:"message_id"`
+	Revision  int64  `json:"revision"`
+	Receipt   string `json:"receipt"`
+}
+
+type OutputReviewEvent struct {
+	Cursor    int64  `json:"cursor"`
+	MessageID string `json:"message_id"`
+	SessionID string `json:"session_id"`
+	Revision  int64  `json:"revision"`
+	Parts     string `json:"parts"`
+	State     string `json:"state"`
+}
+
+type OutputReviewPrivate struct {
+	MessageID  string `json:"message_id"`
+	SessionID  string `json:"session_id"`
+	Revision   int64  `json:"revision"`
+	Kind       string `json:"kind"`
+	SourceHash string `json:"source_hash"`
+	Parts      string `json:"parts"`
+}
+
+type OutputReviewPublic struct {
+	MessageID  string `json:"message_id"`
+	SessionID  string `json:"session_id"`
+	Revision   int64  `json:"revision"`
+	SourceHash string `json:"source_hash"`
+	Parts      string `json:"parts"`
+	State      string `json:"state"`
+	Receipt    string `json:"receipt"`
 }
 
 type ReadFile struct {
@@ -66,6 +123,14 @@ type SessionUndoRecord struct {
 	SessionID string `json:"session_id"`
 	Payload   string `json:"payload"`
 	CreatedAt int64  `json:"created_at"`
+}
+
+type SqliteMaster struct {
+	Type     string         `json:"type"`
+	Name     string         `json:"name"`
+	TblName  string         `json:"tbl_name"`
+	Rootpage int64          `json:"rootpage"`
+	Sql      sql.NullString `json:"sql"`
 }
 
 type TurnFileHistory struct {

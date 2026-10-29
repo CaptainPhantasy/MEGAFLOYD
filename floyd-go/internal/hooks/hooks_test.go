@@ -503,7 +503,7 @@ func TestRunnerHookNameUsesDisplayName(t *testing.T) {
 		require.Equal(t, "my-hook", result.Hooks[0].Name)
 	})
 
-	t.Run("command is used when name is empty", func(t *testing.T) {
+	t.Run("safe identifier is used when name is empty", func(t *testing.T) {
 		t.Parallel()
 		hookCfg := config.HookConfig{
 			Command: `echo '{"decision":"allow"}'`,
@@ -513,7 +513,7 @@ func TestRunnerHookNameUsesDisplayName(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, DecisionAllow, result.Decision)
 		require.Len(t, result.Hooks, 1)
-		require.Equal(t, `echo '{"decision":"allow"}'`, result.Hooks[0].Name)
+		require.Equal(t, "hook[0]", result.Hooks[0].Name)
 	})
 }
 

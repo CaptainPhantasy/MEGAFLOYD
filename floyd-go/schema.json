@@ -122,6 +122,10 @@
           "type": "object",
           "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
         },
+        "output_review": {
+          "$ref": "#/$defs/OutputReviewConfig",
+          "description": "Review and simplify responses before showing them"
+        },
         "heartbeat": {
           "$ref": "#/$defs/HeartbeatConfig",
           "description": "Keep-alive loop that re-prompts the model after each completed turn so it does not sit idle between turns"
@@ -232,6 +236,18 @@
           "type": "integer",
           "description": "Timeout in seconds for the hook command",
           "default": 30
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Require successful completion of this synchronous PreToolUse or PostToolUse check. Required handlers run in configuration order."
+        },
+        "sequential": {
+          "type": "boolean",
+          "description": "Run the matching synchronous hook batch in configuration order"
+        },
+        "async": {
+          "type": "boolean",
+          "description": "Run an observational hook asynchronously. Not allowed with required or sequential checks."
         }
       },
       "additionalProperties": false,
@@ -799,6 +815,20 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "OutputReviewConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Review assistant output before public delivery",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "enabled"
+      ]
     },
     "Permissions": {
       "properties": {

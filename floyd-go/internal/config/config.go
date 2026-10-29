@@ -737,6 +737,12 @@ type HookConfig struct {
 	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
 	// Timeout in seconds. Default 30.
 	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the hook command,default=30"`
+	// Required makes failures explicit and orders this synchronous event batch.
+	Required bool `json:"required,omitempty" jsonschema:"description=Require successful completion of this synchronous PreToolUse or PostToolUse check. Required handlers run in configuration order."`
+	// Sequential orders the matching synchronous batch without making failures mandatory.
+	Sequential bool `json:"sequential,omitempty" jsonschema:"description=Run the matching synchronous hook batch in configuration order"`
+	// Async starts a tracked observer that cannot influence the action or permissions.
+	Async bool `json:"async,omitempty" jsonschema:"description=Run an observational hook asynchronously. Not allowed with required or sequential checks."`
 }
 
 // DisplayName returns the hook name for display purposes. It returns Name
@@ -782,6 +788,8 @@ type Config struct {
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
 
+	OutputReview *OutputReviewConfig `json:"output_review,omitempty" jsonschema:"description=Review and simplify responses before showing them"`
+
 	// Heartbeat configures the auto-continue loop: after a run completes
 	// successfully, the harness re-prompts the model so work continues
 	// instead of idling between turns. Disabled unless configured.
@@ -796,6 +804,16 @@ type Config struct {
 	Experimental map[string]bool `json:"experimental,omitempty" jsonschema:"description=Experimental feature overrides keyed by flag id"`
 
 	Agents map[string]Agent `json:"-"`
+}
+
+// OutputReviewConfig controls the independent assistant publication review.
+type OutputReviewConfig struct {
+	Enabled bool `json:"enabled" jsonschema:"description=Review assistant output before public delivery,default=false"`
+}
+
+// OutputReviewEnabled reports whether assistant publication review is enabled.
+func (c *Config) OutputReviewEnabled() bool {
+	return c != nil && c.OutputReview != nil && c.OutputReview.Enabled
 }
 
 // HeartbeatConfig controls the harness heartbeat: a synthetic continuation
@@ -1023,6 +1041,8 @@ func allToolNames() []string {
 		"failure_mode_enumerator",
 		"transcript_export",
 		"query_floyd_archive",
+		"hook_explain",
+		"hook_trace",
 		"symbol_index",
 		"vision",
 		"workflow",

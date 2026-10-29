@@ -10,7 +10,6 @@ import (
 	"github.com/legacy-ai/floyd/internal/agent/prompt"
 	"github.com/legacy-ai/floyd/internal/agents"
 	"github.com/legacy-ai/floyd/internal/config"
-	"github.com/legacy-ai/floyd/internal/hooks"
 	"github.com/legacy-ai/floyd/internal/pluginruntime"
 	"github.com/legacy-ai/floyd/internal/skills"
 )
@@ -31,6 +30,7 @@ func (c *coordinator) RuntimePluginPrompt(ctx context.Context, sessionID string)
 	}
 	return strings.Join(out, "\n\n"), nil
 }
+
 func (c *coordinator) runtimeAgentSelector() (*AgentSelector, error) {
 	own, err := loadWorkspaceAgentSelector(c.cfg.WorkingDir())
 	if err != nil {
@@ -171,8 +171,9 @@ func (c *coordinator) RuntimeReloadPlugins(ctx context.Context, manager *skills.
 	c.currentAgent.SetTools(agentTools)
 	if a, ok := c.currentAgent.(*sessionAgent); ok {
 		a.SetDynamicContext(cacheable.DynamicContext)
-		a.sessionStartRunner = c.eventHookRunner(hooks.EventSessionStart, false)
-		a.stopRunner = c.eventHookRunner(hooks.EventStop, false)
+		a.hookRuntime = c.hookDispatcher()
+		a.sessionStartRunner = nil
+		a.stopRunner = nil
 	}
 	return nil
 }

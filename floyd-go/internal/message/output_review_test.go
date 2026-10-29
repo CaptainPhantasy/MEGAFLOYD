@@ -1,0 +1,442 @@
+package message
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/legacy-ai/floyd/internal/db"
+	"github.com/legacy-ai/floyd/internal/session"
+	"github.com/stretchr/testify/require"
+)
+
+func TestOutputReviewActualSQLDoesNotExposeProviderDraft(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := db.Connect(t.Context(), dir)
+	require.NoError(t, err)
+	defer db.Release(dir)
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	se, err := sessions.Create(t.Context(), "review")
+	require.NoError(t, err)
+	svc := NewService(q, WithDB(conn), WithDebounce(0))
+	require.NoError(t, EnableOutputReview(t.Context(), svc, ReviewConfig{}))
+	sub := svc.Subscribe(t.Context())
+	msg, err := svc.Create(t.Context(), se.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	<-sub
+	msg.AppendContent("To provide a brief update, utilize the log")
+	msg.AppendReasoningContent("PRIVATE signed reasoning")
+	msg.AppendReasoningSignature("signature-exact")
+	require.NoError(t, svc.Update(context.Background(), msg))
+	select {
+	case event := <-sub:
+		require.Empty(t, event.Payload.Content().Text, "provider draft must not reach actual pubsub")
+		require.Empty(t, event.Payload.ReasoningContent().Thinking)
+	case <-time.After(20 * time.Millisecond):
+	}
+	public, err := PublicGet(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	require.Empty(t, public.Content().Text)
+	require.Empty(t, public.ReasoningContent().Thinking)
+}
+
+func reviewedSQL(t *testing.T, cfg ReviewConfig) (Service, *sql.DB, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	conn, err := db.Connect(t.Context(), dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Release(dir) })
+	q := db.New(conn)
+	se, err := session.NewService(q, conn).Create(t.Context(), "SQL publication")
+	require.NoError(t, err)
+	svc := NewService(q, WithDB(conn), WithDebounce(0))
+	require.NoError(t, EnableOutputReview(t.Context(), svc, cfg))
+	return svc, conn, se.ID, dir
+}
+
+func TestOutputReviewSQLStreamingReopenExportAndDuplicates(t *testing.T) {
+	svc, _, sid, dir := reviewedSQL(t, ReviewConfig{})
+	msg, err := svc.Create(t.Context(), sid, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	msg.AppendContent("To provide a brief update, utilize the log.\n\nPending")
+	msg.AppendReasoningContent("PRIVATE exact replay")
+	msg.AppendReasoningSignature("signed-original")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	public, err := PublicGet(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, "To provide a brief update, utilize the log.\n\n", public.Content().Text)
+	_, err = FinalPublicText(t.Context(), svc, msg.ID)
+	require.ErrorIs(t, err, ErrOutputReviewPending)
+	msg.AppendContent(" detail finished.")
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	before, err := ReplayPublic(t.Context(), svc, sid, 0)
+	require.NoError(t, err)
+	require.NoError(t, svc.Update(t.Context(), msg))
+	after, err := ReplayPublic(t.Context(), svc, sid, 0)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	var exported bytes.Buffer
+	require.NoError(t, ExportPublic(t.Context(), svc, sid, &exported))
+	require.NotContains(t, exported.String(), "PRIVATE")
+	require.NotContains(t, exported.String(), "signed-original")
+	require.Contains(t, exported.String(), "utilize the log")
+	require.NoError(t, svc.FlushAll(t.Context()))
+	svc.(*service).Shutdown()
+	require.NoError(t, db.Release(dir))
+	reopened, err := db.Connect(t.Context(), dir)
+	require.NoError(t, err)
+	fresh := NewService(db.New(reopened), WithDB(reopened))
+	require.NoError(t, EnableOutputReview(t.Context(), fresh, ReviewConfig{}))
+	text, err := FinalPublicText(t.Context(), fresh, msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, "To provide a brief update, utilize the log.\n\nPending detail finished.", text)
+	raw, err := fresh.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, msg.Content(), raw.Content())
+	require.Equal(t, "signed-original", raw.ReasoningContent().Signature)
+	replay, err := ReplayPublic(t.Context(), fresh, sid, before[0].Cursor)
+	require.NoError(t, err)
+	require.Equal(t, before[1:], replay)
+}
+
+func TestOutputReviewSQLGeneralCorrectionPreservesPrivateAndBindsRevision(t *testing.T) {
+	svc, conn, sid, _ := reviewedSQL(t, ReviewConfig{RequireFinalReview: true})
+	msg, err := svc.Create(t.Context(), sid, CreateMessageParams{Role: Assistant, Parts: []ContentPart{TextContent{Text: "Deployment succeeded. Keep `status --json` exact."}}})
+	require.NoError(t, err)
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	public, err := PublicGet(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	require.Empty(t, public.Content().Text)
+	request, err := OutputReviewRequest(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	command := exec.CommandContext(t.Context(), "sh", "-c", "exit 1")
+	err = command.Run()
+	require.Error(t, err)
+	response := ReviewResponse{SourceSHA256: request.SourceSHA256, Disposition: "publish", Text: "Deployment failed. Keep `status --json` exact.", Reviewer: "actual-test-execution", Provenance: []string{"fixture-process-exit:1"}, Claims: []ReviewClaim{{Text: "Deployment failed.", Actor: "fixture", Action: "deployment", Result: "failed", Uncertainty: "observed", EvidenceID: "exit1"}}, Evidence: []ReviewEvidence{{ID: "exit1", Source: "fixture-process-exit:1", Result: "failed"}}}
+	broken := response
+	broken.Text = "Deployment failed. Keep `different` exact."
+	require.ErrorContains(t, ReviewCandidate(t.Context(), svc, msg.ID, broken), "protected")
+	require.NoError(t, ReviewCandidate(t.Context(), svc, msg.ID, response))
+	final, err := FinalPublicText(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, response.Text, final)
+	events, err := ReplayPublic(t.Context(), svc, sid, 0)
+	require.NoError(t, err)
+	require.NoError(t, ReviewCandidate(t.Context(), svc, msg.ID, response))
+	events2, err := ReplayPublic(t.Context(), svc, sid, 0)
+	require.NoError(t, err)
+	require.Equal(t, events, events2)
+	require.NoError(t, svc.Update(t.Context(), msg))
+	final, err = FinalPublicText(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, response.Text, final, "late repeated provider callback must not overwrite correction")
+	next, err := OutputReviewRequest(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	response.SourceSHA256 = next.SourceSHA256
+	response.Text = "The deployment failed. Keep `status --json` exact."
+	response.Claims[0].Text = "The deployment failed."
+	require.NoError(t, ReviewCandidate(t.Context(), svc, msg.ID, response))
+	require.Error(t, ReviewCandidate(t.Context(), svc, msg.ID, broken))
+	raw, err := svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, msg.Content(), raw.Content())
+	var snapshots int
+	require.NoError(t, conn.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM output_review_private WHERE message_id=?`, msg.ID).Scan(&snapshots))
+	require.GreaterOrEqual(t, snapshots, 4)
+}
+
+func TestOutputReviewSQLCancellationClosesLateCorrection(t *testing.T) {
+	svc, conn, sid, _ := reviewedSQL(t, ReviewConfig{RequireFinalReview: true})
+	msg, err := svc.Create(t.Context(), sid, CreateMessageParams{Role: Assistant, Parts: []ContentPart{TextContent{Text: "A provider draft.\n\n"}}})
+	require.NoError(t, err)
+	req, err := OutputReviewRequest(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	msg.AddFinish(FinishReasonCanceled, "User canceled request", "")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	response := ReviewResponse{SourceSHA256: req.SourceSHA256, Text: "A reviewed draft.", Disposition: "publish", Reviewer: "selected-model-judgment", Provenance: []string{"call:actual-fixture"}}
+	require.Error(t, ReviewCandidate(t.Context(), svc, msg.ID, response))
+	msg.AppendContent("LATE DRAFT")
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	public, err := PublicGet(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, FinishReasonCanceled, public.FinishReason())
+	require.Empty(t, public.Content().Text)
+	raw, err := svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, FinishReasonCanceled, raw.FinishReason())
+	var late int
+	require.NoError(t, conn.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM output_review_private WHERE message_id=? AND parts LIKE '%LATE DRAFT%'`, msg.ID).Scan(&late))
+	require.Equal(t, 1, late)
+}
+
+func TestOutputReviewActualSummarySuggestionAndLongExactArtifacts(t *testing.T) {
+	svc, conn, sid, _ := reviewedSQL(t, ReviewConfig{})
+	exact := "```text\n" + strings.Repeat("utilize exact bytes 7\n", 2000) + "```"
+	summary, err := svc.Create(t.Context(), sid, CreateMessageParams{Role: Assistant, IsSummaryMessage: true, Parts: []ContentPart{TextContent{Text: "utilize the note.\n" + exact}, ReasoningContent{Thinking: "PRIVATE summary reasoning", Signature: "summary-signature"}}})
+	require.NoError(t, err)
+	summary.AddFinish(FinishReasonEndTurn, "", "")
+	require.NoError(t, svc.Update(t.Context(), summary))
+	public, err := PublicGet(t.Context(), svc, summary.ID)
+	require.NoError(t, err)
+	require.Contains(t, public.Content().Text, exact)
+	require.Equal(t, summary.Content().Text, public.Content().Text)
+	require.Empty(t, public.ReasoningContent().Thinking)
+	raw, err := svc.Get(t.Context(), summary.ID)
+	require.NoError(t, err)
+	require.Equal(t, summary.Content(), raw.Content())
+	require.Equal(t, "summary-signature", raw.ReasoningContent().Signature)
+	suggestion, err := ReviewText(t.Context(), svc, sid, "suggestion", "utilize the existing output.")
+	require.NoError(t, err)
+	require.Equal(t, "utilize the existing output.", suggestion)
+	var count int
+	require.NoError(t, conn.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM output_review_private WHERE kind='suggestion'`).Scan(&count))
+	require.Equal(t, 1, count)
+	messages, err := svc.List(t.Context(), sid)
+	require.NoError(t, err)
+	require.Len(t, messages, 1, "suggestion is not provider conversation history")
+}
+
+func TestOutputReviewCommandCancellationAndTransientRecovery(t *testing.T) {
+	for _, debounce := range []time.Duration{0, defaultUpdateDebounce} {
+		t.Run(debounce.String(), func(t *testing.T) {
+			dir := t.TempDir()
+			started := filepath.Join(dir, "started")
+			release := filepath.Join(dir, "release")
+			script := filepath.Join(dir, "review.py")
+			require.NoError(t, os.WriteFile(script, []byte(`import json, pathlib, sys, time
+request=json.load(sys.stdin)
+pathlib.Path(sys.argv[1]).write_text('started')
+while not pathlib.Path(sys.argv[2]).exists(): time.sleep(.005)
+json.dump({'source_sha256':request['source_sha256'],'text':request['text'],'disposition':'publish','reviewer':'local-execution-fixture','provenance':['fixture:actual-command']},sys.stdout)
+`), 0o600))
+			svc, _, sid, _ := reviewedSQL(t, ReviewConfig{Command: []string{"python3", script, started, release}})
+			svc.(*service).debounce = debounce
+			msg, err := svc.Create(t.Context(), sid, CreateMessageParams{Role: Assistant})
+			require.NoError(t, err)
+			msg.AppendContent("Ready.")
+			msg.AddFinish(FinishReasonEndTurn, "", "")
+			reviewCtx, stopReview := context.WithCancel(t.Context())
+			defer stopReview()
+			result := make(chan error, 1)
+			go func() { result <- svc.Update(reviewCtx, msg) }()
+			require.Eventually(t, func() bool { _, e := os.Stat(started); return e == nil }, time.Second, 5*time.Millisecond)
+			cancelled := msg.Clone()
+			cancelled.AddFinish(FinishReasonCanceled, "User canceled request", "")
+			cancelCtx, stopCancel := context.WithTimeout(t.Context(), time.Second)
+			defer stopCancel()
+			require.NoError(t, svc.Update(cancelCtx, cancelled))
+			require.ErrorIs(t, <-result, context.Canceled)
+			_, err = os.Stat(release)
+			require.ErrorIs(t, err, os.ErrNotExist, "cancellation must stop the command without releasing it")
+			public, err := PublicGet(t.Context(), svc, msg.ID)
+			require.NoError(t, err)
+			require.Equal(t, FinishReasonCanceled, public.FinishReason())
+			require.Empty(t, public.Content().Text)
+
+			marker := filepath.Join(dir, "attempt")
+			require.NoError(t, os.WriteFile(script, []byte(`import json, pathlib, sys
+request=json.load(sys.stdin)
+marker=pathlib.Path(sys.argv[1])
+if not marker.exists():
+ marker.write_text('failed once')
+ sys.exit(1)
+json.dump({'source_sha256':request['source_sha256'],'text':request['text'],'disposition':'publish','reviewer':'local-execution-fixture','provenance':['fixture:recovered-command']},sys.stdout)
+`), 0o600))
+			recovering, conn, recoverySID, _ := reviewedSQL(t, ReviewConfig{Command: []string{"python3", script, marker}})
+			retry, err := recovering.Create(t.Context(), recoverySID, CreateMessageParams{Role: Assistant})
+			require.NoError(t, err)
+			retry.AppendContent("Recovered.")
+			retry.AddFinish(FinishReasonEndTurn, "", "")
+			require.NoError(t, recovering.Update(t.Context(), retry))
+			status, err := OutputReviewStatus(t.Context(), recovering, retry.ID)
+			require.NoError(t, err)
+			require.Equal(t, "recovery", status.State)
+			_, err = FinalPublicText(t.Context(), recovering, retry.ID)
+			require.ErrorIs(t, err, ErrOutputReviewPending)
+			var snapshots int
+			require.NoError(t, conn.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM output_review_private WHERE message_id=?`, retry.ID).Scan(&snapshots))
+			require.Equal(t, 2, snapshots)
+			require.NoError(t, recovering.Update(t.Context(), retry))
+			text, err := FinalPublicText(t.Context(), recovering, retry.ID)
+			require.NoError(t, err)
+			require.Equal(t, "Recovered.", text)
+		})
+	}
+}
+
+func TestOutputReviewExactSecretsStayPrivateAcrossPublicBoundaries(t *testing.T) {
+	for _, secrets := range [][]string{{"abab", "baba"}, {"baba", "abab"}} {
+		ordered, _, _, _ := reviewedSQL(t, ReviewConfig{SecretValues: secrets})
+		require.Equal(t, "[redacted]a", ordered.(*service).review.redactText("ababa"))
+	}
+	secret := "test-only-secret"
+	svc, _, sid, _ := reviewedSQL(t, ReviewConfig{RequireFinalReview: true, SecretValues: []string{"", secret}})
+	stream := svc.Subscribe(t.Context())
+	user, err := svc.Create(t.Context(), sid, CreateMessageParams{Role: User, Parts: []ContentPart{TextContent{Text: "Credential " + secret}}})
+	require.NoError(t, err)
+	event := <-stream
+	require.NotContains(t, event.Payload.Content().Text, secret)
+	require.Contains(t, event.Payload.Content().Text, "[redacted]")
+	msg, err := svc.Create(t.Context(), sid, CreateMessageParams{Role: Assistant, Parts: []ContentPart{TextContent{Text: "Keep `status --json` and credential `" + secret + "`."}}})
+	require.NoError(t, err)
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	request, err := OutputReviewRequest(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	require.NotContains(t, request.Text, secret)
+	require.NoError(t, ReviewCandidate(t.Context(), svc, msg.ID, ReviewResponse{SourceSHA256: request.SourceSHA256, Text: request.Text, Disposition: "publish", Reviewer: "selected-model-judgment", Provenance: []string{"fixture:" + secret}}))
+	public, err := PublicGet(t.Context(), svc, user.ID)
+	require.NoError(t, err)
+	require.NotContains(t, public.Content().Text, secret)
+	final, err := FinalPublicText(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	require.NotContains(t, final, secret)
+	status, err := OutputReviewStatus(t.Context(), svc, msg.ID)
+	require.NoError(t, err)
+	require.NotContains(t, string(status.Receipt), secret)
+	events, err := ReplayPublic(t.Context(), svc, sid, 0)
+	require.NoError(t, err)
+	for _, event := range events {
+		require.NotContains(t, event.Message.Content().Text, secret)
+	}
+	var exported bytes.Buffer
+	require.NoError(t, ExportPublic(t.Context(), svc, sid, &exported))
+	require.NotContains(t, exported.String(), secret)
+	raw, err := svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Contains(t, raw.Content().Text, secret)
+	rawUser, err := svc.Get(t.Context(), user.ID)
+	require.NoError(t, err)
+	require.Contains(t, rawUser.Content().Text, secret)
+}
+
+func TestOutputReviewCoherentStreamingAndLegacyRestart(t *testing.T) {
+	ctx := t.Context()
+	dir := t.TempDir()
+	conn, err := db.Connect(ctx, dir)
+	require.NoError(t, err)
+	defer db.Release(dir)
+	q := db.New(conn)
+	se, err := session.NewService(q, conn).Create(ctx, "existing")
+	require.NoError(t, err)
+	svc := NewService(q, WithDB(conn), WithDebounce(0))
+	old, err := svc.Create(ctx, se.ID, CreateMessageParams{Role: Assistant, Parts: []ContentPart{TextContent{Text: "Already delivered history."}}})
+	require.NoError(t, err)
+	old.AddFinish(FinishReasonEndTurn, "", "")
+	require.NoError(t, svc.Update(ctx, old))
+	require.NoError(t, EnableOutputReview(ctx, svc, ReviewConfig{SecretValues: []string{"fixture-secret"}}))
+	visible, err := PublicGet(ctx, svc, old.ID)
+	require.NoError(t, err)
+	require.Equal(t, old.Content(), visible.Content())
+	state, err := OutputReviewStatus(ctx, svc, old.ID)
+	require.NoError(t, err)
+	require.Equal(t, "legacy_visible", state.State)
+	sub := svc.Subscribe(ctx)
+	fresh, err := svc.Create(ctx, se.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	<-sub
+	fresh.AppendContent("First complete unit. ")
+	fresh.AppendReasoningContent("PRIVATE provider reasoning")
+	fresh.AppendReasoningSignature("exact-signature")
+	require.NoError(t, svc.Update(ctx, fresh))
+	select {
+	case event := <-sub:
+		require.Equal(t, "First complete unit. ", event.Payload.Content().Text)
+		require.Empty(t, event.Payload.ReasoningContent().Thinking)
+	case <-time.After(time.Second):
+		t.Fatal("first coherent unit not published")
+	}
+	fresh.AppendContent("Second `exact-command --json` unit. ")
+	require.NoError(t, svc.Update(ctx, fresh))
+	select {
+	case event := <-sub:
+		require.Equal(t, fresh.Content(), event.Payload.Content())
+	case <-time.After(time.Second):
+		t.Fatal("second coherent unit not published before final")
+	}
+	fresh.AppendContent("\n\n```text\nfixture-secret\n")
+	require.NoError(t, svc.Update(ctx, fresh))
+	visible, err = PublicGet(ctx, svc, fresh.ID)
+	require.NoError(t, err)
+	require.NotContains(t, visible.Content().Text, "```")
+	fresh.AppendContent("```\n\nFinal exact \"quoted text\".")
+	fresh.AddFinish(FinishReasonEndTurn, "", "")
+	require.NoError(t, svc.Update(ctx, fresh))
+	final, err := FinalPublicText(ctx, svc, fresh.ID)
+	require.NoError(t, err)
+	require.Equal(t, strings.ReplaceAll(fresh.Content().Text, "fixture-secret", "[redacted]"), final)
+	before, err := ReplayPublic(ctx, svc, se.ID, 0)
+	require.NoError(t, err)
+	require.NoError(t, svc.Update(ctx, fresh))
+	after, err := ReplayPublic(ctx, svc, se.ID, 0)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	pending, err := svc.Create(ctx, se.ID, CreateMessageParams{Role: Assistant, Parts: []ContentPart{TextContent{Text: "Unfinished new draft"}}})
+	require.NoError(t, err)
+	rawWriter := NewService(db.New(conn), WithDB(conn), WithDebounce(0))
+	crashDraft, err := rawWriter.Create(ctx, se.ID, CreateMessageParams{Role: Assistant, Parts: []ContentPart{TextContent{Text: "Post-activation crash draft"}}})
+	require.NoError(t, err)
+	rawWriter.(*service).Shutdown()
+	require.NoError(t, svc.FlushAll(ctx))
+	svc.(*service).Shutdown()
+	require.NoError(t, db.Release(dir))
+	conn, err = db.Connect(ctx, dir)
+	require.NoError(t, err)
+	svc = NewService(db.New(conn), WithDB(conn), WithDebounce(0))
+	require.NoError(t, EnableOutputReview(ctx, svc, ReviewConfig{SecretValues: []string{"fixture-secret"}}))
+	visible, err = PublicGet(ctx, svc, old.ID)
+	require.NoError(t, err)
+	require.Equal(t, old.Content(), visible.Content())
+	state, err = OutputReviewStatus(ctx, svc, old.ID)
+	require.NoError(t, err)
+	require.Equal(t, "legacy_visible", state.State)
+	visible, err = PublicGet(ctx, svc, pending.ID)
+	require.NoError(t, err)
+	require.Empty(t, visible.Content().Text)
+	visible, err = PublicGet(ctx, svc, crashDraft.ID)
+	require.NoError(t, err)
+	require.Empty(t, visible.Content().Text)
+	restarted, err := FinalPublicText(ctx, svc, fresh.ID)
+	require.NoError(t, err)
+	require.Equal(t, final, restarted)
+	raw, err := svc.Get(ctx, fresh.ID)
+	require.NoError(t, err)
+	require.Equal(t, fresh.Content(), raw.Content())
+	require.Equal(t, "exact-signature", raw.ReasoningContent().Signature)
+	var exported bytes.Buffer
+	require.NoError(t, ExportPublic(ctx, svc, se.ID, &exported))
+	require.NotContains(t, exported.String(), "PRIVATE")
+	require.NotContains(t, exported.String(), "fixture-secret")
+	require.NotContains(t, exported.String(), "Unfinished new draft")
+	cancelled, err := svc.Create(ctx, se.ID, CreateMessageParams{Role: Assistant, Parts: []ContentPart{TextContent{Text: "Retained progress. Pending"}}})
+	require.NoError(t, err)
+	cancelled.AddFinish(FinishReasonCanceled, "User canceled request", "")
+	require.NoError(t, svc.Update(ctx, cancelled))
+	cancelled.AppendContent(" late callback.")
+	cancelled.AddFinish(FinishReasonEndTurn, "", "")
+	require.NoError(t, svc.Update(ctx, cancelled))
+	visible, err = PublicGet(ctx, svc, cancelled.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Retained progress. ", visible.Content().Text)
+	require.Equal(t, FinishReasonCanceled, visible.FinishReason())
+	failed, err := svc.Create(ctx, se.ID, CreateMessageParams{Role: Assistant, Parts: []ContentPart{TextContent{Text: "Completed progress. Incomplete failure tail"}}})
+	require.NoError(t, err)
+	failed.AddFinish(FinishReasonError, "provider interrupted", "")
+	require.NoError(t, svc.Update(ctx, failed))
+	visible, err = PublicGet(ctx, svc, failed.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Completed progress. ", visible.Content().Text)
+	require.Equal(t, FinishReasonError, visible.FinishReason())
+	_, err = FinalPublicText(ctx, svc, failed.ID)
+	require.ErrorIs(t, err, ErrOutputReviewPending)
+}

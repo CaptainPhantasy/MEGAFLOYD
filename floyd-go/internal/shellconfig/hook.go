@@ -11,7 +11,7 @@ import (
 //
 // Usage:
 //
-//	hook add <event> --command CMD [--name NAME] [--matcher REGEX] [--timeout N]
+//	hook add <event> --command CMD [--name NAME] [--matcher REGEX] [--timeout N] [--required] [--sequential] [--async]
 //	hook remove <event> [--name NAME]   (alias: rm)
 //
 // "add" appends a hook to the event's list; multiple hooks per event
@@ -43,11 +43,14 @@ var hookAddFlags = []flagSpec{
 	{name: "--matcher", jsonKey: "matcher", kind: flagString, op: opSet},
 	{name: "--timeout", jsonKey: "timeout", kind: flagInt, op: opSet},
 	{name: "--name", jsonKey: "name", kind: flagString, op: opSet},
+	{name: "--required", jsonKey: "required", kind: flagBoolTrue, op: opSet},
+	{name: "--sequential", jsonKey: "sequential", kind: flagBoolTrue, op: opSet},
+	{name: "--async", jsonKey: "async", kind: flagBoolTrue, op: opSet},
 }
 
 func hookAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: hook add <event> --command CMD [--name NAME] [--matcher REGEX] [--timeout N]")
+		return usage(stderr, "usage: hook add <event> --command CMD [--name NAME] [--matcher REGEX] [--timeout N] [--required] [--sequential] [--async]")
 	}
 	event := args[2]
 	slog.Info("Hook defined in shell config", "event", event)

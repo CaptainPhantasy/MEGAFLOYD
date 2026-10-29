@@ -38,6 +38,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/agent/hyper"
 	"github.com/legacy-ai/floyd/internal/agent/notify"
 	"github.com/legacy-ai/floyd/internal/agent/ralph"
@@ -46,6 +47,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/csync"
 	filehistory "github.com/legacy-ai/floyd/internal/history"
+	"github.com/legacy-ai/floyd/internal/hookruntime"
 	"github.com/legacy-ai/floyd/internal/hooks"
 	"github.com/legacy-ai/floyd/internal/megafloyd/style"
 	"github.com/legacy-ai/floyd/internal/message"
@@ -207,6 +209,7 @@ type sessionAgent struct {
 	runComplete          pubsub.Publisher[notify.RunComplete]
 	sessionStartRunner   *hooks.Runner
 	stopRunner           *hooks.Runner
+	hookRuntime          *hookruntime.Runtime
 	dataDirectory        string
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
@@ -286,11 +289,13 @@ type SessionAgentOptions struct {
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
 	// SessionStartRunner fires SessionStart hooks on a session's first
-	// run. Nil disables the event (sub-agents never fire it).
+	// run. Nil retains the legacy disabled behavior.
 	SessionStartRunner *hooks.Runner
 	// StopRunner fires Stop hooks at every terminal run state. Nil
-	// disables the event (sub-agents never fire it).
+	// disables the legacy event.
 	StopRunner *hooks.Runner
+	// Hooks is the application-owned lifecycle dispatcher, including sub-agents.
+	Hooks *hookruntime.Runtime
 	// DataDirectory is the .floyd directory path used to persist ralph
 	// loop state. Empty disables the loop for this agent.
 	DataDirectory string
@@ -325,6 +330,7 @@ func NewSessionAgent(
 		runComplete:          opts.RunComplete,
 		sessionStartRunner:   opts.SessionStartRunner,
 		stopRunner:           opts.StopRunner,
+		hookRuntime:          opts.Hooks,
 		dataDirectory:        opts.DataDirectory,
 		planService:          opts.PlanService,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
@@ -732,6 +738,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Idle: become the active run. Register the cancel func before dropping
 	// the lock so a Cancel that arrives between here and assistant creation
 	// is not lost.
+	hookRunID := call.RunID
+	if hookRunID == "" {
+		hookRunID = uuid.NewString()
+	}
+	ctx = hookruntime.WithRun(ctx, hookRunID)
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
@@ -762,6 +773,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// message of the turn is the value reachable through this
 	// pointer when the defer runs.
 	var currentAssistant *message.Message
+	defer func() {
+		if !skipRunComplete && message.OutputReviewEnabled(a.messages) && result != nil && currentAssistant != nil {
+			result = a.publicOutputResult(context.WithoutCancel(ctx), result, currentAssistant.ID)
+		}
+	}()
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -792,7 +808,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
 		if currentAssistant != nil {
 			complete.MessageID = currentAssistant.ID
-			complete.Text = currentAssistant.Content().String()
+			if message.OutputReviewEnabled(a.messages) {
+				publicText, projectionErr := message.FinalPublicText(context.WithoutCancel(ctx), a.messages, currentAssistant.ID)
+				if projectionErr != nil {
+					complete.Error = projectionErr.Error()
+				} else {
+					complete.Text = publicText
+				}
+			} else {
+				complete.Text = currentAssistant.Content().String()
+			}
 		}
 		if retErr != nil {
 			complete.Error = retErr.Error()
@@ -802,7 +827,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		// Stop hooks observe every terminal run state. They cannot
 		// block; their context is logged (the run is already over).
-		if a.stopRunner != nil {
+		if a.hookRuntime != nil || a.stopRunner != nil {
 			stopData, _ := json.Marshal(map[string]any{
 				"session_id": call.SessionID,
 				"run_id":     call.RunID,
@@ -810,12 +835,24 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				"cancelled":  complete.Cancelled,
 			})
 			stopCtx := context.WithoutCancel(ctx)
-			stop, stopErr := a.stopRunner.Run(stopCtx, hooks.EventStop, call.SessionID, "", string(stopData))
+			var stop hooks.AggregateResult
+			var stopErr error
+			if a.hookRuntime != nil {
+				outcome := "completed"
+				if complete.Cancelled || genCtx.Err() != nil {
+					outcome = "cancelled"
+				} else if complete.Error != "" {
+					outcome = "failed"
+				}
+				stop, stopErr = a.hookRuntime.Run(stopCtx, hooks.EventStop, call.SessionID, "", string(stopData), hooks.EventDetails{Outcome: outcome, IsInterrupt: outcome == "cancelled", Error: complete.Error})
+			} else {
+				stop, stopErr = a.stopRunner.Run(stopCtx, hooks.EventStop, call.SessionID, "", string(stopData))
+			}
 			if stopErr != nil {
 				slog.Warn("Stop hook execution error", "error", stopErr)
 			}
 			if stop.Context != "" {
-				slog.Info("Stop hook context", "session", call.SessionID, "context", stop.Context)
+				slog.Debug("Stop hook context received", "session", call.SessionID)
 			}
 		}
 		// Prefer the per-call hook when supplied so the coordinator
@@ -893,7 +930,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	agent := fantasy.NewAgent(
 		largeModel.Model,
-		fantasy.WithSystemPrompt(systemPrompt),
+		fantasy.WithSystemPrompt(a.outputPrompt(systemPrompt)),
 		fantasy.WithTools(agentTools...),
 		fantasy.WithUserAgent(userAgent),
 	)
@@ -917,9 +954,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// SessionStart hooks: only on a session's first run. They cannot
 		// block; their context is prepended to the prompt so the model
 		// sees it before its first response.
-		if a.sessionStartRunner != nil {
-			ssCtx := context.WithoutCancel(ctx)
-			ss, ssErr := a.sessionStartRunner.Run(ssCtx, hooks.EventSessionStart, call.SessionID, "", "")
+		if a.hookRuntime != nil || a.sessionStartRunner != nil {
+			ssCtx := genCtx
+			var ss hooks.AggregateResult
+			var ssErr error
+			if a.hookRuntime != nil {
+				ss, ssErr = a.hookRuntime.Run(ssCtx, hooks.EventSessionStart, call.SessionID, "", "{}", hooks.EventDetails{Outcome: "started"})
+			} else {
+				ss, ssErr = a.sessionStartRunner.Run(ssCtx, hooks.EventSessionStart, call.SessionID, "", "")
+			}
 			if ssErr != nil {
 				slog.Warn("SessionStart hook execution error", "error", ssErr)
 			}
@@ -1594,7 +1637,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		if currentAssistant != nil {
 			complete.MessageID = currentAssistant.ID
-			complete.Text = currentAssistant.Content().String()
+			if message.OutputReviewEnabled(a.messages) {
+				publicText, projectionErr := message.FinalPublicText(context.WithoutCancel(ctx), a.messages, currentAssistant.ID)
+				if projectionErr != nil {
+					complete.Error = projectionErr.Error()
+				} else {
+					complete.Text = publicText
+				}
+			} else {
+				complete.Text = currentAssistant.Content().String()
+			}
 		}
 		if ctx.Err() != nil {
 			complete.Cancelled = true
@@ -2058,7 +2110,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
 		return fantasy.NewAgent(
 			m,
-			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
+			fantasy.WithSystemPrompt(a.outputPrompt(string(p))+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
 			fantasy.WithUserAgent(userAgent),
 		)
@@ -2136,6 +2188,12 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		title = cmp.Or(fallback, DefaultSessionName)
 	}
 
+	reviewedTitle, projectionErr := message.ReviewText(ctx, a.messages, sessionID, "title", title)
+	if projectionErr != nil {
+		slog.Warn("Session title publication failed", "error", projectionErr)
+		return
+	}
+	title = reviewedTitle
 	// Calculate usage and cost.
 	var openrouterCost *float64
 	for _, step := range resp.Steps {

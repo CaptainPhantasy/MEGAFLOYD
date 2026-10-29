@@ -91,6 +91,9 @@ type pendingState struct {
 	// but other flushers must back off.
 	flushing bool
 
+	// flushCancel stops in-flight output review when cancellation arrives.
+	flushCancel context.CancelFunc
+
 	// timer is the active debounce timer, or nil if no flush is
 	// scheduled. Stopped and reset when a terminal update preempts
 	// the debounce window.
@@ -111,6 +114,7 @@ type service struct {
 	q        db.Querier
 	db       *sql.DB
 	debounce time.Duration
+	review   *outputReview
 
 	mu      sync.Mutex
 	pending map[string]*pendingState
@@ -152,7 +156,7 @@ func NewService(q db.Querier, opts ...ServiceOption) Service {
 }
 
 func (s *service) Delete(ctx context.Context, id string) error {
-	message, err := s.Get(ctx, id)
+	message, err := PublicGet(ctx, s, id)
 	if err != nil {
 		return err
 	}
@@ -208,7 +212,14 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	}
 	// Clone the message before publishing to avoid race conditions with
 	// concurrent modifications to the Parts slice.
-	s.Publish(pubsub.CreatedEvent, message.Clone())
+	if s.review != nil && message.Role == Assistant {
+		if err := s.review.record(ctx, message, privateKind(message), false); err != nil {
+			return Message{}, err
+		}
+	}
+	if err := s.publishOutput(ctx, pubsub.CreatedEvent, message, false); err != nil {
+		return Message{}, err
+	}
 	return message, nil
 }
 
@@ -246,6 +257,9 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 		}
 		p.latest = cloned
 		p.dirty = true
+		if s.review != nil && cloned.Role == Assistant && cloned.FinishReason() == FinishReasonCanceled && p.flushCancel != nil {
+			p.flushCancel()
+		}
 		s.mu.Unlock()
 		return s.flushOne(ctx, msg.ID, true)
 	}
@@ -258,6 +272,9 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 	}
 	p.latest = cloned
 	p.dirty = true
+	if s.review != nil && cloned.Role == Assistant && cloned.FinishReason() == FinishReasonCanceled && p.flushCancel != nil {
+		p.flushCancel()
+	}
 
 	var prev *Message
 	if p.hasFlushed {
@@ -330,6 +347,9 @@ func (s *service) FlushAll(ctx context.Context) error {
 // recent state.
 func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) error {
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		s.mu.Lock()
 		p, ok := s.pending[id]
 		if !ok {
@@ -367,11 +387,25 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		isTerminal := shouldFlushNow(prev, &snap)
 		p.flushing = true
 		p.dirty = false
+		publishCtx := ctx
+		var cancel context.CancelFunc
+		if s.review != nil {
+			publishCtx, cancel = context.WithCancel(ctx)
+			p.flushCancel = cancel
+		}
 		s.mu.Unlock()
 
 		err := s.write(ctx, snap)
+		if err == nil {
+			// Preserve publication order while this message owns its flush.
+			err = s.publishOutput(publishCtx, pubsub.UpdatedEvent, snap, isTerminal)
+		}
+		if cancel != nil {
+			cancel()
+		}
 
 		s.mu.Lock()
+		p.flushCancel = nil
 		p.flushing = false
 		if err == nil {
 			p.lastFlushed = snap
@@ -389,15 +423,6 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 			return err
 		}
 
-		// Terminal events — message finished, tool call added or
-		// finished, reasoning ended — use the bounded must-deliver
-		// path so they never get dropped under channel contention.
-		if isTerminal {
-			s.PublishMustDeliver(ctx, pubsub.UpdatedEvent, snap)
-		} else {
-			s.Publish(pubsub.UpdatedEvent, snap)
-		}
-
 		if wasDirty && syncCaller {
 			continue
 		}
@@ -408,6 +433,9 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 // write performs the unguarded SQL write + UpdatedAt stamp. Caller
 // owns publishing.
 func (s *service) write(ctx context.Context, msg Message) error {
+	if s.review != nil && msg.Role == Assistant {
+		return s.review.record(ctx, msg, privateKind(msg), true)
+	}
 	parts, err := marshalParts(msg.Parts)
 	if err != nil {
 		return err

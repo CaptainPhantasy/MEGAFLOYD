@@ -58,7 +58,7 @@ func NewTranscriptExportTool(sessions session.Service, messages message.Service,
 			}
 
 			// Get all messages for the session
-			msgs, err := messages.List(ctx, sessionID)
+			msgs, err := message.PublicList(ctx, messages, sessionID)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get messages: %v", err)), nil
 			}

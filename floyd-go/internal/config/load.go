@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"log/slog"
 	"maps"
 	"os"
@@ -19,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 
 	"charm.land/catwalk/pkg/catwalk"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
@@ -1584,49 +1585,95 @@ func ProjectSkillsDir(workingDir string) []string {
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
 
-// normalizeHookEvent maps user-provided event names to their canonical
-// form. Matching is case-insensitive and accepts snake_case variants
-// (e.g. "pre_tool_use" → "PreToolUse").
-func normalizeHookEvent(name string) string {
-	switch strings.ToLower(strings.ReplaceAll(name, "_", "")) {
+// NormalizeHookEvent accepts canonical event names and documented aliases.
+func NormalizeHookEvent(name string) (string, error) {
+	switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(name), "_", "")) {
 	case "pretooluse":
-		return "PreToolUse"
+		return "PreToolUse", nil
 	case "posttooluse":
-		return "PostToolUse"
+		return "PostToolUse", nil
+	case "posttoolusefailure", "toolfailure":
+		return "PostToolUseFailure", nil
+	case "actionrejected":
+		return "ActionRejected", nil
+	case "toolcancelled", "toolcanceled":
+		return "ToolCancelled", nil
+	case "permissionrequest":
+		return "PermissionRequest", nil
+	case "permissionresolved":
+		return "PermissionResolved", nil
 	case "sessionstart":
-		return "SessionStart"
+		return "SessionStart", nil
 	case "stop", "runcomplete":
-		return "Stop"
+		return "Stop", nil
 	default:
-		return name
+		return "", fmt.Errorf("unknown hook event %q", name)
 	}
 }
 
-// ValidateHooks normalizes event names and checks that every configured
-// hook has a command and a syntactically valid matcher regex. Matcher
-// compilation used for matching is owned by hooks.Runner; this function
-// only validates up front so the user sees config errors at load time
-// rather than on the first tool call.
+// Unknown optional legacy events remain accepted but are not dispatched.
+func normalizeHookEvent(name string) string {
+	canonical, err := NormalizeHookEvent(name)
+	if err != nil {
+		return name
+	}
+	return canonical
+}
+
+// ValidateHooks merges canonical names first, then aliases in lexical order.
+// This is deterministic even when multiple JSON keys refer to one event.
 func (c *Config) ValidateHooks() error {
-	// Normalize event name keys.
-	for event, eventHooks := range c.Hooks {
-		canonical := normalizeHookEvent(event)
-		if canonical != event {
-			c.Hooks[canonical] = append(c.Hooks[canonical], eventHooks...)
-			delete(c.Hooks, event)
+	keys := make([]string, 0, len(c.Hooks))
+	for key := range c.Hooks {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	merged := make(map[string][]HookConfig, len(c.Hooks))
+	for _, key := range keys {
+		if normalizeHookEvent(key) == key {
+			merged[key] = append(merged[key], c.Hooks[key]...)
 		}
 	}
-
-	for event, eventHooks := range c.Hooks {
-		for i, h := range eventHooks {
-			if h.Command == "" {
-				return fmt.Errorf("hook %s[%d]: command is required", event, i)
+	for _, key := range keys {
+		if canonical := normalizeHookEvent(key); canonical != key {
+			merged[canonical] = append(merged[canonical], c.Hooks[key]...)
+		}
+	}
+	for event, hs := range merged {
+		c.Hooks[event] = hs
+	}
+	for _, key := range keys {
+		if normalizeHookEvent(key) != key {
+			delete(c.Hooks, key)
+		}
+	}
+	keys = keys[:0]
+	for key := range c.Hooks {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, event := range keys {
+		for i, h := range c.Hooks[event] {
+			prefix := fmt.Sprintf("hook %s[%d]", event, i)
+			if strings.TrimSpace(h.Command) == "" {
+				return fmt.Errorf("%s: command is required", prefix)
 			}
-			if h.Matcher == "" {
-				continue
+			if h.Matcher != "" {
+				if _, err := regexp.Compile(h.Matcher); err != nil {
+					return fmt.Errorf("%s: invalid matcher regex %q: %w", prefix, h.Matcher, err)
+				}
 			}
-			if _, err := regexp.Compile(h.Matcher); err != nil {
-				return fmt.Errorf("hook %s[%d]: invalid matcher regex %q: %w", event, i, h.Matcher, err)
+			if h.Async && (h.Required || h.Sequential) {
+				return fmt.Errorf("%s: async observers cannot be required or sequential", prefix)
+			}
+			if h.Required && event != "PreToolUse" && event != "PostToolUse" {
+				return fmt.Errorf("%s: required is supported only by PreToolUse and PostToolUse", prefix)
+			}
+			if h.Async && (event == "PreToolUse" || event == "SessionStart") {
+				return fmt.Errorf("%s: this event must be synchronous", prefix)
+			}
+			if _, err := NormalizeHookEvent(event); err != nil && (h.Required || h.Async || h.Sequential) {
+				return fmt.Errorf("%s: modern controls require a supported event", prefix)
 			}
 		}
 	}
