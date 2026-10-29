@@ -62,9 +62,13 @@ func Read(cfg *config.Config) (Snapshot, error) {
 // native workspace config transaction. It never touches provider/model fields.
 func Apply(store *config.ConfigStore, in Input) (Snapshot, error) {
 	var result Snapshot
+	// Resolver reads take the same write lock UpdatePluginRuntime holds for
+	// the whole transaction, so the resolver must be captured before entering
+	// it; reading it inside the mutation deadlocks the store against itself.
+	resolver := store.Resolver().ResolveValue
 	err := store.UpdatePluginRuntime(func(cfg *config.Config) (map[string]any, error) {
 		var err error
-		result, err = Merge(cfg, in, store.WorkingDir(), store.Resolver().ResolveValue)
+		result, err = Merge(cfg, in, store.WorkingDir(), resolver)
 		if err != nil {
 			return nil, err
 		}

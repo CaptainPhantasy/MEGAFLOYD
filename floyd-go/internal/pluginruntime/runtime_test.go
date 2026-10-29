@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -90,4 +91,27 @@ func TestCanonicalPluginReloadOwnsOnlyItsContributions(t *testing.T) {
 	}
 	_, err = Merge(&restored, Input{MCP: config.MCPs{"owner-server": {Command: "replacement"}}}, dir, nil)
 	require.ErrorContains(t, err, "conflicts")
+}
+
+func TestApplyCompletesInsideConfigTransaction(t *testing.T) {
+	t.Setenv("FLOYD_GLOBAL_CONFIG", t.TempDir())
+	t.Setenv("FLOYD_GLOBAL_DATA", t.TempDir())
+	store, err := config.Load(t.TempDir(), t.TempDir(), false)
+	require.NoError(t, err)
+	pluginRoot := filepath.Join(t.TempDir(), "plugins")
+	require.NoError(t, os.MkdirAll(pluginRoot, 0755))
+
+	done := make(chan error, 1)
+	go func() {
+		_, applyErr := Apply(store, Input{PluginPaths: []string{pluginRoot}})
+		done <- applyErr
+	}()
+	select {
+	case applyErr := <-done:
+		require.NoError(t, applyErr)
+	case <-time.After(120 * time.Second):
+		buf := make([]byte, 1<<20)
+		buf = buf[:runtime.Stack(buf, true)]
+		t.Fatalf("Apply deadlocked reading the resolver inside the config transaction\n%s", buf)
+	}
 }
