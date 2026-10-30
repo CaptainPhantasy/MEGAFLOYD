@@ -12,7 +12,7 @@ engine_gid="$(id -g nobody)"
 [[ "$engine_uid" != 0 ]]
 sudo -n true
 build_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/megafloyd-approval-build.XXXXXX")"
-fixture="$(sudo -n mktemp -d /opt/megafloyd-approval-test.XXXXXX)"
+fixture="$(sudo -n mktemp -d /run/megafloyd-approval-test.XXXXXX)"
 sudo -n chmod 755 "$fixture"
 CGO_ENABLED=0 go -C "$repo_root/floyd-go" build -o "$build_dir/authority" ./cmd/megafloyd-approval-authority
 CGO_ENABLED=0 go -C "$repo_root/floyd-go" test -c -o "$build_dir/engine.test" ./internal/deletionguard
@@ -26,13 +26,28 @@ broker_pid=''
 broker_job=''
 stop_broker() {
   if [[ -n "$broker_pid" ]]; then
-    sudo -n kill -TERM "$broker_pid"
-    wait "$broker_job"
+    if sudo -n kill -0 "$broker_pid" 2>/dev/null; then
+      sudo -n kill -TERM "$broker_pid"
+    fi
+    local stop_status=0
+    wait "$broker_job" || stop_status=$?
     broker_pid=''
     broker_job=''
+    return "$stop_status"
   fi
 }
-trap stop_broker EXIT
+cleanup_broker() {
+  local original_status=$?
+  trap - EXIT
+  local cleanup_status=0
+  stop_broker || cleanup_status=$?
+  if (( original_status != 0 || cleanup_status != 0 )); then
+    if [[ -f "$build_dir/authority.log" ]]; then cat "$build_dir/authority.log" >&2; fi
+  fi
+  if (( original_status == 0 )); then original_status=$cleanup_status; fi
+  exit "$original_status"
+}
+trap cleanup_broker EXIT
 start_broker() {
   local phase="$1" old_inode=''
   if [[ -S "$socket_path" ]]; then old_inode="$(stat -c '%i' "$socket_path")"; fi
