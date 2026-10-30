@@ -109,15 +109,20 @@ func snapshot(target string) (string, error) {
 }
 
 func sameOperation(a Approval, c Classification) bool {
-	if len(a.Operations) > 0 {
-		for _, target := range c.Targets {
-			if a.Operations[target] == "" || a.Operations[target] != c.Operations[target] {
-				return false
-			}
-		}
-		return len(c.Targets) > 0
+	if a.TargetSet != Digest(a.Targets) || len(a.Targets) == 0 {
+		return false
 	}
-	return a.Command == c.Command && a.Recursive == c.Recursive
+	for _, target := range a.Targets {
+		if a.Snapshots[target] == "" || a.Operations[target] == "" {
+			return false
+		}
+	}
+	for _, target := range c.Targets {
+		if a.Operations[target] == "" || a.Operations[target] != c.Operations[target] {
+			return false
+		}
+	}
+	return len(c.Targets) > 0
 }
 
 func subset(targets, whole []string) bool {
@@ -147,10 +152,7 @@ func approvalForSubset(record Record, c Classification) (Approval, bool) {
 			return a, true
 		}
 	}
-	// Existing v1 exact-set confirmations remain valid; they confer no subset authority.
-	if record.Confirmed(c.Digest()) {
-		return Approval{TargetSet: c.Digest(), Targets: c.Targets, Command: c.Command, Recursive: c.Recursive}, true
-	}
+
 	return Approval{}, false
 }
 
@@ -271,6 +273,14 @@ func (g *Guard) saveApproval(sessionID string, c Classification, snapshots map[s
 
 // BeginExecution durably marks an authorized operation pending before launch.
 func (g *Guard) BeginExecution(sessionID string, c Classification, callID string) error {
+	if !c.IsDestructive() || c.Unresolved != "" || len(c.Targets) == 0 {
+		return ErrNotConfirmed
+	}
+	// Obtain metadata before the final identity check. No callback or stale
+	// pre-lock approval may substitute new snapshots after that check.
+	recordedAt := g.now().UTC().Format(time.RFC3339Nano)
+	g.ledger.mu.Lock()
+	defer g.ledger.mu.Unlock()
 	record, err := g.ledger.Read(sessionID)
 	if err != nil {
 		return err
@@ -278,29 +288,11 @@ func (g *Guard) BeginExecution(sessionID string, c Classification, callID string
 	if reason := recoveryDenial(record, c); reason != "" {
 		return errors.New(reason)
 	}
-	a, ok := approvalForSubset(record, c)
+	approval, ok := reusableApproval(record, c)
 	if !ok {
-		return ErrNotConfirmed
+		return fmt.Errorf("%w: the original target identity and operation are not verified", ErrNotConfirmed)
 	}
-	if len(a.Snapshots) == 0 {
-		snapshots, err := snapshotTargets(c.Targets)
-		if err != nil {
-			return err
-		}
-		if err := g.saveApproval(sessionID, c, snapshots); err != nil {
-			return err
-		}
-	}
-	g.ledger.mu.Lock()
-	defer g.ledger.mu.Unlock()
-	record, err = g.ledger.Read(sessionID)
-	if err != nil {
-		return err
-	}
-	if reason := recoveryDenial(record, c); reason != "" {
-		return errors.New(reason)
-	}
-	record.Attempts = append(record.Attempts, Attempt{ToolCallID: callID, ApprovalSet: a.TargetSet, Targets: c.Targets, State: "started", RecordedAt: g.now().UTC().Format(time.RFC3339Nano)})
+	record.Attempts = append(record.Attempts, Attempt{ToolCallID: callID, ApprovalSet: approval.TargetSet, Targets: c.Targets, State: "started", RecordedAt: recordedAt})
 	return g.ledger.write(sessionID, record)
 }
 

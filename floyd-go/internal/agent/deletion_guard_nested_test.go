@@ -19,6 +19,12 @@ func TestDeletionGuardNestedCommandsNeverReachToolWithoutAuthorization(t *testin
 		`sudo -n rm widget`,
 		`sudo -u root rm widget`,
 		`nohup -- rm widget`,
+		`env rm widget`,
+		`xargs env rm widget`,
+		`nice -n 5 rm widget`,
+		`timeout 2 rm widget`,
+		`setsid -fw rm widget`,
+		`stdbuf -o L env rm widget`,
 	} {
 		t.Run(command, func(t *testing.T) {
 			for _, answers := range [][]bool{nil, {true, false}} {

@@ -264,7 +264,7 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 	// Wrapper arguments may belong to a nested script rather than the
 	// wrapper itself, so a later --help must not hide that script.
 	if hasInformationalFlag(args[1:]) && !slices.Contains(
-		[]string{"sudo", "doas", "nohup", "time", "command", "builtin", "exec", "eval", "sh", "bash", "dash", "zsh", "ksh"}, name) {
+		[]string{"sudo", "doas", "nohup", "time", "env", "nice", "timeout", "setsid", "stdbuf", "xargs", "command", "builtin", "exec", "eval", "sh", "bash", "dash", "zsh", "ksh"}, name) {
 		return
 	}
 	if slices.Contains(removalCommands, name) || slices.Contains([]string{"truncate", "dd", "find", "git", "mv", "rsync"}, name) {
@@ -292,6 +292,8 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 	switch name {
 	case "sudo", "doas", "nohup", "time":
 		c.wrapper(args, complete, dir)
+	case "env", "nice", "timeout", "setsid", "stdbuf":
+		c.launchWrapper(args, complete, dir)
 	case "command", "builtin", "exec":
 		nested := args[1:]
 		if name == "command" && len(nested) > 0 && (nested[0] == "-v" || nested[0] == "-V") {
@@ -323,7 +325,7 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 			c.statement(stmt, &dir)
 		}
 	case "xargs":
-		c.xargs(args, dir)
+		c.xargs(args, complete, dir)
 	case "sh", "bash", "dash", "zsh", "ksh":
 		c.shellCommand(args, complete, dir)
 	case "truncate":
@@ -625,7 +627,139 @@ func (c *classifier) wrapper(args []string, complete bool, dir string) {
 		}
 		return
 	}
+	if name == "sudo" && strings.Contains(args[i], "=") {
+		c.unresolved("wrapper environment assignments can change command resolution")
+		return
+	}
 	c.command(args[i:], complete, dir)
+}
+
+// launchWrapper inspects common process launchers without allowing their
+// option arguments or timeout duration to masquerade as the executable.
+func (c *classifier) launchWrapper(args []string, complete bool, dir string) {
+	name := filepath.Base(args[0])
+	i := 1
+	for i < len(args) {
+		arg := args[i]
+		if arg == "--" {
+			i++
+			break
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			break
+		}
+		if (arg == "--help" || arg == "--version") && i == 1 && len(args) == 2 {
+			return
+		}
+		consumed := false
+		switch name {
+		case "env":
+			// Even an otherwise harmless executable may change with PATH, loader,
+			// split-string, chdir, or other environment-dispatch options.
+		case "nice":
+			if arg == "-n" || arg == "--adjustment" {
+				if i+1 < len(args) && decimalInteger(args[i+1]) {
+					i++
+					consumed = true
+				}
+			} else if value, ok := strings.CutPrefix(arg, "--adjustment="); ok {
+				consumed = decimalInteger(value)
+			} else if strings.HasPrefix(arg, "-n") && len(arg) > 2 {
+				consumed = decimalInteger(arg[2:])
+			} else {
+				consumed = decimalInteger(arg)
+			}
+		case "timeout":
+			if slices.Contains([]string{"--preserve-status", "--foreground", "--verbose", "-v"}, arg) {
+				consumed = true
+			} else if slices.Contains([]string{"-s", "--signal", "-k", "--kill-after"}, arg) {
+				if i+1 < len(args) {
+					i++
+					consumed = true
+				}
+			} else if strings.HasPrefix(arg, "--signal=") || strings.HasPrefix(arg, "--kill-after=") ||
+				(len(arg) > 2 && (strings.HasPrefix(arg, "-s") || strings.HasPrefix(arg, "-k"))) {
+				consumed = true
+			}
+		case "setsid":
+			if slices.Contains([]string{"--ctty", "--fork", "--wait"}, arg) {
+				consumed = true
+			} else if !strings.HasPrefix(arg, "--") {
+				consumed = len(arg) > 1
+				for _, flag := range arg[1:] {
+					if !strings.ContainsRune("cfw", flag) {
+						consumed = false
+					}
+				}
+			}
+		case "stdbuf":
+			if slices.Contains([]string{"-i", "-o", "-e", "--input", "--output", "--error"}, arg) {
+				if i+1 < len(args) {
+					i++
+					consumed = true
+				}
+			} else if strings.HasPrefix(arg, "--input=") || strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "--error=") ||
+				(len(arg) > 2 && (strings.HasPrefix(arg, "-i") || strings.HasPrefix(arg, "-o") || strings.HasPrefix(arg, "-e"))) {
+				consumed = true
+			}
+		}
+		if !consumed {
+			c.unresolved("the process-launcher option or value cannot be inspected")
+			return
+		}
+		i++
+	}
+	if name == "env" && i < len(args) && (args[i] == "-" || strings.Contains(args[i], "=")) {
+		c.unresolved("environment changes can alter command resolution or inject execution")
+		return
+	}
+	if name == "timeout" {
+		if i >= len(args) || !timeoutDuration(args[i]) {
+			c.unresolved("the timeout duration cannot be inspected")
+			return
+		}
+		i++
+	}
+	if i >= len(args) {
+		if !complete {
+			c.unresolved("the launched command is not literal")
+		}
+		return
+	}
+	c.command(args[i:], complete, dir)
+}
+
+func decimalInteger(value string) bool {
+	if len(value) > 0 && (value[0] == '+' || value[0] == '-') {
+		value = value[1:]
+	}
+	if value == "" {
+		return false
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func timeoutDuration(value string) bool {
+	value = strings.TrimPrefix(value, "+")
+	if len(value) > 0 && strings.ContainsRune("smhd", rune(value[len(value)-1])) {
+		value = value[:len(value)-1]
+	}
+	digits, dots := 0, 0
+	for _, character := range value {
+		if character == '.' {
+			dots++
+		} else if character >= '0' && character <= '9' {
+			digits++
+		} else {
+			return false
+		}
+	}
+	return digits > 0 && dots <= 1
 }
 
 // find classifies "find -delete" and "-exec" forms. The matched set cannot be
@@ -730,30 +864,60 @@ func (c *classifier) truncate(args []string, complete bool, dir string) {
 	c.removal("truncate", paths, false, complete, dir)
 }
 
-// xargs classifies a pipeline that runs a removal command over generated
-// arguments.
-func (c *classifier) xargs(args []string, dir string) {
-	for i := 1; i < len(args); i++ {
-		if strings.HasPrefix(args[i], "-") {
-			continue
+// xargs delegates its explicit child to the same command classifier. Input
+// arguments are generated, so destructive child effects cannot prove targets.
+func (c *classifier) xargs(args []string, complete bool, dir string) {
+	i := 1
+	for i < len(args) {
+		arg := args[i]
+		if arg == "--" {
+			i++
+			break
 		}
-		if !slices.Contains(removalCommands, filepath.Base(args[i])) {
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			break
+		}
+		if (arg == "--help" || arg == "--version") && i == 1 && len(args) == 2 {
 			return
 		}
-		_, paths := operands(args[i:])
-		effect := Classification{
-			Effect:     EffectPermanentDeletion,
-			Command:    "xargs " + args[i],
-			Unresolved: "xargs builds its target list from standard input, so the exact targets cannot be proven",
-			Reason:     "The pipeline permanently deletes data, and its exact targets cannot be proven.",
+		if slices.Contains([]string{"-0", "--null", "-r", "--no-run-if-empty", "-t", "--verbose", "-p", "--interactive", "-x", "--exit"}, arg) {
+			i++
+			continue
 		}
-		for _, name := range paths {
-			if target, err := c.resolve(dir, name); err == nil {
-				effect.Targets = append(effect.Targets, target)
+		if slices.Contains([]string{"-a", "--arg-file", "-d", "--delimiter", "-E", "--eof", "-I", "--replace", "-L", "--max-lines", "-n", "--max-args", "-P", "--max-procs", "-s", "--max-chars"}, arg) {
+			if i+1 >= len(args) {
+				c.unresolved("an xargs option value is missing")
+				return
 			}
+			i += 2
+			continue
 		}
-		c.add(effect)
+		key, _, hasValue := strings.Cut(arg, "=")
+		if hasValue && slices.Contains([]string{"--arg-file", "--delimiter", "--eof", "--replace", "--max-lines", "--max-args", "--max-procs", "--max-chars"}, key) {
+			i++
+			continue
+		}
+		if len(arg) > 2 && !strings.HasPrefix(arg, "--") && strings.ContainsRune("adEILnPs", rune(arg[1])) {
+			i++
+			continue
+		}
+		c.unresolved("the xargs option cannot be inspected")
 		return
+	}
+	if i >= len(args) {
+		if !complete {
+			c.unresolved("the xargs command is not literal")
+		}
+		return
+	}
+	start := len(c.effects)
+	c.command(args[i:], false, dir)
+	for index := start; index < len(c.effects); index++ {
+		effect := &c.effects[index]
+		if effect.IsDestructive() {
+			effect.Unresolved = "xargs builds its target arguments from input, so the exact targets cannot be proven"
+			effect.Reason = "The launched command may permanently delete data, and " + effect.Unresolved + "."
+		}
 	}
 }
 

@@ -107,7 +107,7 @@ func (g *Guard) Check(ctx context.Context, sessionID, toolCallID string, classif
 		return decision
 	}
 	if record.Confirmed(targetSet) {
-		decision.Allowed, decision.Record = true, true
+		decision.Reason = "Permanent deletion is blocked because the recorded confirmations have no verified original target identity and operation. New observations cannot substitute for the approved items."
 		return decision
 	}
 	if g.confirmer == nil {

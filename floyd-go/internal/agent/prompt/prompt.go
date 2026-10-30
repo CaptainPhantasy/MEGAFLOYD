@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -238,14 +239,14 @@ func loadContextFiles(paths []string, store *config.ConfigStore) ([]ContextFile,
 			return nil, fmt.Errorf("reading policy directory %s: %w", filepath.Dir(fullPath), err)
 		}
 		for _, entry := range entries {
-			if !policyName(entry.Name()) || entry.IsDir() {
+			if !policyName(entry.Name()) {
 				continue
 			}
 			path := filepath.Join(filepath.Dir(fullPath), entry.Name())
 			if seen[path] {
 				continue
 			}
-			content, err := os.ReadFile(path)
+			content, err := readPolicyFile(path)
 			if err != nil {
 				return nil, fmt.Errorf("reading policy %s: %w", path, err)
 			}
@@ -254,6 +255,36 @@ func loadContextFiles(paths []string, store *config.ConfigStore) ([]ContextFile,
 		}
 	}
 	return files, nil
+}
+
+// maxPolicyBytes bounds each automatically loaded policy before any content
+// enters the model context. The opened descriptor must be a regular file.
+const maxPolicyBytes = 1 << 20
+
+func readPolicyFile(path string) ([]byte, error) {
+	file, err := openPolicyFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("policy is not a regular file")
+	}
+	if info.Size() > maxPolicyBytes {
+		return nil, fmt.Errorf("policy exceeds %d bytes", maxPolicyBytes)
+	}
+	content, err := io.ReadAll(io.LimitReader(file, maxPolicyBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(content) > maxPolicyBytes {
+		return nil, fmt.Errorf("policy exceeds %d bytes", maxPolicyBytes)
+	}
+	return content, nil
 }
 
 func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {

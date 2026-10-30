@@ -57,6 +57,7 @@ func TestDeletionWrapperOptionsCannotHideCommand(t *testing.T) {
 		`/usr/bin/time -o important.txt echo safe`,
 		`sudo "$command" important.txt`,
 		`sudo PATH=/different rm important.txt`,
+		`sudo -- PATH=/different rm important.txt`,
 		`sudo -nEu root rm important.txt`,
 		`sudo -uroot rm important.txt`,
 		`doas -n -uroot rm important.txt`,
@@ -90,4 +91,32 @@ func TestDeletionMoveSymlinkAndDuplicateDestinations(t *testing.T) {
 	require.True(t, duplicate.IsDestructive())
 	require.NotEmpty(t, duplicate.Unresolved)
 	require.False(t, Classify("mv -n one/report two/report destination/", dir).IsDestructive())
+}
+
+func TestDeletionLaunchWrappersCannotHideCommand(t *testing.T) {
+	for _, command := range []string{
+		`env rm important.txt`, `env -- rm important.txt`,
+		`xargs env rm`, `xargs -I {} nice -n 5 rm '{}'`, `xargs --max-args=1 timeout 5 rm`, `xargs sh -c 'rm important.txt' --help`, `/usr/bin/env nice -n 5 rm important.txt`,
+		`nice rm important.txt`, `nice -n 5 rm important.txt`, `nice --adjustment=-5 rm important.txt`, `nice -10 rm important.txt`,
+		`timeout 5 rm important.txt`, `timeout --signal=KILL --kill-after=2 5s rm important.txt`, `timeout -s TERM -k 2 5 rm important.txt`,
+		`setsid -fw rm important.txt`, `stdbuf -o L rm important.txt`, `stdbuf --output=L timeout 5 env rm important.txt`,
+		`env PATH=/different rm important.txt`, `env FOO=value echo safe`, `env -i rm important.txt`,
+		`env -u PATH rm important.txt`, `env -C /elsewhere rm important.txt`, `env -S 'rm important.txt'`,
+		`timeout --unknown 5 rm important.txt`, `nice --unknown rm important.txt`, `env --unknown rm important.txt`,
+		`env "$command" important.txt`, `xargs "$command"`, `timeout "$duration" rm important.txt`,
+	} {
+		t.Run(command, func(t *testing.T) {
+			classification := Classify(command, t.TempDir())
+			require.True(t, classification.IsDestructive(), command)
+			require.False(t, NewGuard(t.TempDir(), nil).Check(t.Context(), "s", "launch-wrapper", classification).Allowed)
+		})
+	}
+	for _, command := range []string{`env echo safe`, `env -- echo safe`, `xargs -n 1 echo`, `nice -n 5 echo safe`, `timeout 2 printf safe`, `setsid -f echo safe`, `stdbuf -o L echo safe`} {
+		require.False(t, Classify(command, t.TempDir()).IsDestructive(), command)
+	}
+	for _, command := range []string{`env PATH=/different echo safe`, `env -C /different echo safe`, `env -S 'rm important.txt'`, `timeout "$duration" rm important.txt`, `nice -n "$priority" rm important.txt`} {
+		classification := Classify(command, t.TempDir())
+		require.True(t, classification.IsDestructive(), command)
+		require.NotEmpty(t, classification.Unresolved, command)
+	}
 }
