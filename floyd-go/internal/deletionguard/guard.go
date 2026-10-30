@@ -98,6 +98,14 @@ func (g *Guard) Check(ctx context.Context, sessionID, toolCallID string, classif
 			" A new deletion of a different item needs its own two confirmations."
 		return decision
 	}
+	if reason := recoveryDenial(record, classification); reason != "" {
+		decision.Reason = reason
+		return decision
+	}
+	if _, ok := reusableApproval(record, classification); ok {
+		decision.Allowed, decision.Record = true, true
+		return decision
+	}
 	if record.Confirmed(targetSet) {
 		decision.Allowed, decision.Record = true, true
 		return decision
@@ -107,9 +115,22 @@ func (g *Guard) Check(ctx context.Context, sessionID, toolCallID string, classif
 		return decision
 	}
 
+	snapshots, snapshotErr := snapshotTargets(classification.Targets)
+	if snapshotErr != nil {
+		decision.Reason = "Permanent deletion is blocked because target identity cannot be checked: " + snapshotErr.Error()
+		return decision
+	}
+	if err := g.saveApproval(sessionID, classification, snapshots); err != nil {
+		decision.Reason = "Permanent deletion is blocked because target identity cannot be recorded: " + err.Error()
+		return decision
+	}
 	for stage := 1; stage <= 2; stage++ {
 		if _, ok := record.ConfirmationsFor(targetSet)[stage]; ok {
 			continue
+		}
+		if err := g.saveApproval(sessionID, classification, snapshots); err != nil {
+			decision.Reason = "Permanent deletion is blocked because target identity changed: " + err.Error()
+			return decision
 		}
 		request := g.request(sessionID, toolCallID, classification, stage)
 		confirmed, confirmErr := g.confirmer.Confirm(ctx, request)
@@ -138,6 +159,10 @@ func (g *Guard) Check(ctx context.Context, sessionID, toolCallID string, classif
 		record.Confirmations = append(record.Confirmations, confirmation)
 	}
 
+	if err := g.saveApproval(sessionID, classification, snapshots); err != nil {
+		decision.Reason = "Permanent deletion is blocked because approval identity cannot be recorded: " + err.Error()
+		return decision
+	}
 	decision.Allowed, decision.Record = true, true
 	return decision
 }
@@ -148,13 +173,21 @@ func (g *Guard) RecordExecution(sessionID string, classification Classification,
 	if classification.Effect != EffectPermanentDeletion || g == nil {
 		return nil
 	}
-	return g.ledger.AppendExecution(sessionID, Execution{
-		ID:         uuid.NewString(),
-		TargetSet:  classification.Digest(),
-		Targets:    classification.Targets,
-		ToolCallID: toolCallID,
-		RecordedAt: g.now().UTC().Format(time.RFC3339Nano),
+	g.ledger.mu.Lock()
+	defer g.ledger.mu.Unlock()
+	record, err := g.ledger.Read(sessionID)
+	if err != nil {
+		return err
+	}
+	approval, ok := approvalForSubset(record, classification)
+	if !ok {
+		return ErrNotConfirmed
+	}
+	record.Executions = append(record.Executions, Execution{
+		ID: uuid.NewString(), TargetSet: classification.Digest(), ApprovalSet: approval.TargetSet,
+		Targets: classification.Targets, ToolCallID: toolCallID, RecordedAt: g.now().UTC().Format(time.RFC3339Nano),
 	})
+	return g.ledger.write(sessionID, record)
 }
 
 // request builds the stage question. The wording follows the project standard:

@@ -1,6 +1,7 @@
 package deletionguard
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -55,6 +56,7 @@ func (c *classifier) result() Classification {
 			out.Unresolved = effect.Unresolved
 		}
 		out.Targets = append(out.Targets, effect.Targets...)
+		out.Operations = mergeOperations(out.Operations, effect.Operations)
 	}
 	for _, effect := range c.effects {
 		if effect.Effect != out.Effect {
@@ -80,9 +82,23 @@ func (c *classifier) statement(stmt *syntax.Stmt, dir *string) {
 	if stmt == nil {
 		return
 	}
+	if stmt.Background {
+		start := len(c.effects)
+		defer func() {
+			for i := start; i < len(c.effects); i++ {
+				if c.effects[i].IsDestructive() {
+					c.effects[i].Unresolved = "the destructive shell statement runs asynchronously, so its completion cannot be proven"
+				}
+			}
+		}()
+	}
 	c.redirect(stmt, *dir)
+	for _, redir := range stmt.Redirs {
+		c.nestedStatements(redir, *dir)
+	}
 	switch command := stmt.Cmd.(type) {
 	case *syntax.CallExpr:
+		c.nestedStatements(command, *dir)
 		c.call(command, dir)
 	case *syntax.BinaryCmd:
 		if command.Op == syntax.AndStmt {
@@ -106,11 +122,41 @@ func (c *classifier) statement(stmt *syntax.Stmt, dir *string) {
 		for _, child := range command.Stmts {
 			c.statement(child, &nested)
 		}
-	default:
-		// A control-flow construct can change directory in ways that are not
-		// statically known.
+	case *syntax.IfClause, *syntax.WhileClause, *syntax.ForClause,
+		*syntax.CaseClause, *syntax.FuncDecl, *syntax.ArithmCmd,
+		*syntax.TestClause, *syntax.DeclClause, *syntax.LetClause,
+		*syntax.TimeClause, *syntax.CoprocClause, *syntax.TestDecl:
+		// Visit every branch and expansion. We do not predict runtime branch
+		// selection or loop values; nonliteral deletion targets fail closed.
+		c.nestedStatements(command, *dir)
 		*dir = ""
+	case nil:
+		// A statement containing only redirects has no command body.
+	default:
+		c.unresolved("the shell structure cannot be inspected")
 	}
+}
+
+// nestedStatements uses the parser's complete visitor so branch conditions,
+// loop bodies, function bodies and substitutions cannot hide executable code.
+// Each child statement is owned by statement, avoiding duplicate traversal.
+func (c *classifier) nestedStatements(node syntax.Node, dir string) {
+	syntax.Walk(node, func(child syntax.Node) bool {
+		if stmt, ok := child.(*syntax.Stmt); ok {
+			nested := dir
+			c.statement(stmt, &nested)
+			return false
+		}
+		return true
+	})
+}
+
+func (c *classifier) unresolved(reason string) {
+	c.add(Classification{
+		Effect:     EffectPermanentDeletion,
+		Unresolved: reason,
+		Reason:     "The command may permanently delete data, and " + reason + ".",
+	})
 }
 
 // redirect classifies a truncating redirect. Only ">" and ">|" replace existing
@@ -121,7 +167,11 @@ func (c *classifier) redirect(stmt *syntax.Stmt, dir string) {
 			continue
 		}
 		name, ok := literalWord(redir.Word)
-		if !ok || name == "" || name == "/dev/null" {
+		if !ok || name == "" {
+			c.unresolved("the redirect target is not literal, so its contents cannot be protected")
+			continue
+		}
+		if name == "/dev/null" {
 			continue
 		}
 		target, err := c.resolve(dir, name)
@@ -129,11 +179,25 @@ func (c *classifier) redirect(stmt *syntax.Stmt, dir string) {
 			// Creating a file or redirecting to a device keeps stored data.
 			continue
 		}
+		producer := *stmt
+		producer.Redirs = nil
+		for _, input := range stmt.Redirs {
+			if input.Op != syntax.RdrOut && input.Op != syntax.ClbOut {
+				producer.Redirs = append(producer.Redirs, input)
+			}
+		}
+		var printed strings.Builder
+		if err := syntax.NewPrinter().Print(&printed, &producer); err != nil {
+			c.unresolved("the redirect producer cannot be inspected")
+			continue
+		}
+		descriptor, _ := json.Marshal([][]string{{redir.Op.String(), printed.String()}})
 		c.add(Classification{
-			Effect:  EffectPermanentDeletion,
-			Command: ">",
-			Targets: []string{target},
-			Reason:  "The redirect truncates existing content in " + target + ".",
+			Effect:     EffectPermanentDeletion,
+			Command:    ">",
+			Targets:    []string{target},
+			Operations: map[string]string{target: string(descriptor)},
+			Reason:     "The redirect truncates existing content in " + target + ".",
 		})
 	}
 }
@@ -160,12 +224,18 @@ func (c *classifier) call(command *syntax.CallExpr, dir *string) {
 	}
 	if len(args) == 0 {
 		if !complete {
+			c.unresolved("the command name is not literal, so its effect cannot be proven")
 			*dir = ""
 		}
 		return
 	}
-	if complete && args[0] == "cd" {
-		*dir = c.changeDirectory(args, *dir)
+	if args[0] == "cd" {
+		if !complete {
+			c.changedDir = true
+			*dir = ""
+		} else {
+			*dir = c.changeDirectory(args, *dir)
+		}
 		return
 	}
 	c.command(args, complete, *dir)
@@ -190,10 +260,30 @@ func (c *classifier) changeDirectory(args []string, dir string) string {
 }
 
 func (c *classifier) command(args []string, complete bool, dir string) {
-	if hasInformationalFlag(args[1:]) {
+	name := filepath.Base(args[0])
+	// Wrapper arguments may belong to a nested script rather than the
+	// wrapper itself, so a later --help must not hide that script.
+	if hasInformationalFlag(args[1:]) && !slices.Contains(
+		[]string{"sudo", "doas", "nohup", "time", "command", "builtin", "exec", "eval", "sh", "bash", "dash", "zsh", "ksh"}, name) {
 		return
 	}
-	name := filepath.Base(args[0])
+	if slices.Contains(removalCommands, name) || slices.Contains([]string{"truncate", "dd", "find", "git", "mv", "rsync"}, name) {
+		start := len(c.effects)
+		defer func() {
+			for i := start; i < len(c.effects); i++ {
+				effect := &c.effects[i]
+				if effect.Effect != EffectPermanentDeletion {
+					continue
+				}
+				effect.Operations = make(map[string]string, len(effect.Targets))
+				descriptor := operationArguments(args, effect.Targets, dir)
+				data, _ := json.Marshal([][]string{descriptor})
+				for _, target := range effect.Targets {
+					effect.Operations[target] = string(data)
+				}
+			}
+		}()
+	}
 	if slices.Contains(removalCommands, name) {
 		flags, paths := operands(args)
 		c.removal(name, paths, recursiveFlag(flags), complete, dir)
@@ -204,10 +294,40 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 		if len(args) > 1 {
 			c.command(args[1:], complete, dir)
 		}
+	case "command", "builtin", "exec":
+		nested := args[1:]
+		if name == "command" && len(nested) > 0 && (nested[0] == "-v" || nested[0] == "-V") {
+			return
+		}
+		if len(nested) > 0 && nested[0] == "--" {
+			nested = nested[1:]
+		}
+		if len(nested) > 0 && !strings.HasPrefix(nested[0], "-") {
+			c.command(nested, complete, dir)
+		} else if !complete || len(nested) > 0 {
+			c.unresolved("the wrapped command cannot be inspected")
+		}
+	case "cd":
+		// A directory change hidden behind a builtin wrapper still affects
+		// the target identity of later commands.
+		c.changedDir = true
+	case "eval":
+		if !complete {
+			c.unresolved("the evaluated script is not literal")
+			return
+		}
+		script, err := syntax.NewParser().Parse(strings.NewReader(strings.Join(args[1:], " ")), "")
+		if err != nil {
+			c.unresolved("the evaluated script cannot be parsed")
+			return
+		}
+		for _, stmt := range script.Stmts {
+			c.statement(stmt, &dir)
+		}
 	case "xargs":
 		c.xargs(args, dir)
 	case "sh", "bash", "dash", "zsh", "ksh":
-		c.shellCommand(args, dir)
+		c.shellCommand(args, complete, dir)
 	case "truncate":
 		c.truncate(args, complete, dir)
 	case "dd":
@@ -441,9 +561,13 @@ func (c *classifier) xargs(args []string, dir string) {
 
 // shellCommand classifies a nested "-c" script so the wrapper does not hide a
 // deletion.
-func (c *classifier) shellCommand(args []string, dir string) {
+func (c *classifier) shellCommand(args []string, complete bool, dir string) {
+	if !complete {
+		c.unresolved("the nested shell script cannot be inspected")
+		return
+	}
 	for i := 1; i < len(args); i++ {
-		if args[i] != "-c" || i+1 >= len(args) {
+		if !strings.HasPrefix(args[i], "-") || strings.HasPrefix(args[i], "--") || !strings.ContainsRune(args[i][1:], 'c') || i+1 >= len(args) {
 			continue
 		}
 		nestedDir := dir
@@ -561,4 +685,49 @@ func literalWord(word *syntax.Word) (string, bool) {
 		}
 	}
 	return text.String(), true
+}
+
+// operationArguments retains the executable and destructive options while
+// replacing only target operands. Thus retrying a remainder keeps its identity
+// while changing truncate's size or adding another destructive command does not.
+func operationArguments(args, targets []string, dir string) []string {
+	out := []string{args[0]}
+	name := filepath.Base(args[0])
+	// Rsync operands have different source/destination roles. Retaining them
+	// prevents swapping those roles from reusing the same authorization.
+	if name == "rsync" {
+		return append(out, args[1:]...)
+	}
+	value := false
+	for index, arg := range args[1:] {
+		if name == "git" && index == 0 {
+			out = append(out, arg)
+			continue
+		}
+		if value {
+			out = append(out, arg)
+			value = false
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			out = append(out, arg)
+			if name == "truncate" && (arg == "-s" || arg == "--size" || arg == "-r" || arg == "--reference") {
+				value = true
+			}
+			if name == "shred" && (arg == "-n" || arg == "--iterations" || arg == "-s" || arg == "--size" || arg == "--random-source") {
+				value = true
+			}
+			continue
+		}
+		candidate := arg
+		if name == "dd" && strings.HasPrefix(arg, "of=") {
+			candidate = strings.TrimPrefix(arg, "of=")
+		}
+		resolved, err := ResolveTarget(dir, candidate)
+		if err == nil && slices.Contains(targets, resolved) {
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
 }

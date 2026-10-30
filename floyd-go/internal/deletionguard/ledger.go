@@ -46,11 +46,12 @@ type Confirmation struct {
 
 // Execution records that one approved deletion already ran.
 type Execution struct {
-	ID         string   `json:"id"`
-	TargetSet  string   `json:"target_set"`
-	Targets    []string `json:"targets"`
-	ToolCallID string   `json:"tool_call_id,omitempty"`
-	RecordedAt string   `json:"recorded_at"`
+	ID          string   `json:"id"`
+	TargetSet   string   `json:"target_set"`
+	ApprovalSet string   `json:"approval_set,omitempty"`
+	Targets     []string `json:"targets"`
+	ToolCallID  string   `json:"tool_call_id,omitempty"`
+	RecordedAt  string   `json:"recorded_at"`
 }
 
 // Record is the durable per-session deletion record.
@@ -59,6 +60,8 @@ type Record struct {
 	SessionID     string         `json:"session_id"`
 	Confirmations []Confirmation `json:"confirmations"`
 	Executions    []Execution    `json:"executions"`
+	Approvals     []Approval     `json:"approvals,omitempty"`
+	Attempts      []Attempt      `json:"attempts,omitempty"`
 }
 
 // ConfirmationsFor returns the first human confirmation for each stage of one
@@ -115,11 +118,20 @@ func (r Record) Executed(targetSet string) (Execution, bool) {
 // survive a restart and stay separate from conversation text.
 type Ledger struct {
 	dataDir string
-	mu      sync.Mutex
+	mu      *sync.Mutex
 }
 
 // NewLedger returns a ledger rooted at dataDir.
-func NewLedger(dataDir string) *Ledger { return &Ledger{dataDir: dataDir} }
+var ledgerLocks sync.Map
+
+func NewLedger(dataDir string) *Ledger {
+	key, err := filepath.Abs(dataDir)
+	if err != nil {
+		key = dataDir
+	}
+	lock, _ := ledgerLocks.LoadOrStore(key, &sync.Mutex{})
+	return &Ledger{dataDir: dataDir, mu: lock.(*sync.Mutex)}
+}
 
 // Dir returns the directory holding a session's deletion record.
 func (l *Ledger) Dir(sessionID string) string {
@@ -232,6 +244,10 @@ func (l *Ledger) write(sessionID string, record Record) error {
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return fmt.Errorf("write deletion record: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync deletion record: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close deletion record: %w", err)

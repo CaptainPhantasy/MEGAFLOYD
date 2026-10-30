@@ -72,7 +72,8 @@ func (f *deletionFixture) Confirm(_ context.Context, req deletionguard.Confirmat
 func (f *deletionFixture) run(sessionID, command string) (fantasy.ToolResponse, bool) {
 	f.t.Helper()
 	ran := false
-	inner := deletionRecordingTool{ran: &ran, resp: fantasy.NewTextResponse("ran")}
+	exitCode := 0
+	inner := deletionRecordingTool{ran: &ran, resp: fantasy.WithResponseMetadata(fantasy.NewTextResponse("ran"), tools.BashResponseMetadata{ExitCode: &exitCode})}
 	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
 	f.calls++
 	input, err := json.Marshal(map[string]string{"command": command})

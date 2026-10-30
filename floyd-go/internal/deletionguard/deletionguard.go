@@ -9,9 +9,9 @@ package deletionguard
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/legacy-ai/floyd/internal/filepathext"
 )
@@ -48,6 +48,9 @@ type Classification struct {
 	Effect Effect
 	// Command is the command that produced the effect, such as "rm".
 	Command string
+	// Operations binds each target to the ordered destructive commands and
+	// options acting on it, independent of the other target operands.
+	Operations map[string]string
 	// Targets are the absolute, cleaned, sorted and de-duplicated paths the
 	// command removes.
 	Targets []string
@@ -85,7 +88,6 @@ func CanonicalTargets(targets []string) []string {
 	seen := make(map[string]struct{}, len(targets))
 	out := make([]string, 0, len(targets))
 	for _, target := range targets {
-		target = strings.TrimSpace(target)
 		if target == "" {
 			continue
 		}
@@ -105,6 +107,7 @@ func ClassifyAll(commands []string, workingDir string) Classification {
 	for _, command := range commands {
 		classification := Classify(command, workingDir)
 		merged.Targets = append(merged.Targets, classification.Targets...)
+		merged.Operations = mergeOperations(merged.Operations, classification.Operations)
 		merged.Recursive = merged.Recursive || classification.Recursive
 		if classification.Effect > merged.Effect {
 			merged.Effect = classification.Effect
@@ -128,4 +131,41 @@ func ResolveTarget(workingDir, name string) (string, error) {
 		return "", err
 	}
 	return filepath.Clean(abs), nil
+}
+
+// mergeOperations retains the execution order and multiplicity of destructive
+// operations for each target. JSON arrays avoid ambiguous string separators.
+func mergeOperations(dst, src map[string]string) map[string]string {
+	if dst == nil {
+		dst = make(map[string]string)
+	}
+	for target, signature := range src {
+		if previous := dst[target]; previous != "" {
+			var before, after [][]string
+			if json.Unmarshal([]byte(previous), &before) != nil || json.Unmarshal([]byte(signature), &after) != nil {
+				dst[target] = "invalid"
+				continue
+			}
+			data, _ := json.Marshal(append(before, after...))
+			dst[target] = string(data)
+		} else {
+			dst[target] = signature
+		}
+	}
+	return dst
+}
+
+// RemovesTarget reports whether every recorded operation unlinks the target.
+// Missing or malformed descriptions never establish a removal.
+func (c Classification) RemovesTarget(target string) bool {
+	var operations [][]string
+	if json.Unmarshal([]byte(c.Operations[target]), &operations) != nil || len(operations) == 0 {
+		return false
+	}
+	for _, args := range operations {
+		if len(args) == 0 || !slices.Contains([]string{"rm", "unlink", "rmdir"}, filepath.Base(args[0])) {
+			return false
+		}
+	}
+	return true
 }
