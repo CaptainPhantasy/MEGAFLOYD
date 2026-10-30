@@ -34,9 +34,6 @@ func (s *server) authenticate(conn *net.UnixConn) error {
 	if peer.uid == uint32(os.Getuid()) || !slices.Contains(s.config.AllowedUIDs, peer.uid) {
 		return errors.New("unauthorized approval authority UID")
 	}
-	if err := validateEngineAccount(peer.uid); err != nil {
-		return err
-	}
 	executable, err := peerExecutable(peer.pid)
 	if err != nil {
 		return err
@@ -48,9 +45,6 @@ func (s *server) authenticate(conn *net.UnixConn) error {
 		if err := immutablePath(allowed.Path, false, 0); err != nil {
 			return err
 		}
-		if err := validateEffectiveAccess(s.config, peer.uid); err != nil {
-			return err
-		}
 		if err := verifyPeerRuntime(peer.pid, allowed.Path); err != nil {
 			return err
 		}
@@ -60,6 +54,14 @@ func (s *server) authenticate(conn *net.UnixConn) error {
 		}
 		if digest != allowed.SHA256 {
 			return errors.New("approval authority executable digest mismatch")
+		}
+		// Only pinned images may reach account-policy or effective-access helper
+		// subprocesses. Untrusted shell clients are rejected without spawning them.
+		if err := validateEngineAccount(peer.uid); err != nil {
+			return err
+		}
+		if err := validateEffectiveAccess(s.config, peer.uid); err != nil {
+			return err
 		}
 		// Recheck peer credentials after image inspection; an exited/replaced peer
 		// or an image transition is not accepted based on stale observations.

@@ -167,6 +167,10 @@ func exchangeAuthenticated(conn net.Conn, req request, localPolicy localPolicySt
 	return result, nil
 }
 
+// Each admitted connection can run authentication helpers and wait for input.
+// Refuse excess connections before allocating workers or starting helpers.
+const maxConcurrentConnections = 8
+
 type server struct {
 	config    Config
 	mu        sync.Mutex
@@ -215,6 +219,7 @@ func (s *server) serve(ctx context.Context) error {
 	defer stop()
 	var workers sync.WaitGroup
 	defer workers.Wait()
+	admitted := make(chan struct{}, maxConcurrentConnections)
 	for {
 		conn, err := listener.AcceptUnix()
 		if err != nil {
@@ -223,8 +228,18 @@ func (s *server) serve(ctx context.Context) error {
 			}
 			return err
 		}
-		workers.Add(1)
-		go func() { defer workers.Done(); defer conn.Close(); s.handle(conn) }()
+		select {
+		case admitted <- struct{}{}:
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer func() { <-admitted }()
+				defer conn.Close()
+				s.handle(conn)
+			}()
+		default:
+			_ = conn.Close()
+		}
 	}
 }
 
