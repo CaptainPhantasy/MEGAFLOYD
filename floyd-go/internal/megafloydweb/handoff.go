@@ -240,6 +240,11 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		childEnv = setEnv(childEnv, "MEGAFLOYD_GO_HOST", opts.GoHost)
 		childEnv = setEnv(childEnv, "MEGAFLOYD_GO_CWD", opts.CWD)
 		childEnv = setEnv(childEnv, "MEGAFLOYD_GO_DATA_DIR", opts.GoDataDir)
+		// Shared Go web mode requires FLOYD_CODE_HOME to be the web home,
+		// MEGAFLOYD_HOME/web, and refuses to start otherwise. BuildChildEnv
+		// has already pointed it at the workspace data directory, which is a
+		// different directory, so it has to be reset here.
+		childEnv = setEnv(childEnv, codeHomeEnv, filepath.Join(home, "web"))
 	}
 	result := Result{
 		Port:      port,

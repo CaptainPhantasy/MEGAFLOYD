@@ -1,5 +1,6 @@
 import { basename, dirname, join, normalize } from 'pathe';
 
+import { redundantWithInheritedStandard } from '#/app/agentProfileCatalog/inheritedStandard';
 import { findGitWorkTree } from '#/app/git/workTree';
 import type { IHostFileSystem } from '#/os/interface/hostFileSystem';
 
@@ -152,6 +153,7 @@ export async function loadAgentsMdForRoots(
     const key = normalize(file.path);
     if (seen.has(key)) return false;
     seen.add(key);
+    if (redundantWithInheritedStandard(file.content)) return true;
     discovered.push(file);
     return true;
   };

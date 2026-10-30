@@ -693,13 +693,18 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 		Content:  []byte("fake-screenshot"),
 	}
 
+	// preparePrompt carries only the real conversation: it no longer injects
+	// a synthetic reminder message ahead of the history. Text attachments are
+	// rendered inline into the user text by message.ToAIMessage, while image
+	// attachments survive as FileParts only when the model supports them.
+
 	// When supportsImages is false, image attachments should be stripped
 	// from history AND from the files list.
 	history, files := agent.preparePrompt(msgs, false, imageAtt)
-	// First message is the system reminder, second is the user message.
-	require.Len(t, history, 2)
-	require.Len(t, history[1].Content, 1)
-	text, ok := fantasy.AsMessagePart[fantasy.TextPart](history[1].Content[0])
+	require.Len(t, history, 1, "preparePrompt must not prepend a synthetic message")
+	require.Equal(t, fantasy.MessageRoleUser, history[0].Role)
+	require.Len(t, history[0].Content, 1)
+	text, ok := fantasy.AsMessagePart[fantasy.TextPart](history[0].Content[0])
 	require.True(t, ok)
 	require.Contains(t, text.Text, "hello world")
 	require.Contains(t, text.Text, "important notes")
@@ -708,12 +713,12 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 	// When supportsImages is true, image attachments should remain in
 	// history and be included in the files list.
 	history, files = agent.preparePrompt(msgs, true, imageAtt)
-	require.Len(t, history, 2)
-	require.Len(t, history[1].Content, 2)
-	text, ok = fantasy.AsMessagePart[fantasy.TextPart](history[1].Content[0])
+	require.Len(t, history, 1, "preparePrompt must not prepend a synthetic message")
+	require.Len(t, history[0].Content, 2)
+	text, ok = fantasy.AsMessagePart[fantasy.TextPart](history[0].Content[0])
 	require.True(t, ok)
 	require.Contains(t, text.Text, "hello world")
-	file, ok := fantasy.AsMessagePart[fantasy.FilePart](history[1].Content[1])
+	file, ok := fantasy.AsMessagePart[fantasy.FilePart](history[0].Content[1])
 	require.True(t, ok)
 	require.Equal(t, "image.png", file.Filename)
 	require.Len(t, files, 1, "new-turn image attachment should be included when model supports images")

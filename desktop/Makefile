@@ -14,7 +14,7 @@ build:
 	node desktop/scripts/build.mjs
 
 test:
-	node --test desktop/test/*.test.mjs
+	node --experimental-vm-modules --test desktop/test/*.test.mjs
 
 verify:
 	node desktop/scripts/verify.mjs

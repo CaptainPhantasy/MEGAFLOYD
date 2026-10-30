@@ -37,8 +37,8 @@ func BuildChildEnv(base []string, info Tailscale, dataDir string) []string {
 // untouched (embedded newlines would otherwise break process spawning) and so
 // the child can reject anything it does not understand.
 func withRolePrompt(env []string) []string {
-	prompt := strings.TrimSpace(agent.WebRolePrompt())
-	if prompt == "" {
+	prompt := agent.WebRolePrompt()
+	if strings.TrimSpace(prompt) == "" {
 		return env
 	}
 	var buf bytes.Buffer

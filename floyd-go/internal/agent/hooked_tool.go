@@ -13,8 +13,11 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// hookedTool retains the legacy direct-runner adapter. Application tools use
-// runtimePreTool and runtimeObservedTool with the shared lifecycle dispatcher.
+// hookedTool is retained for its direct tests: internal/hookruntime carries no
+// tests of its own, so this decorator's tests are the only tool-layer coverage
+// of hook allow/deny, approval stamping and post-hook context handling. The
+// application never constructs it; native child and parent tools both use the
+// shared runtime wrappers in runtime_hooked_tool.go.
 type hookedTool struct {
 	inner fantasy.AgentTool
 	// pre runs PreToolUse hooks (built from the PreToolUse event group).
@@ -28,20 +31,6 @@ type hookedTool struct {
 
 func newHookedTool(inner fantasy.AgentTool, pre, post *hooks.Runner) *hookedTool {
 	return &hookedTool{inner: inner, pre: pre, post: post}
-}
-
-// wrapToolsWithHooks preserves the legacy adapter contract for direct callers.
-// The application does not use it: native child and parent tools both use the
-// shared runtime wrappers, including terminal failure and cancellation events.
-func wrapToolsWithHooks(tools []fantasy.AgentTool, pre, post *hooks.Runner, isSubAgent bool) []fantasy.AgentTool {
-	if (pre == nil && post == nil) || isSubAgent {
-		return tools
-	}
-	out := make([]fantasy.AgentTool, len(tools))
-	for i, tool := range tools {
-		out[i] = newHookedTool(tool, pre, post)
-	}
-	return out
 }
 
 func (h *hookedTool) Info() fantasy.ToolInfo {

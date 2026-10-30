@@ -11,11 +11,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MISMATCH_OVERRIDE_ENV, verifyEmbeddedPolicy } from './policy-check.mjs';
 import { signApp, loadSigningIdentity } from './stable-sign.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
 const DESKTOP_SRC = path.join(ROOT, 'desktop');
+const POLICY = path.join(ROOT, '..', 'MegaFloyd.md');
 const BASE = process.env.MEGAFLOYD_BASE ?? path.join(ROOT, 'vendor', 'Kimi-3.2.17-arm64.app');
 const INSTALLED_PLATFORM_BIN = path.join(ROOT, '..', 'current', 'MEGAFLOYD.app', 'Contents', 'Resources', 'megafloyd', 'bin', 'megafloyd');
 const PLATFORM_BIN = process.env.MEGAFLOYD_PLATFORM_BIN ??
@@ -218,8 +220,15 @@ function main() {
   if (path.resolve(OUT) === path.resolve(BASE)) throw new Error('desktop output must differ from its base');
   assertExists(BASE, 'base app');
   assertExists(PLATFORM_BIN, 'platform binary');
+  assertExists(POLICY, 'reviewed MegaFloyd standard');
   assertExists(path.join(PLATFORM_WEB, 'dist', 'main.mjs'), 'platform web server');
   assertExists(path.join(PLATFORM_WEB, 'dist-web', 'index.html'), 'platform web bundle');
+  step('proving the platform binary embeds the reviewed standard');
+  const embeddedPolicy = verifyEmbeddedPolicy({
+    binary: PLATFORM_BIN,
+    policy: POLICY,
+    allowMismatch: process.env[MISMATCH_OVERRIDE_ENV] === '1',
+  });
   step('verifying preserved custom web assets');
   run(process.execPath, [path.join(ROOT, '..', 'floyd-code', 'apps', 'floyd-code', 'scripts', 'check-web-assets.mjs'), path.join(PLATFORM_WEB, 'dist-web')], { stdio: 'inherit' });
 
@@ -313,6 +322,10 @@ function main() {
   fs.mkdirSync(path.join(platformDir, 'bin'), { recursive: true });
   fs.copyFileSync(PLATFORM_BIN, path.join(platformDir, 'bin', 'megafloyd'));
   fs.chmodSync(path.join(platformDir, 'bin', 'megafloyd'), 0o755);
+  fs.copyFileSync(POLICY, path.join(platformDir, 'MegaFloyd.md'));
+  // The readable copy and the engine's embedded standard are already proven to
+  // agree by verifyEmbeddedPolicy; record the hash that check compared.
+  const policySHA256 = embeddedPolicy.expected;
 
   const nodeWrapper = path.join(platformDir, 'bin', 'node');
   fs.writeFileSync(
@@ -386,6 +399,7 @@ function main() {
     product: PRODUCT,
     bundleId: BUNDLE_ID,
     signing: { kind: 'persistent-local-certificate', certificate_sha1: signingIdentity.certificate_sha1 },
+    policy: { path: 'megafloyd/MegaFloyd.md', sha256: policySHA256, embedded_verified: embeddedPolicy.enforced },
     version: VERSION,
     buildId: BUILD_ID,
     builtAt: new Date().toISOString(),
@@ -421,6 +435,7 @@ function main() {
   fs.writeFileSync(path.join(BUILD, 'build-receipt.json'), `${JSON.stringify({
     version: VERSION, build_id: BUILD_ID, output: OUT, backup: replacing ? backup : null,
     source_commit: SOURCE_COMMIT, binary: PLATFORM_BIN, web: PLATFORM_WEB,
+    policy: { path: 'Contents/Resources/megafloyd/MegaFloyd.md', sha256: policySHA256, embedded_verified: embeddedPolicy.enforced },
   }, null, 2)}\n`);
 
   step(`built ${OUT}`);

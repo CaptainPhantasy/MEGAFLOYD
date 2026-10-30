@@ -133,6 +133,10 @@ definitions:
     type: object
   config.HookConfig:
     properties:
+      async:
+        description: Async starts a tracked observer that cannot influence the action
+          or permissions.
+        type: boolean
       command:
         description: Shell command to execute.
         type: string
@@ -144,6 +148,14 @@ definitions:
         description: Friendly display name shown in the TUI. Falls back to Command
           when empty.
         type: string
+      required:
+        description: Required makes failures explicit and orders this synchronous
+          event batch.
+        type: boolean
+      sequential:
+        description: Sequential orders the matching synchronous batch without making
+          failures mandatory.
+        type: boolean
       timeout:
         description: Timeout in seconds. Default 30.
         type: integer
@@ -311,6 +323,11 @@ definitions:
         type: string
       token_path:
         type: string
+    type: object
+  config.OutputReviewConfig:
+    properties:
+      enabled:
+        type: boolean
     type: object
   config.Permissions:
     properties:
@@ -482,6 +499,8 @@ definitions:
         type: object
       options:
         $ref: '#/definitions/github_com_legacy-ai_floyd_internal_config.Options'
+      output_review:
+        $ref: '#/definitions/config.OutputReviewConfig'
       permissions:
         $ref: '#/definitions/config.Permissions'
       providers:

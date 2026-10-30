@@ -77,7 +77,7 @@ internal/
     coordinator.go                 Coordinator: manages named agents ("coder", "task")
     hooked_tool.go                 Decorator that runs PreToolUse hooks before tool execution
     prompts.go                     Loads Go-template system prompts
-    templates/                     System prompt templates (coder.md.tpl, task.md.tpl, ...)
+    templates/                     System prompt templates (megafloyd-coder.md.tpl, task.md.tpl, ...)
     tools/                         All built-in tools (bash, edit, view, grep, glob, ...)
       mcp/                         MCP client integration
   hooks/                           Hook engine: runs user shell commands on hook events
@@ -131,11 +131,11 @@ internal/
   `.md` (or `.md.tpl`) description file in `internal/agent/tools/`.
 - **System prompts are Go templates**: `internal/agent/templates/*.md.tpl`
   with runtime data injected.
-- **Context files**: MegaFloyd reads `AGENTS.md`, `FLOYD.md`, `CLAUDE.md`,
-  `GEMINI.md` (and `.local` variants) from the working directory, plus global
-  context from `~/.config/floyd/FLOYD.md` and `~/.config/AGENTS.md` by
-  default. Project initialization writes `AGENTS.md` (configurable via
-  `option initialize-as`).
+- **Context files**: policy-bearing context is restricted to `MegaFloyd.md`.
+  Project initialisation writes `MegaFloyd.md`; `initialize_as` is fixed to that
+  name on this distribution, and a configured value is overridden. Global
+  context resolves to the `MegaFloyd.md` beside the global config, not to
+  `FLOYD.md` or `AGENTS.md`.
 - **Bash config format**: the primary config format is `floydrc` — a Bash
   script using builtins (`provider`, `model`, `mcp`, `lsp`, `permissions`,
   `hook`, `option`, ...) to define config. `floyd.json` is still supported

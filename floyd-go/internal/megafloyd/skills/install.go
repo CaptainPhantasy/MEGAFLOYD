@@ -33,6 +33,15 @@ type registryEntry struct {
 	AliasOf string   `json:"alias_of"`
 }
 
+// manifestName records which command files this installer owns. It lives in
+// the commands directory so a moved or copied data directory keeps its claim
+// list with the files it describes; the loader ignores it because it is not
+// markdown.
+const manifestName = ".megafloyd-skills-manifest"
+
+// manifestHeader explains the file to anyone who finds it.
+const manifestHeader = "# Files installed by MegaFloyd. Retired entries are removed on the next install."
+
 // InstallCommands writes every embedded skill command into
 // <dataDir>/commands. Files are rewritten only when their content differs, so
 // repeated calls are idempotent. Aliases declared in skills.json are written
@@ -52,27 +61,131 @@ func InstallCommands(dataDir string) error {
 		return err
 	}
 
+	desired := make(map[string][]byte, len(commands)+len(aliases))
+	for name, content := range commands {
+		desired[name] = content
+	}
+	for name, target := range aliases {
+		content, ok := commands[target]
+		if !ok {
+			return fmt.Errorf("skills: alias %s targets missing file %s", name, target)
+		}
+		desired[name] = content
+	}
+
+	return installFiles(dataDir, desired)
+}
+
+// installFiles makes <dataDir>/commands contain desired, then removes the
+// files a previous install claimed and this one no longer provides. Removing
+// only manifest-claimed names is what keeps user-authored and foreign files
+// safe: a file this installer never wrote is never touched.
+func installFiles(dataDir string, desired map[string][]byte) error {
 	commandsDir := filepath.Join(dataDir, "commands")
 	if err := os.MkdirAll(commandsDir, 0o755); err != nil {
 		return fmt.Errorf("skills: create commands directory: %w", err)
 	}
 
-	for _, name := range sortedKeys(commands) {
-		if err := writeIfChanged(filepath.Join(commandsDir, name), commands[name]); err != nil {
+	previous, err := readManifest(commandsDir)
+	if err != nil {
+		return err
+	}
+
+	// Write before pruning so a failed install never leaves the manifest
+	// claiming files that were never written.
+	for _, name := range sortedKeys(desired) {
+		if err := writeIfChanged(filepath.Join(commandsDir, name), desired[name]); err != nil {
 			return fmt.Errorf("skills: install %s: %w", name, err)
 		}
 	}
-	for _, name := range sortedKeys(aliases) {
-		content, ok := commands[aliases[name]]
-		if !ok {
-			return fmt.Errorf("skills: alias %s targets missing file %s", name, aliases[name])
+
+	for _, name := range previous {
+		if _, current := desired[name]; current {
+			continue
 		}
-		if err := writeIfChanged(filepath.Join(commandsDir, name), content); err != nil {
-			return fmt.Errorf("skills: install alias %s: %w", name, err)
+		if err := removeInstalled(commandsDir, name); err != nil {
+			return fmt.Errorf("skills: prune %s: %w", name, err)
 		}
 	}
 
+	return writeManifest(commandsDir, sortedKeys(desired))
+}
+
+// readManifest returns the names the previous install claimed. A missing
+// manifest means nothing is claimed yet, so nothing may be pruned.
+func readManifest(commandsDir string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(commandsDir, manifestName))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("skills: read manifest: %w", err)
+	}
+
+	var names []string
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(string(data), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" || strings.HasPrefix(name, "#") {
+			continue
+		}
+		if !validCommandName(name) {
+			// A corrupt or hand-edited entry must never become a delete
+			// path outside the commands directory.
+			continue
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// writeManifest records the current claim list, sorted and unchanged-aware so
+// repeated installs do not rewrite the file.
+func writeManifest(commandsDir string, names []string) error {
+	var b strings.Builder
+	b.WriteString(manifestHeader)
+	b.WriteString("\n")
+	for _, name := range names {
+		b.WriteString(name)
+		b.WriteString("\n")
+	}
+	if err := writeIfChanged(filepath.Join(commandsDir, manifestName), []byte(b.String())); err != nil {
+		return fmt.Errorf("skills: write manifest: %w", err)
+	}
 	return nil
+}
+
+// removeInstalled deletes one claimed command file. Only regular files are
+// removed: a directory (or symlink) that appeared at a claimed name belongs to
+// someone else and is left alone. A file that is already gone is not an error.
+func removeInstalled(commandsDir, name string) error {
+	path := filepath.Join(commandsDir, name)
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// validCommandName accepts a plain file name with no path separators.
+func validCommandName(name string) bool {
+	if name == "." || name == ".." || name == manifestName {
+		return false
+	}
+	return !strings.ContainsAny(name, `/\`)
 }
 
 // commandFiles returns the embedded command markdown keyed by file name.

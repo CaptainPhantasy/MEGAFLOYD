@@ -26,7 +26,7 @@ test('MegaFloyd menus and fallback page preserve the stable application identity
  assert.equal(labels.some(label=>/\b(?:MEGAFLOYD|Floyd Code|SuperFloyd|Kimi)\b/.test(label)),false);
  const home=fs.readFileSync(path.join(root,'src/home.html'),'utf8');
  assert.match(home,/<title>MegaFloyd<\/title>/);
- assert.match(home,/Mega<span>Floyd<\/span>/);
+ assert.match(home,/<h1[^>]*aria-label="MEGAFLOYD"/);
  const builder=fs.readFileSync(path.join(root,'scripts/build.mjs'),'utf8');
  assert.match(builder,/const PRODUCT = 'MEGAFLOYD'/);
  assert.match(builder,/const DISPLAY_NAME = 'MegaFloyd'/);

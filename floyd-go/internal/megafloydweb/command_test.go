@@ -85,7 +85,23 @@ func TestNewCommandBuildsWithoutStarting(t *testing.T) {
 	require.Nil(t, cmd.Process, "building must not start the server")
 	require.Equal(t, "/opt/node", cmd.Path)
 	require.Equal(t, "/workspace", cmd.Dir)
-	require.Equal(t, []string{"A=B"}, cmd.Env)
+	require.Equal(t, []string{"A=B", "ELECTRON_RUN_AS_NODE=1"}, cmd.Env)
+}
+
+func TestNewCommandForcesElectronRunAsNode(t *testing.T) {
+	t.Parallel()
+
+	cmd, err := newCommand(commandSpec{
+		Node:   "/opt/node",
+		Server: "/srv/main.mjs",
+		Port:   58627,
+		Bind:   Bind{Host: "127.0.0.1", Mode: BindLoopback},
+		Env:    []string{"ELECTRON_RUN_AS_NODE=0"},
+	})
+
+	require.NoError(t, err)
+	require.Contains(t, cmd.Env, "ELECTRON_RUN_AS_NODE=1")
+	require.NotContains(t, cmd.Env, "ELECTRON_RUN_AS_NODE=0")
 }
 
 func TestNewCommandValidation(t *testing.T) {

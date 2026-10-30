@@ -41,12 +41,13 @@ func TestChassisEnvDirectories(t *testing.T) {
 		ChassisGlobalConfigEnv: "/m/config",
 		ChassisGlobalDataEnv:   "/m/data",
 		ChassisCacheDirEnv:     "/m/cache",
+		ChassisIdentityEnv:     DisplayName,
 	} {
 		if env[name] != want {
 			t.Errorf("%s = %q, want %q", name, env[name], want)
 		}
 	}
-	for _, name := range []string{ChassisIdentityEnv, ChassisProfileEnv, ChassisSkillsDirEnv} {
+	for _, name := range []string{ChassisProfileEnv, ChassisSkillsDirEnv} {
 		if _, ok := env[name]; ok {
 			t.Errorf("%s should be absent when unset, got %q", name, env[name])
 		}
@@ -71,35 +72,78 @@ func TestChassisEnvMirrorsOptionalValues(t *testing.T) {
 	}
 }
 
-func TestApplyChassisEnvDoesNotClobber(t *testing.T) {
+// TestApplyChassisEnvOverwritesInheritedDirectories pins the post-rebrand
+// contract: the MegaFloyd layout outranks any FLOYD_* value inherited from
+// the chassis, while profile and skills keep their inherited values.
+func TestApplyChassisEnvOverwritesInheritedDirectories(t *testing.T) {
 	clearEnv(t)
-	t.Setenv(ChassisGlobalConfigEnv, "/explicit/config")
+	t.Setenv(ChassisGlobalConfigEnv, "/inherited/config")
+	t.Setenv(ChassisGlobalDataEnv, "/inherited/data")
+	t.Setenv(ChassisCacheDirEnv, "/inherited/cache")
+	t.Setenv(ChassisIdentityEnv, "inherited identity")
+	t.Setenv(ChassisProfileEnv, "1")
+	t.Setenv(ChassisSkillsDirEnv, "/inherited/skills")
 
-	applied := ApplyChassisEnv(Dirs{Config: "/m/config", Data: "/m/data", Cache: "/m/cache"})
-	for _, name := range applied {
-		if name == ChassisGlobalConfigEnv {
-			t.Fatalf("ApplyChassisEnv overwrote an explicit %s", name)
+	ApplyChassisEnv(Dirs{Config: "/m/config", Data: "/m/data", Cache: "/m/cache"})
+
+	for name, want := range map[string]string{
+		ChassisGlobalConfigEnv: "/m/config",
+		ChassisGlobalDataEnv:   "/m/data",
+		ChassisCacheDirEnv:     "/m/cache",
+		ChassisIdentityEnv:     DisplayName,
+		ChassisProfileEnv:      "1",
+		ChassisSkillsDirEnv:    "/inherited/skills",
+	} {
+		if got := os.Getenv(name); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
 		}
-	}
-	if got := os.Getenv(ChassisGlobalConfigEnv); got != "/explicit/config" {
-		t.Fatalf("%s = %q, want /explicit/config", ChassisGlobalConfigEnv, got)
-	}
-	if got := os.Getenv(ChassisGlobalDataEnv); got != "/m/data" {
-		t.Fatalf("%s = %q, want /m/data", ChassisGlobalDataEnv, got)
-	}
-	if got := os.Getenv(ChassisCacheDirEnv); got != "/m/cache" {
-		t.Fatalf("%s = %q, want /m/cache", ChassisCacheDirEnv, got)
 	}
 }
 
+// TestApplyChassisEnvIsIdempotent checks that a repeated apply reproduces
+// the first one: the same four mirror names, the same values, and no
+// profile or skills export.
 func TestApplyChassisEnvIsIdempotent(t *testing.T) {
 	clearEnv(t)
 	d := Dirs{Config: "/m/config", Data: "/m/data", Cache: "/m/cache"}
 	ApplyChassisEnv(d)
 
 	applied := ApplyChassisEnv(d)
-	if len(applied) != 0 {
-		t.Fatalf("second apply exported %v, want none", applied)
+
+	wantExported := []string{
+		ChassisGlobalConfigEnv,
+		ChassisGlobalDataEnv,
+		ChassisCacheDirEnv,
+		ChassisIdentityEnv,
+	}
+	if len(applied) != len(wantExported) {
+		t.Fatalf("second apply exported %v, want only %v", applied, wantExported)
+	}
+	exported := make(map[string]bool, len(applied))
+	for _, name := range applied {
+		exported[name] = true
+	}
+	for _, name := range wantExported {
+		if !exported[name] {
+			t.Errorf("second apply did not export %s", name)
+		}
+	}
+
+	for name, want := range map[string]string{
+		ChassisGlobalConfigEnv: "/m/config",
+		ChassisGlobalDataEnv:   "/m/data",
+		ChassisCacheDirEnv:     "/m/cache",
+		ChassisIdentityEnv:     DisplayName,
+	} {
+		if got := os.Getenv(name); got != want {
+			t.Errorf("%s = %q after second apply, want %q", name, got, want)
+		}
+	}
+	if _, ok := os.LookupEnv(ChassisProfileEnv); ok {
+		t.Errorf("%s was exported without %s set", ChassisProfileEnv, ProfileEnv)
+	}
+	if _, ok := os.LookupEnv(ChassisSkillsDirEnv); ok {
+		t.Errorf("%s was exported without %s set", ChassisSkillsDirEnv, SkillsEnv)
 	}
 }
 

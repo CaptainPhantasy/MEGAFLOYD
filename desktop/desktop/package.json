@@ -6,6 +6,9 @@
   "private": true,
   "type": "module",
   "main": "src/main.mjs",
+  "scripts": {
+    "test": "node --experimental-vm-modules --test test/*.test.mjs"
+  },
   "author": "Legacy AI",
   "license": "MIT",
   "engines": {

@@ -18,9 +18,10 @@ func Get(name string) string {
 }
 
 // ChassisEnv returns the FLOYD_* mirrors for d. The map always contains the
-// three directory variables; identity, profile and skills are mirrored only
-// when their MEGAFLOYD_* counterpart is set, so the chassis keeps its own
-// defaults otherwise.
+// three directory variables and the identity mirror, which defaults to
+// [DisplayName] and follows MEGAFLOYD_IDENTITY when that is set. Profile and
+// skills are mirrored only when their MEGAFLOYD_* counterpart is set, so the
+// chassis keeps its own defaults for them otherwise.
 func ChassisEnv(d Dirs) map[string]string {
 	env := map[string]string{
 		ChassisGlobalConfigEnv: d.Config,
@@ -41,9 +42,12 @@ func ChassisEnv(d Dirs) map[string]string {
 }
 
 // ApplyChassisEnv exports the FLOYD_* mirrors for d into the process
-// environment. An inherited FLOYD_* value is left untouched unless the
-// matching MEGAFLOYD_* variable is explicitly set, in which case the
-// MEGAFLOYD_* value wins. It returns the names it exported, in map order.
+// environment. The three directory mirrors and FLOYD_IDENTITY always
+// overwrite an inherited value, because the MegaFloyd layout and identity
+// are authoritative. FLOYD_PROFILE and FLOYD_SKILLS_DIR are written only
+// when MEGAFLOYD_PROFILE or MEGAFLOYD_SKILLS_DIR is set; an inherited value
+// is otherwise left untouched. Repeated calls leave the environment
+// unchanged. It returns the names it exported, in no particular order.
 func ApplyChassisEnv(d Dirs) []string {
 	explicit := map[string]bool{
 		ChassisGlobalConfigEnv: os.Getenv(ConfigEnv) != "",

@@ -64,6 +64,9 @@ func newCommand(spec commandSpec) (*exec.Cmd, error) {
 
 	cmd := exec.Command(spec.Node, spec.args()...)
 	cmd.Dir = spec.Dir
-	cmd.Env = spec.Env
+	// The bundled node executable is an Electron binary; without this flag
+	// Electron boots as a GUI app that never runs the web server script.
+	// Plain node binaries ignore the variable, so setting it is always safe.
+	cmd.Env = setEnv(spec.Env, electronNodeEnv, "1")
 	return cmd, nil
 }

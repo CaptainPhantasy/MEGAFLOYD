@@ -77,11 +77,10 @@ func TestCanonicalMegafloydConfigIsolation(t *testing.T) {
 	require.Equal(t, "megafloyd-project", cfg.Options.AgentName)
 	require.Equal(t, filepath.Join(project, ".megafloyd"), cfg.Options.DataDirectory)
 	require.ElementsMatch(t, []string{
-		"AGENTS.md", "AGENTS.local.md", "MEGAFLOYD.md", "MEGAFLOYD.local.md",
+		"MegaFloyd.md",
 	}, cfg.Options.ContextPaths)
 	require.ElementsMatch(t, []string{
-		filepath.Join(canonicalHome, "config", "MEGAFLOYD.md"),
-		filepath.Join(canonicalHome, "AGENTS.md"),
+		filepath.Join(canonicalHome, "config", "MegaFloyd.md"),
 	}, cfg.Options.GlobalContextPaths)
 	require.ElementsMatch(t, []string{
 		filepath.Join(canonicalHome, "config", "skills"),

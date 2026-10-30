@@ -68,7 +68,7 @@ func TestModernHooksAppPermissionsAndShutdown(t *testing.T) {
 	requestEvents := app.Permissions.Subscribe(ctx)
 	done := make(chan bool, 1)
 	go func() {
-		response, err := app.Hooks.ExecuteTool(ctx, "session-1", fantasy.ToolCall{ID: "permission-call", Name: "bash", Input: `{}`}, func(ctx context.Context, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		response, err := app.Hooks.ExecuteTool(ctx, "session-1", fantasy.ToolCall{ID: "permission-call", Name: "bash", Input: `{"command":"echo permission-call"}`}, func(ctx context.Context, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			granted, err := app.Permissions.Request(ctx, permission.CreatePermissionRequest{SessionID: "session-1", ToolCallID: "permission-call", ToolName: "bash", Action: "execute", Path: store.WorkingDir()})
 			if err != nil {
 				return fantasy.ToolResponse{}, err
@@ -85,7 +85,7 @@ func TestModernHooksAppPermissionsAndShutdown(t *testing.T) {
 	case event := <-requestEvents:
 		request = event.Payload
 	case <-time.After(2 * time.Second):
-		t.Fatal("observer must not approve permission")
+		t.Fatal("permission request was not published: an observer must not approve, and the guarded tool body must run")
 	}
 	require.Equal(t, "permission-call", request.ToolCallID)
 	select {

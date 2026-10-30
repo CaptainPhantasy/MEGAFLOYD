@@ -22,8 +22,14 @@ import (
 const (
 	appName              = "floyd"
 	defaultDataDirectory = ".floyd"
-	defaultInitializeAs  = "AGENTS.md"
+	megaFloydPolicyFile  = "MegaFloyd.md"
 )
+
+// isPolicyFilename reports whether name is the complete MegaFloyd policy
+// filename, regardless of capitalization.
+func isPolicyFilename(name string) bool {
+	return len(name) == len(megaFloydPolicyFile) && strings.EqualFold(name, megaFloydPolicyFile)
+}
 
 var defaultContextPaths = []string{
 	".github/copilot-instructions.md",
@@ -391,7 +397,7 @@ type Options struct {
 	ManagedAccounts      map[string]ManagedAccount `json:"managed_accounts,omitempty"`
 
 	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=FLOYD.md"`
-	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/floyd/FLOYD.md,default=~/.config/AGENTS.md"`
+	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI - only MegaFloyd.md is retained,default=~/.config/floyd/MegaFloyd.md"`
 	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/floyd/skills,example=./skills"`
 	PluginsPaths         []string    `json:"plugins_paths,omitempty" jsonschema:"description=Paths to directories containing MegaFloyd plugins (folders with PLUGIN.md files),example=~/.config/floyd/plugins,example=./plugins"`
 	AgentName            string      `json:"agent_name,omitempty" jsonschema:"description=Identity name injected into prompt templates (overridden by FLOYD_IDENTITY env),default=MegaFloyd"`
@@ -409,7 +415,7 @@ type Options struct {
 	DisableDefaultProviders   bool          `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
 	Attribution               *Attribution  `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool          `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
-	InitializeAs              string        `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=FLOYD.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	InitializeAs              string        `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization. Fixed to MegaFloyd.md on this distribution - a configured value is overridden.,default=MegaFloyd.md,example=MegaFloyd.md"`
 	AutoLSP                   *bool         `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                  *bool         `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	Notifications             string        `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`

@@ -42,8 +42,8 @@ func TestPromptDataPopulatesPluginXML(t *testing.T) {
 	assert.Contains(t, data.AvailPluginXML, `<name>release-guard</name>`)
 	assert.Contains(t, data.AvailPluginXML, `Checks release readiness`)
 	assert.Contains(t, data.AvailPluginXML, filepath.ToSlash(filepath.Join(pluginDir, "PLUGIN.md")))
-	assert.Contains(t, data.PluginInstrXML, `plugin="release-guard"`)
-	assert.Contains(t, data.PluginInstrXML, `Always run the release checklist.`)
+	assert.Empty(t, data.PluginInstrXML)
+	assert.NotContains(t, data.AvailPluginXML, `Always run the release checklist.`)
 }
 
 func TestPromptDataOmitsPluginXMLWithoutPaths(t *testing.T) {
@@ -78,6 +78,6 @@ func TestPromptBuildRendersPluginSections(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "PLUGINS")
 	assert.Contains(t, out, "<name>alpha</name>")
-	assert.Contains(t, out, "INSTRUCTIONS")
-	assert.Contains(t, out, "Alpha instructions.")
+	assert.NotContains(t, out, "INSTRUCTIONS")
+	assert.NotContains(t, out, "Alpha instructions.")
 }

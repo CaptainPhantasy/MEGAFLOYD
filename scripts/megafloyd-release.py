@@ -24,6 +24,8 @@ APP = "MEGAFLOYD.app"
 RESOURCES = APP + "/Contents/Resources/megafloyd"
 NATIVE = RESOURCES + "/bin/megafloyd"
 WEB = RESOURCES + "/web"
+POLICY = RESOURCES + "/MegaFloyd.md"
+POLICY_SOURCE = "MegaFloyd.md"
 DESTINATION_ERROR = "Error: No destination folder specified. Supply an output path within your user space."
 
 
@@ -107,6 +109,10 @@ def host_target():
     return system + "-" + arch
 
 
+def warn(message):
+    print("Warning: " + message, file=sys.stderr)
+
+
 def source_receipt(root):
     paths = subprocess.check_output(["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"])
     selected = []
@@ -116,7 +122,10 @@ def source_receipt(root):
         rel = raw.decode()
         if ".bak" in rel or rel.startswith(".tmp/"):
             continue
-        source = (rel.startswith("floyd-go/") or rel.startswith("scripts/") or
+        # The reviewed standard at the repository root is a build input: the
+        # desktop bundle ships it and the engine enforces it, so a release
+        # receipt that omits it cannot show which policy the build consumed.
+        source = (rel == POLICY_SOURCE or rel.startswith("floyd-go/") or rel.startswith("scripts/") or
                   rel.startswith("desktop/desktop/") or
                   (rel.startswith("floyd-code/") and ("/src/" in rel or rel.endswith("pnpm-lock.yaml"))))
         path = root / rel
@@ -172,11 +181,18 @@ def package(args):
     payload.mkdir()
     run(["ditto", str(app), str(payload / APP)])
     native = payload / NATIVE
+    policy = payload / POLICY
+    if policy.read_bytes() != (root / "MegaFloyd.md").read_bytes():
+        raise ValueError("bundled MegaFloyd standard differs from the reviewed source")
     version_output = run([str(native), "--version"])
     if version_output not in ("MegaFloyd version " + version, "megafloyd version " + version):
         raise ValueError("bundled Go executable has the wrong release version: " + version_output)
     provenance = json.loads((payload / APP / "Contents/Resources/provenance.json").read_text())
     web_identity = json.loads((payload / WEB / "release.json").read_text())
+    if run([str(native), "prompt", "policy", "--sha256"]) != sha256(policy):
+        raise ValueError("bundled native prompt differs from the readable MegaFloyd standard")
+    if provenance.get("policy", {}).get("sha256") != sha256(policy):
+        raise ValueError("bundled MegaFloyd standard differs from the desktop build receipt")
     if provenance.get("version") != version or provenance.get("buildId") != build_id:
         raise ValueError("desktop release identity differs from the requested release")
     if web_identity.get("version") != version or web_identity.get("build_id") != build_id:
@@ -209,6 +225,7 @@ def package(args):
                 "components": {"go": {"path": NATIVE, "sha256": sha256(native), "version": version,
                                        "build_receipt_sha256": sha256(build_receipt_path),
                                        "toolchain": run([args.go, "version"])},
+                               "policy": {"path": POLICY, "sha256": sha256(policy)},
                                "web": {"path": WEB, "inventory_sha256": digest(web_records), "entries": len(web_records)},
                                "desktop": {"path": APP, "bundle_id": "ai.legacy.megafloyd",
                                            "inventory_sha256": digest(desktop_records)},
@@ -308,6 +325,33 @@ def extract(archive, destination, byte_limit):
                 path.symlink_to(member.linkname)
 
 
+def verify_policy(path, manifest):
+    """Prove the shipped standard is the one the shipped binary enforces.
+
+    The standard is mandatory: a release is only installable when its manifest
+    names the policy it ships and the shipped binary demonstrably enforces the
+    same bytes. A manifest without the component was produced before the
+    standard was bound into the release chain, which means the standard it
+    ships cannot be proven at all, so it is refused rather than downgraded to a
+    warning. There is deliberately no override: a check that can be bypassed is
+    not a check.
+    """
+    policy = (manifest.get("components") or {}).get("policy")
+    if policy is None:
+        raise ValueError("release " + str(manifest.get("release_id")) + " declares no components.policy: "
+                         "the MegaFloyd standard it ships cannot be proven to match the standard its "
+                         "binary enforces, so the release is refused")
+    if policy.get("path") != POLICY or sha256(path / POLICY) != policy.get("sha256"):
+        raise ValueError("installed MegaFloyd standard differs from the release manifest")
+    try:
+        embedded = run([str(path / NATIVE), "prompt", "policy", "--sha256"])
+    except subprocess.CalledProcessError:
+        raise ValueError("installed binary is pre-policy: it does not answer "
+                         "'prompt policy --sha256': " + str(path / NATIVE)) from None
+    if embedded != policy["sha256"]:
+        raise ValueError("installed native prompt differs from the release manifest")
+
+
 def verify_tree(path, manifest):
     check_identity(manifest)
     release_file = path / "release.json"
@@ -320,6 +364,7 @@ def verify_tree(path, manifest):
     actual = inventory(path)
     if actual != release["inventory"] or digest(actual) != manifest["components"]["inventory_sha256"]:
         raise ValueError("package files do not match the manifest inventory")
+    verify_policy(path, manifest)
     result = run([str(path / "bin/megafloyd"), "--version"])
     if result not in ("MegaFloyd version " + manifest["version"], "megafloyd version " + manifest["version"]):
         raise ValueError("package version check failed: " + result)

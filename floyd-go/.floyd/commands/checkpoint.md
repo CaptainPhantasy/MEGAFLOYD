@@ -10,9 +10,9 @@ Record a named, restorable snapshot of the current state: conversation position,
 ## Procedure
 1. Record git state: current branch, `git rev-parse HEAD`, and `git stash create` (or note the dirty diff) so uncommitted work is capturable.
 2. Capture the active diff with the `get_active_diff` tool.
-3. Write the checkpoint record with the `write` tool to `.harness/checkpoints/<name>.md` containing:
+3. Write the checkpoint record with the `write` tool to `<data-directory>/checkpoints/<name>.md` — the same account-private data directory the job records use, so a checkpoint never lands in shared project docs:
    - name and timestamp
-   - session id (`floyd session list` shows it) and current message position
+   - session id (`megafloyd session list` shows it) and current message position
    - git branch, HEAD commit, dirty-file list, stash ref if created
    - open todos (from the `todos` tool)
    - the intended next step, one sentence

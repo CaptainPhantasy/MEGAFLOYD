@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/legacy-ai/floyd/internal/agent"
 	"github.com/legacy-ai/floyd/internal/agent/notify"
+	agentprompt "github.com/legacy-ai/floyd/internal/agent/prompt"
 	"github.com/legacy-ai/floyd/internal/agent/ralph"
 	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/clipboard"
@@ -101,6 +102,10 @@ type App struct {
 // caller is responsible for constructing it (typically via
 // skills.NewManager + skills.DiscoverFromConfig).
 func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
+	// Record which standard this binary loads and how it compares with a
+	// standard shipped beside it. The check reports, never fails startup.
+	agentprompt.VerifyLoadedStandard(slog.Default())
+
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q, message.WithDB(conn))

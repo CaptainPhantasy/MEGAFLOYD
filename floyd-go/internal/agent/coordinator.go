@@ -26,6 +26,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/agent/tools"
 	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/deletionguard"
 	"github.com/legacy-ai/floyd/internal/discover"
 	"github.com/legacy-ai/floyd/internal/event"
 	"github.com/legacy-ai/floyd/internal/filetracker"
@@ -991,6 +992,15 @@ func (c *coordinator) wrapAgentTools(filteredTools []fantasy.AgentTool, isSubAge
 	// those guards so native rejections also emit a correlated event.
 	filteredTools = wrapToolsWithRuntimePre(filteredTools, c.hookDispatcher())
 
+	// Permanent deletion is gated outside the hook wrapper so the decision is
+	// made before user hooks and tool permissions: a hook allow or a generic
+	// permission approval must never stand in for the two confirmations.
+	filteredTools = wrapToolsWithDeletionGuard(
+		filteredTools,
+		c.deletionGuard(),
+		c.cfg.WorkingDir(),
+	)
+
 	// Active-job scope enforcement runs inside the plan guard so plan mode
 	// remains authoritative for its own file, and outside the hook wrapper
 	// so a scope denial is decided before user hooks and tool permissions.
@@ -1006,6 +1016,17 @@ func (c *coordinator) wrapAgentTools(filteredTools []fantasy.AgentTool, isSubAge
 	filteredTools = wrapToolsWithPlanGuard(filteredTools, plans, c.permissions, c.cfg.WorkingDir())
 
 	return wrapToolsWithRuntimeObservation(filteredTools, c.hookDispatcher())
+}
+
+// deletionGuard returns the before-action permanent-deletion gate. Human
+// confirmation runs through the interactive question service; without one the
+// gate refuses permanent deletion rather than assuming approval.
+func (c *coordinator) deletionGuard() *deletionguard.Guard {
+	var confirmer deletionguard.Confirmer
+	if c.questions != nil {
+		confirmer = questionConfirmer{questions: c.questions}
+	}
+	return deletionguard.NewGuard(c.cfg.Config().Options.DataDirectory, confirmer)
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config

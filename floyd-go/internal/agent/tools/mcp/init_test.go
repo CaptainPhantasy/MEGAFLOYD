@@ -343,8 +343,12 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 
 		sct, ok := tr.(*mcp.StreamableClientTransport)
 		require.True(t, ok)
-		rt, ok := sct.HTTPClient.Transport.(*headerRoundTripper)
-		require.True(t, ok, "expected headerRoundTripper, got %T", sct.HTTPClient.Transport)
+		// The session-lifetime wrapper is outermost so cancellation covers
+		// the whole chain; the header injector sits directly beneath it.
+		lt, ok := sct.HTTPClient.Transport.(lifetimeRoundTripper)
+		require.True(t, ok, "expected lifetimeRoundTripper outermost, got %T", sct.HTTPClient.Transport)
+		rt, ok := lt.inner.(*headerRoundTripper)
+		require.True(t, ok, "expected headerRoundTripper beneath the lifetime wrapper, got %T", lt.inner)
 		require.Equal(t, map[string]string{
 			"Authorization": "Bearer gh-secret",
 			"X-Static":      "kept",
@@ -401,8 +405,12 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 		require.NoError(t, err)
 		sse, ok := tr.(*mcp.SSEClientTransport)
 		require.True(t, ok)
-		rt, ok := sse.HTTPClient.Transport.(*headerRoundTripper)
-		require.True(t, ok)
+		// Same wrapper order as the HTTP branch: lifetime outermost,
+		// header injector directly beneath it.
+		lt, ok := sse.HTTPClient.Transport.(lifetimeRoundTripper)
+		require.True(t, ok, "expected lifetimeRoundTripper outermost, got %T", sse.HTTPClient.Transport)
+		rt, ok := lt.inner.(*headerRoundTripper)
+		require.True(t, ok, "expected headerRoundTripper beneath the lifetime wrapper, got %T", lt.inner)
 		require.NotContains(t, rt.headers, "Authorization")
 	})
 }

@@ -37,7 +37,10 @@ func NewWhyTool(dataDir, workingDir string) fantasy.AgentTool {
 		WhyToolName,
 		whyDescription,
 		func(ctx context.Context, params WhyParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			root := jobsDataDirectory(dataDir, workingDir)
+			root, err := jobsDataDirectory(dataDir, workingDir)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
 			if strings.TrimSpace(params.JobID) == "" {
 				return fantasy.NewTextErrorResponse("job_id is required"), nil
 			}

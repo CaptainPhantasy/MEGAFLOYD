@@ -101,9 +101,13 @@ func TestResolveMegafloydOverrides(t *testing.T) {
 	}
 }
 
-func TestResolveChassisFallback(t *testing.T) {
+// TestResolveIgnoresInheritedChassisDirs pins the post-rebrand contract: the
+// layout comes from MEGAFLOYD_HOME, never from a FLOYD_* value inherited
+// from the chassis.
+func TestResolveIgnoresInheritedChassisDirs(t *testing.T) {
 	clearEnv(t)
-	t.Setenv(HomeEnv, "/srv/megafloyd")
+	home := "/srv/megafloyd"
+	t.Setenv(HomeEnv, home)
 	t.Setenv(ChassisGlobalConfigEnv, "/legacy/config")
 	t.Setenv(ChassisGlobalDataEnv, "/legacy/data")
 	t.Setenv(ChassisCacheDirEnv, "/legacy/cache")
@@ -112,8 +116,14 @@ func TestResolveChassisFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if d.Config != "/legacy/config" || d.Data != "/legacy/data" || d.Cache != "/legacy/cache" {
-		t.Fatalf("chassis fallbacks not honored: %+v", d)
+	for _, tc := range []struct{ got, want, label string }{
+		{d.Config, filepath.Join(home, "config"), "Config"},
+		{d.Data, filepath.Join(home, "data"), "Data"},
+		{d.Cache, filepath.Join(home, "cache"), "Cache"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s = %q, want %q (inherited FLOYD_* must not win)", tc.label, tc.got, tc.want)
+		}
 	}
 }
 

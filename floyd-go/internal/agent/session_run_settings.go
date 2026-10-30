@@ -24,7 +24,6 @@ type SessionRunSettings struct {
 	DisabledTools []string  `json:"disabled_tools,omitempty"`
 	profilePrompt string
 	profileTools  *[]string
-	pluginPrompt  string
 }
 
 func ReadSessionRunSettings(metadata map[string]any) (SessionRunSettings, error) {
@@ -127,7 +126,7 @@ func (s SessionRunSettings) clone() SessionRunSettings {
 
 func (s SessionRunSettings) promptAddition() string {
 	var parts []string
-	for _, part := range []string{s.profilePrompt, s.SystemPrompt, s.pluginPrompt} {
+	for _, part := range []string{s.profilePrompt, s.SystemPrompt} {
 		if strings.TrimSpace(part) != "" {
 			parts = append(parts, part)
 		}
@@ -204,14 +203,6 @@ func (c *coordinator) captureSessionRunSettings(ctx context.Context, sessionID s
 	settings, err = c.resolveSessionProfile(settings)
 	if err != nil {
 		return settings, err
-	}
-	if plugin, ok := any(c).(interface {
-		RuntimePluginPrompt(context.Context, string) (string, error)
-	}); ok {
-		settings.pluginPrompt, err = plugin.RuntimePluginPrompt(ctx, sessionID)
-		if err != nil {
-			return settings, err
-		}
 	}
 	return settings.clone(), nil
 }

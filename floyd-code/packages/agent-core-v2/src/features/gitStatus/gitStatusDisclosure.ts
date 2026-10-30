@@ -1,12 +1,5 @@
 import type { FsGitStatus, FsGitStatusResponse } from '#/app/git/git';
 
-/**
- * Git branch/status disclosure for the session-start reminder.
- *
- * Go's prompt assembly bakes `GitStatus` into `PromptDat`; Floyd Code discloses the date via a
- * reminder (`features/dateChange`), so git follows the same convention. This module is the pure,
- * testable core the reminder actor will call — no services, no I/O.
- */
 export interface GitDisclosure {
   readonly kind: 'git';
   readonly branch: string;
@@ -16,8 +9,7 @@ export interface GitDisclosure {
   readonly behind: number;
 }
 
-/** `clean` and `ignored` are not working-tree changes; everything else is. */
-function isChange(state: FsGitStatus): boolean {
+function isWorkingTreeChange(state: FsGitStatus): boolean {
   return state !== 'clean' && state !== 'ignored';
 }
 
@@ -26,7 +18,7 @@ export function gitDisclosure(status: FsGitStatusResponse): GitDisclosure {
   let untracked = 0;
   for (const state of Object.values(status.entries)) {
     if (state === 'untracked') untracked += 1;
-    else if (isChange(state)) changed += 1;
+    else if (isWorkingTreeChange(state)) changed += 1;
   }
   return {
     kind: 'git',

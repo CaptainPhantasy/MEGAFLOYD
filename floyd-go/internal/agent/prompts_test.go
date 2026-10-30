@@ -1,73 +1,89 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/legacy-ai/floyd/internal/agent/prompt"
+	"github.com/legacy-ai/floyd/internal/config"
 )
 
-func TestPromptTemplateOverride(t *testing.T) {
+// TestCoderPromptIgnoresLegacyPromptOverride proves an external prompt file is
+// never read: coderPrompt renders the embedded bundle even when a legacy
+// prompts/coder.md.tpl exists in the global config directory.
+func TestCoderPromptIgnoresLegacyPromptOverride(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FLOYD_GLOBAL_CONFIG", dir)
-
-	promptsDir := filepath.Join(dir, "prompts")
-	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "prompts"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	override := "You are {{.AgentName}}, the overridden persona."
-	overridePath := filepath.Join(promptsDir, "coder.md.tpl")
-	if err := os.WriteFile(overridePath, []byte(override), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "prompts", "coder.md.tpl"), []byte("legacy external behavior"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if got := promptTemplate("coder", []byte("embedded default")); got != override {
-		t.Fatalf("override not applied: %q", got)
+	p, err := coderPrompt(prompt.WithWorkingDir(dir))
+	if err != nil {
+		t.Fatalf("build coder prompt: %v", err)
 	}
-
-	if got := promptTemplate("task", []byte("embedded default")); got != "embedded default" {
-		t.Fatalf("embedded fallback not used: %q", got)
+	out, err := p.Build(context.Background(), "", "", config.NewTestStoreWithWorkingDir(&config.Config{Options: &config.Options{}}, dir))
+	if err != nil {
+		t.Fatalf("render coder prompt: %v", err)
+	}
+	if strings.Contains(out, "legacy external behavior") {
+		t.Fatal("legacy prompt override replaced the reviewed standard")
+	}
+	if !strings.Contains(out, prompt.StandardPolicy()) {
+		t.Fatal("reviewed standard missing from the rendered prompt")
 	}
 }
 
-func TestRoleTemplateSelection(t *testing.T) {
-	cases := []struct {
-		name   string
-		legacy []byte
-		want   string
-	}{
-		{"superfloyd profile", roleTemplateFor("superfloyd", "floyd"), "# SUPERFLOYD"},
-		{"megafloyd binary", roleTemplateFor("", "megafloyd"), "# MegaFloyd"},
-		{"superfloyd binary", roleTemplateFor("", "superfloyd"), "# SUPERFLOYD"},
-		{"general fallback", roleTemplateFor("", "floyd"), "# FLOYD"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if !strings.Contains(string(tc.legacy), tc.want) {
-				t.Fatalf("role template missing %q: %q", tc.want, string(tc.legacy)[:80])
+// TestEveryRuntimeProfileUsesReviewedPolicy keeps the collapsed dispatch
+// honest: every executable alias renders the single policy-bearing template
+// and therefore the reviewed policy exactly once.
+func TestEveryRuntimeProfileUsesReviewedPolicy(t *testing.T) {
+	for _, profile := range []string{"", "megafloyd", "superfloyd", "floyd"} {
+		t.Run("profile="+profile, func(t *testing.T) {
+			t.Setenv("FLOYD_RUNTIME_PROFILE", profile)
+			dir := t.TempDir()
+			p, err := coderPrompt(prompt.WithWorkingDir(dir))
+			if err != nil {
+				t.Fatalf("build coder prompt: %v", err)
+			}
+			out, err := p.Build(context.Background(), "", "", config.NewTestStoreWithWorkingDir(&config.Config{Options: &config.Options{}}, dir))
+			if err != nil {
+				t.Fatalf("render coder prompt: %v", err)
+			}
+			if got := strings.Count(out, prompt.StandardPolicy()); got != 1 {
+				t.Fatalf("profile %q renders the reviewed policy %d times, want exactly 1", profile, got)
 			}
 		})
 	}
 }
 
 func TestProtocolKernelContent(t *testing.T) {
-	kernel := string(protocolKernelTmpl)
-	for _, want := range []string{
-		"Protocol Kernel",
-		"MODE SELECTOR",
-		"DEBUG MODE GATES",
-		"BUILD MODE GATES",
-		"TOOL DISCIPLINE",
-		"CONTINUITY",
-	} {
-		if !strings.Contains(kernel, want) {
-			t.Fatalf("kernel missing %q", want)
+	kernel := protocolKernelPrompt()
+	for _, old := range []string{"ask exactly ONE", "attempt ONE fix", "NEVER summarize", "MODE SELECTOR", "ask the user to run commands"} {
+		if strings.Contains(kernel, old) {
+			t.Fatalf("legacy behavior retained: %s", old)
 		}
 	}
 }
 
 func TestFloydProtocolAvailable(t *testing.T) {
-	if strings.TrimSpace(FloydProtocol()) == "" {
-		t.Fatal("FloydProtocol returned empty content")
+	if FloydProtocol() != prompt.StandardPolicy() {
+		t.Fatal("protocol export differs from standard")
+	}
+}
+
+func TestWebRoleLoadsReviewedPolicy(t *testing.T) {
+	got := WebRolePrompt()
+	if strings.Count(got, prompt.StandardPolicy()) != 1 {
+		t.Fatal("web policy missing, altered or duplicated")
+	}
+	if strings.Contains(got, "{{.StandardPolicy}}") {
+		t.Fatal("unrendered template leaked into web prompt")
 	}
 }

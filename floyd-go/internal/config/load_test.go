@@ -264,15 +264,13 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.NotNil(t, cfg.LSP)
 		require.NotNil(t, cfg.MCP)
 		require.Equal(t, filepath.Join(workingDir, ".floyd"), cfg.Options.DataDirectory)
-		require.Equal(t, "AGENTS.md", cfg.Options.InitializeAs)
+		require.Equal(t, "MegaFloyd.md", cfg.Options.InitializeAs)
 		// DiffMode is deliberately left empty: the permissions dialog treats
 		// the zero value as "pick split or unified based on terminal width".
 		require.Empty(t, cfg.Options.TUI.DiffMode)
 		require.Equal(t, ScrollbarDefault, cfg.Options.TUI.Scrollbar)
 		require.Equal(t, ExitBannerDefault, cfg.Options.TUI.ExitBanner)
-		for _, path := range defaultContextPaths {
-			require.Contains(t, cfg.Options.ContextPaths, path)
-		}
+		require.Equal(t, []string{"MegaFloyd.md"}, cfg.Options.ContextPaths)
 	})
 
 	t.Run("sets TUI defaults only when unset", func(t *testing.T) {
@@ -832,7 +830,12 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "enter_plan_mode", "exit_plan_mode", "floyd_info", "floyd_logs", "job_output", "job_kill", "contract", "prove", "drift", "why", "recover", "handoff", "replay", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "glob", "ls", "question", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource", "parallel_bash", "context_status", "complexity_estimator", "refactor_blueprint", "failure_mode_enumerator", "transcript_export", "query_floyd_archive", "symbol_index", "vision", "workflow", "mcp_task_status", "project_map", "manage_scratchpad", "list_symbols", "apply_patch", "smart_replace", "get_active_diff", "mcp_floyd-lab_spawn_lab", "mcp_floyd-lab_execute_in_lab", "mcp_floyd-lab_teardown_lab"}, coderAgent.AllowedTools)
+	// Derive the expectation from the registry so a newly advertised tool
+	// cannot leave this allowlist stale.
+	assert.Equal(t, resolveAllowedTools(allToolNames(), cfg.Options.DisabledTools), coderAgent.AllowedTools)
+	for _, disabled := range cfg.Options.DisabledTools {
+		assert.NotContains(t, coderAgent.AllowedTools, disabled)
+	}
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -858,7 +861,12 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "enter_plan_mode", "exit_plan_mode", "floyd_info", "floyd_logs", "job_output", "job_kill", "contract", "prove", "drift", "why", "recover", "handoff", "replay", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource", "parallel_bash", "context_status", "complexity_estimator", "refactor_blueprint", "failure_mode_enumerator", "transcript_export", "query_floyd_archive", "symbol_index", "vision", "workflow", "mcp_task_status", "project_map", "manage_scratchpad", "list_symbols", "apply_patch", "smart_replace", "get_active_diff", "mcp_floyd-lab_spawn_lab", "mcp_floyd-lab_execute_in_lab", "mcp_floyd-lab_teardown_lab"}, coderAgent.AllowedTools)
+	// Derive the expectation from the registry so a newly advertised tool
+	// cannot leave this allowlist stale.
+	assert.Equal(t, resolveAllowedTools(allToolNames(), cfg.Options.DisabledTools), coderAgent.AllowedTools)
+	for _, disabled := range cfg.Options.DisabledTools {
+		assert.NotContains(t, coderAgent.AllowedTools, disabled)
+	}
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)

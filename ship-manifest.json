@@ -1,7 +1,7 @@
 {
   "version": 2,
-  "updated": "2026-10-25",
-  "release_id": "2026.10.25-megafloyd-20261025T054728Z",
+  "updated": "2026-10-28",
+  "release_id": "2026.10.25-megafloyd-20261026T023648Z",
   "note": "Complete canonical MEGAFLOYD package: the installed launcher, bundled Go engine, web assets, and desktop shell. Existing company services remain external shared services.",
   "ship_set": [
     {
@@ -9,19 +9,24 @@
       "kind": "installed-package-launcher"
     },
     {
-      "path": "releases/2026.10.25-megafloyd-20261025T054728Z/MEGAFLOYD.app",
+      "path": "MegaFloyd.md",
+      "kind": "policy-standard",
+      "sha256": "5bf0bb4a37990bfd1c7f7cc22c73e1ec2bfbfddac0d95952bae49652aa40945b"
+    },
+    {
+      "path": "releases/2026.10.25-megafloyd-20261026T023648Z/MEGAFLOYD.app",
       "kind": "desktop-with-go-web"
     },
     {
-      "path": "dist/releases/2026.10.25-megafloyd-20261025T054728Z/manifest.json",
+      "path": "dist/releases/2026.10.25-megafloyd-20261026T023648Z/manifest.json",
       "kind": "release-manifest"
     },
     {
-      "path": "dist/releases/2026.10.25-megafloyd-20261025T054728Z/megafloyd-darwin-arm64.tar.gz",
+      "path": "dist/releases/2026.10.25-megafloyd-20261026T023648Z/megafloyd-darwin-arm64.tar.gz",
       "kind": "complete-package"
     },
     {
-      "path": "dist/releases/2026.10.25-megafloyd-20261025T054728Z/install.sh",
+      "path": "dist/releases/2026.10.25-megafloyd-20261026T023648Z/install.sh",
       "kind": "explicit-prefix-installer"
     }
   ]

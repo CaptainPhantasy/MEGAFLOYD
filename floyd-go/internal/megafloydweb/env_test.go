@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/legacy-ai/floyd/internal/agent/prompt"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -102,7 +104,7 @@ func TestBuildChildEnvCarriesRolePrompt(t *testing.T) {
 
 	decoded, err := decodeRolePrompt(value)
 	require.NoError(t, err)
-	require.Contains(t, decoded, "# Protocol Kernel", "kernel layer present")
-	require.Contains(t, decoded, "SUPERFLOYD", "role layer present")
-	require.True(t, len(decoded) > 5000, "all three layers, not a fragment")
+	require.True(t, strings.Contains(decoded, "# MegaFloyd Protocol Kernel"), "transport layer present")
+	require.Equal(t, 1, strings.Count(decoded, prompt.StandardPolicy()), "complete reviewed policy appears exactly once")
+	require.False(t, strings.Contains(decoded, "{{.StandardPolicy}}"), "no unrendered template in web transport")
 }

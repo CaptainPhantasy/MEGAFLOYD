@@ -80,7 +80,7 @@ func (w Writer) Write(ctx context.Context, cp Checkpoint) error {
 	}
 
 	if cp.Git == nil {
-		cp.Git = w.gitSummary(ctx, cwd)
+		cp.Git = w.gitSummary(ctx, cwd, dataDir)
 	}
 
 	data, err := encode(cp, MaxSize)
@@ -110,7 +110,7 @@ func existingNewer(path string, ts time.Time) (bool, error) {
 // gitSummary probes git for the branch and dirty state. It returns nil when
 // git is unavailable or cwd is not a repository, so the checkpoint simply
 // omits git data.
-func (w Writer) gitSummary(ctx context.Context, cwd string) *GitState {
+func (w Writer) gitSummary(ctx context.Context, cwd, dataDir string) *GitState {
 	run := w.git
 	if run == nil {
 		run = execGit
@@ -124,17 +124,66 @@ func (w Writer) gitSummary(ctx context.Context, cwd string) *GitState {
 
 	// Limit the summary to the working directory and exclude the checkpoint
 	// itself (and any leftover temp files), so recording project state never
-	// makes the tree look dirty on its own.
-	out, err := run(ctx, cwd,
-		"status", "--porcelain=v1", "--branch",
-		"--", ".",
-		":(exclude)"+DirName+"/"+FileName,
-		":(exclude)"+DirName+"/"+FileName+"-*.tmp",
-	)
+	// makes the tree look dirty on its own. The excluded directory is resolved
+	// from the write target, because the canonical binary keeps state in
+	// .megafloyd rather than the legacy .floyd.
+	args := []string{"status", "--porcelain=v1", "--branch", "--", "."}
+	for _, pattern := range checkpointExcludes(cwd, dataDir) {
+		args = append(args, ":(exclude)"+pattern)
+	}
+	out, err := run(ctx, cwd, args...)
 	if err != nil {
 		return nil
 	}
 	return parseGitStatus(out)
+}
+
+// checkpointExcludes returns the git pathspec patterns that exclude the
+// checkpoint and its temporary files, relative to cwd.
+//
+// The directory is the one the write actually targets, not a fixed name: the
+// canonical binary keeps project state in .megafloyd while the legacy
+// scaffold uses .floyd, and recording project state must never make the tree
+// look dirty on its own. A checkpoint outside the working tree needs no
+// exclusion, because the probe only reports paths under ".".
+func checkpointExcludes(cwd, dataDir string) []string {
+	rel, ok := relativeTo(cwd, dataDir)
+	if !ok {
+		return nil
+	}
+	rel = filepath.ToSlash(rel)
+	prefix := ""
+	if rel != "." {
+		prefix = rel + "/"
+	}
+	return []string{prefix + FileName, prefix + FileName + "-*.tmp"}
+}
+
+// relativeTo reports target relative to base when target is base or a
+// descendant of it. Both are resolved through symlinks when they exist, so a
+// macOS /var and /private/var spelling of one directory still compares equal.
+func relativeTo(base, target string) (string, bool) {
+	b, err := filepath.Abs(base)
+	if err != nil {
+		return "", false
+	}
+	t, err := filepath.Abs(target)
+	if err != nil {
+		return "", false
+	}
+	if resolvedBase, err := filepath.EvalSymlinks(b); err == nil {
+		if resolvedTarget, err := filepath.EvalSymlinks(t); err == nil {
+			b, t = resolvedBase, resolvedTarget
+		}
+	}
+	rel, err := filepath.Rel(b, t)
+	if err != nil {
+		return "", false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
 }
 
 // parseGitStatus parses the output of git status --porcelain=v1 --branch. It

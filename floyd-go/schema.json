@@ -648,10 +648,9 @@
             "type": "string"
           },
           "type": "array",
-          "description": "Paths to files containing global context information for the AI",
+          "description": "Paths to files containing global context information for the AI - only MegaFloyd.md is retained",
           "default": [
-            "~/.config/floyd/FLOYD.md",
-            "~/.config/AGENTS.md"
+            "~/.config/floyd/MegaFloyd.md"
           ]
         },
         "skills_paths": {
@@ -740,13 +739,10 @@
         },
         "initialize_as": {
           "type": "string",
-          "description": "Name of the context file to create/update during project initialization",
-          "default": "AGENTS.md",
+          "description": "Name of the context file to create/update during project initialization. Fixed to MegaFloyd.md on this distribution - a configured value is overridden.",
+          "default": "MegaFloyd.md",
           "examples": [
-            "AGENTS.md",
-            "FLOYD.md",
-            "CLAUDE.md",
-            "docs/LLMs.md"
+            "MegaFloyd.md"
           ]
         },
         "auto_lsp": {

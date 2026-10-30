@@ -18,6 +18,7 @@ import (
 	mcpclient "github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/hooks"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/permission"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -179,6 +180,10 @@ func (m *canonicalContextModel) Stream(ctx context.Context, call fantasy.Call) (
 
 func canonicalDynamicContextRefresh(t *testing.T) {
 	t.Setenv("MEGAFLOYD_ACTIVE", "1")
+	// Keep the private workspace store inside the test: project memory is
+	// account-private, so nothing may be read from or written to the project
+	// directory.
+	t.Setenv("MEGAFLOYD_HOME", t.TempDir())
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	env := testEnv(t)
@@ -191,7 +196,9 @@ func canonicalDynamicContextRefresh(t *testing.T) {
 	}
 	runGit("init", "--quiet")
 	runGit("symbolic-ref", "HEAD", "refs/heads/canonical-before")
-	cache := filepath.Join(env.workingDir, ".megafloyd", ".supercache")
+	workspaceData, err := megafloyd.WorkspaceDataDir(env.workingDir)
+	require.NoError(t, err)
+	cache := filepath.Join(workspaceData, ".supercache")
 	require.NoError(t, os.MkdirAll(filepath.Dir(cache), 0o700))
 	require.NoError(t, os.WriteFile(cache, []byte("CACHE_BEFORE"), 0o600))
 	first, err := env.sessions.Create(ctx, "first")

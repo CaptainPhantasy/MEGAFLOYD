@@ -176,6 +176,13 @@ function canonicalPath(value) {
   }
 }
 
+/** The native private store: a `.megafloyd` directory, never the legacy `.floyd`. */
+const CANONICAL_DATA_DIR_NAME = '.megafloyd';
+
+function isCanonicalDataDir(value) {
+  return path.resolve(value).split(path.sep).includes(CANONICAL_DATA_DIR_NAME);
+}
+
 /** Prove the web adapter serves this Go workspace and its own data store. */
 export async function fetchRuntime({
   port,
@@ -200,6 +207,15 @@ export async function fetchRuntime({
       const envelope = parseEnvelope(await response.json());
       if (!envelope.ok) return envelope;
       const runtime = envelope.data;
+      // A caller that names a workspace but no store has not said which store to
+      // trust, so only the native `.megafloyd` store may be adopted. A legacy
+      // `.floyd` directory is never accepted implicitly (private-data guard).
+      const dataDirMismatch =
+        workspace && typeof runtime.data_dir === 'string'
+          ? dataDir
+            ? canonicalPath(runtime.data_dir) !== canonicalPath(dataDir)
+            : !isCanonicalDataDir(runtime.data_dir)
+          : false;
       if (
         runtime.engine !== 'go' ||
         typeof runtime.host !== 'string' || runtime.host.length === 0 ||
@@ -209,7 +225,7 @@ export async function fetchRuntime({
         typeof runtime.cwd !== 'string' || !path.isAbsolute(runtime.cwd) ||
         (workspace && canonicalPath(runtime.cwd) !== canonicalPath(workspace)) ||
         typeof runtime.data_dir !== 'string' || !path.isAbsolute(runtime.data_dir) ||
-        (dataDir && canonicalPath(runtime.data_dir) !== canonicalPath(dataDir))
+        dataDirMismatch
       ) {
         return { ok: false, error: `Expected the Go runtime for workspace ${workspace} and data ${dataDir}.` };
       }

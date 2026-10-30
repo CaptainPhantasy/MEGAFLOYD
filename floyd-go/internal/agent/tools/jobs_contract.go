@@ -41,7 +41,10 @@ func NewContractTool(dataDir string, permissions permission.Service, workingDir 
 		ContractToolName,
 		contractDescription,
 		func(ctx context.Context, params ContractParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			root := jobsDataDirectory(dataDir, workingDir)
+			root, err := jobsDataDirectory(dataDir, workingDir)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
 			switch strings.ToLower(strings.TrimSpace(params.Action)) {
 			case "create":
 				return contractCreate(ctx, root, workingDir, permissions, call, params)

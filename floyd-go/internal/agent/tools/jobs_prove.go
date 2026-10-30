@@ -43,7 +43,10 @@ func NewProveTool(dataDir string, permissions permission.Service, workingDir str
 		ProveToolName,
 		proveDescription,
 		func(ctx context.Context, params ProveParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			root := jobsDataDirectory(dataDir, workingDir)
+			root, err := jobsDataDirectory(dataDir, workingDir)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
 			switch strings.ToLower(strings.TrimSpace(params.Action)) {
 			case "record":
 				return proveRecord(ctx, root, workingDir, permissions, call, params)

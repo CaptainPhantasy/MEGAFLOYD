@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -124,13 +125,23 @@ func TestRunSubAgent(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)
 
-		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		// The runtime guard resolves the parent session before the child runs,
+		// so the parent has to exist at entry. Removing it while the agent is
+		// running is what leaves updateParentSessionCost without a row to
+		// accumulate into — the failure this test is about.
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			if err := env.sessions.Delete(ctx, parentSession.ID); err != nil {
+				return nil, fmt.Errorf("delete parent session mid-run: %w", err)
+			}
 			return agentResultWithText("output before cost failure"), nil
 		})
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
-			SessionID:      "missing-parent-session",
+			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",
 			Prompt:         "test",
@@ -139,6 +150,11 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, resp.IsError)
 		assert.Equal(t, "output before cost failure", resp.Content)
+
+		// The cost update had no parent session to write to, so it could not
+		// have completed; the child output above is what must survive that.
+		_, err = env.sessions.Get(t.Context(), parentSession.ID)
+		require.ErrorIs(t, err, sql.ErrNoRows)
 	})
 
 	t.Run("response with text returns it", func(t *testing.T) {

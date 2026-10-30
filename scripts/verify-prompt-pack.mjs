@@ -22,6 +22,7 @@ const DERIVED_DIRS = [join(ROOT, "floyd-go/internal/agent/templates")];
 const ADVISORY_DIRS = [join(ROOT, "..", "floyd-merge/prompt-pack/templates")];
 
 const ASSEMBLY_PAIRS = [
+  [join(ROOT, "MegaFloyd.md"), join(ROOT, "floyd-go/internal/agent/prompt/megafloyd_standard.md")],
   [join(ROOT, "docs/prompt-pack/prompt.go.reference"), join(ROOT, "floyd-go/internal/agent/prompt/prompt.go")],
 ];
 
@@ -106,6 +107,38 @@ for (const [canonFile, derivedFile] of ASSEMBLY_PAIRS) {
   } else {
     console.error(`FAIL  ${relative(ROOT, derivedFile)} differs from ${relative(ROOT, canonFile)}`);
     drifted += 1;
+  }
+}
+
+const STANDARD_COPIES = ["AGENTS.md", "claude.md"];
+
+function normalizedRuleText(file) {
+  const lines = readFileSync(file, "utf8").replace(/\r\n/g, "\n").split("\n");
+  let start = 0;
+  if (lines.length > 0 && /^#\s/.test(lines[0])) {
+    start = 1;
+    while (start < lines.length && lines[start].trim() === "") start += 1;
+  }
+  let end = lines.length;
+  while (end > start && lines[end - 1].trim() === "") end -= 1;
+  return lines.slice(start, end).join("\n");
+}
+
+const authorityFile = join(ROOT, "MegaFloyd.md");
+const authorityText = existsSync(authorityFile) ? normalizedRuleText(authorityFile) : null;
+for (const name of STANDARD_COPIES) {
+  const file = join(ROOT, name);
+  if (!existsSync(file)) continue;
+  if (authorityText === null) {
+    console.error(`FAIL  ${name} exists but MegaFloyd.md does not, so drift cannot be detected`);
+    drifted += 1;
+    continue;
+  }
+  if (normalizedRuleText(file) !== authorityText) {
+    console.error(`FAIL  ${name} rule text differs from MegaFloyd.md — regenerate the copy from the authoritative file`);
+    drifted += 1;
+  } else {
+    console.log(`ok    ${name} matches the MegaFloyd.md rule text`);
   }
 }
 
