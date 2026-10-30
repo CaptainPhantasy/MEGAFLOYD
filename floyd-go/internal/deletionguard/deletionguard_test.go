@@ -80,7 +80,7 @@ func TestDeletionDigestIsStable(t *testing.T) {
 func TestDeletionLedgerRecordsHumanConfirmations(t *testing.T) {
 	t.Parallel()
 
-	ledger := NewLedger(t.TempDir())
+	ledger := testLedger(t.TempDir())
 	targets := []string{"/work/widget"}
 	targetSet := Digest(targets)
 	for stage := 1; stage <= 2; stage++ {
@@ -103,7 +103,7 @@ func TestDeletionLedgerRecordsHumanConfirmations(t *testing.T) {
 func TestDeletionLedgerRejectsModelText(t *testing.T) {
 	t.Parallel()
 
-	ledger := NewLedger(t.TempDir())
+	ledger := testLedger(t.TempDir())
 	err := ledger.AppendConfirmation("session", Confirmation{
 		Stage: 1, TargetSet: Digest([]string{"/work/widget"}), Targets: []string{"/work/widget"}, Source: "assistant",
 	})
@@ -113,14 +113,14 @@ func TestDeletionLedgerRejectsModelText(t *testing.T) {
 func TestDeletionLedgerFailsClosedOnMalformedRecord(t *testing.T) {
 	t.Parallel()
 
-	ledger := NewLedger(t.TempDir())
+	ledger := testLedger(t.TempDir())
 	require.NoError(t, os.MkdirAll(ledger.Dir("session"), 0o755))
-	require.NoError(t, os.WriteFile(ledger.Path("session"), []byte("{not json"), 0o644))
+	fixtureBackend(ledger.dataDir).corrupt(ledger.namespace, "session", []byte("{not json"))
 
 	_, err := ledger.Read("session")
 	require.ErrorIs(t, err, ErrSessionRecordUnavailable)
 
-	require.NoError(t, os.WriteFile(ledger.Path("session"), []byte(`{"schema":"other/v9","session_id":"session"}`), 0o644))
+	fixtureBackend(ledger.dataDir).corrupt(ledger.namespace, "session", []byte(`{"schema":"other/v9","session_id":"session"}`))
 	_, err = ledger.Read("session")
 	require.True(t, errors.Is(err, ErrSessionRecordUnavailable), err)
 }
@@ -128,7 +128,7 @@ func TestDeletionLedgerFailsClosedOnMalformedRecord(t *testing.T) {
 func TestDeletionLedgerMissingRecordIsEmpty(t *testing.T) {
 	t.Parallel()
 
-	record, err := NewLedger(t.TempDir()).Read("session")
+	record, err := testLedger(t.TempDir()).Read("session")
 	require.NoError(t, err)
 	require.Empty(t, record.Confirmations)
 	require.False(t, record.Confirmed(Digest([]string{"/work/widget"})))

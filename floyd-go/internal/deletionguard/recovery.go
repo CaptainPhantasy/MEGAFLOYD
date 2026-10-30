@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -285,6 +286,9 @@ func (g *Guard) BeginExecution(sessionID string, c Classification, callID string
 	if err != nil {
 		return err
 	}
+	if err := inPlaceTargetIdentity(c); err != nil {
+		return err
+	}
 	if reason := recoveryDenial(record, c); reason != "" {
 		return errors.New(reason)
 	}
@@ -326,27 +330,47 @@ func (g *Guard) RecordOutcome(sessionID string, c Classification, callID string,
 	if len(successfulTargets) > 0 && !subset(successfulTargets, c.Targets) {
 		return errors.New("completion includes an unauthorized target")
 	}
+	toolFinished := !uncertain
 	var completed []string
 	for _, target := range successfulTargets {
-		if a.Snapshots[target] != "" && a.Snapshots[target] != "absent" {
-			now, err := snapshot(target)
+		before := a.Snapshots[target]
+		current, err := snapshot(target)
+		if err != nil {
+			return err
+		}
+		// Absence proves an unlink outcome, not an in-place transformation.
+		// An already absent unlink target is a successful harmless no-op.
+		if current == "absent" && c.RemovesTarget(target) {
+			completed = append(completed, target)
+			continue
+		}
+		if !c.RemovesTarget(target) {
+			proven, err := inPlacePostcondition(target, c.Operations[target])
 			if err != nil {
 				return err
 			}
-			if now == a.Snapshots[target] || (c.RemovesTarget(target) && now != "absent") {
+			if proven {
+				completed = append(completed, target)
 				continue
 			}
 		}
-		completed = append(completed, target)
+		// An unrelated metadata/content change cannot prove the requested
+		// destructive effect. Keep that outcome uncertain, never successful.
+		if current != before {
+			uncertain = true
+		}
+		if info, err := os.Lstat(target); err == nil && !info.Mode().IsRegular() && !c.RemovesTarget(target) {
+			uncertain = true
+		}
 	}
-	if !uncertain {
+	if toolFinished {
 		for _, target := range c.Targets {
 			if c.RemovesTarget(target) && a.Snapshots[target] != "" && a.Snapshots[target] != "absent" {
-				now, err := snapshot(target)
+				current, err := snapshot(target)
 				if err != nil {
 					return err
 				}
-				if now == "absent" {
+				if current == "absent" {
 					completed = append(completed, target)
 				}
 			}
@@ -362,4 +386,95 @@ func (g *Guard) RecordOutcome(sessionID string, c Classification, callID string,
 	}
 	record.Attempts = append(record.Attempts, Attempt{ToolCallID: callID, ApprovalSet: a.TargetSet, Targets: c.Targets, State: state, RecordedAt: g.now().UTC().Format(time.RFC3339Nano)})
 	return g.ledger.write(sessionID, record)
+}
+
+// inPlacePostcondition proves the final size for an empty redirect or one
+// absolute numeric truncate. Other producers, relative sizes, reference files,
+// block units and compound effects never become success by default.
+func inPlacePostcondition(target, signature string) (bool, error) {
+	var operations [][]string
+	if json.Unmarshal([]byte(signature), &operations) != nil || len(operations) != 1 || len(operations[0]) == 0 {
+		return false, nil
+	}
+	operation := operations[0]
+	if (operation[0] == ">" || operation[0] == ">|") && len(operation) == 2 && strings.TrimSpace(operation[1]) == "" {
+		info, err := os.Lstat(target)
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return info.Mode().IsRegular() && info.Size() == 0, nil
+	}
+	if filepath.Base(operation[0]) != "truncate" {
+		return false, nil
+	}
+	args := operation[1:]
+	value := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "-c" || arg == "--no-create" || arg == "--":
+		case arg == "-s" || arg == "--size":
+			if value != "" || i+1 >= len(args) {
+				return false, nil
+			}
+			i++
+			value = args[i]
+		case strings.HasPrefix(arg, "--size="):
+			if value != "" {
+				return false, nil
+			}
+			value = strings.TrimPrefix(arg, "--size=")
+		case strings.HasPrefix(arg, "-s") && len(arg) > 2:
+			if value != "" {
+				return false, nil
+			}
+			value = arg[2:]
+		default:
+			return false, nil
+		}
+	}
+	if value == "" {
+		return false, nil
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return false, nil
+		}
+	}
+	expected, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return false, nil
+	}
+	info, err := os.Lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return info.Mode().IsRegular() && info.Size() == expected, nil
+}
+
+// In-place operations follow a final symlink, whereas an unlink removes the
+// link itself. A link-only fingerprint cannot approve changing referent data.
+func inPlaceTargetIdentity(c Classification) error {
+	for _, target := range c.Targets {
+		if c.RemovesTarget(target) {
+			continue
+		}
+		info, err := os.Lstat(target)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("permanent deletion is blocked because the in-place target cannot be inspected: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("permanent deletion is blocked because an in-place operation on a symbolic link cannot verify the referenced item; name the explicit regular-file target instead")
+		}
+	}
+	return nil
 }

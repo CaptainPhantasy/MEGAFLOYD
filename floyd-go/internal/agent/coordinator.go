@@ -1018,8 +1018,9 @@ func (c *coordinator) wrapAgentTools(filteredTools []fantasy.AgentTool, isSubAge
 	return wrapToolsWithRuntimeObservation(filteredTools, c.hookDispatcher())
 }
 
-// deletionGuard returns the before-action permanent-deletion gate. Human
-// confirmation runs through the interactive question service; without one the
+// deletionGuard returns the before-action permanent-deletion gate backed by
+// the administrator-owned approval service. Workspace JSON never authorizes it.
+// Human confirmation runs through the interactive question service; without one the
 // gate refuses permanent deletion rather than assuming approval.
 func (c *coordinator) deletionGuard() *deletionguard.Guard {
 	var confirmer deletionguard.Confirmer

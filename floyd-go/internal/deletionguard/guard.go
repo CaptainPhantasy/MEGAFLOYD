@@ -55,6 +55,12 @@ func NewGuard(dataDir string, confirmer Confirmer) *Guard {
 	return &Guard{ledger: NewLedger(dataDir), confirmer: confirmer, now: time.Now}
 }
 
+// NewGuardWithAuthority allows a trusted host to provide its protected authority.
+// The default runtime uses NewGuard and the fixed administrator-owned broker.
+func NewGuardWithAuthority(dataDir string, confirmer Confirmer, authority Authority) *Guard {
+	return &Guard{ledger: newLedgerWithAuthority(dataDir, authority), confirmer: confirmer, now: time.Now}
+}
+
 // SetConfirmer installs the human confirmation channel.
 func (g *Guard) SetConfirmer(confirmer Confirmer) {
 	if g != nil {
@@ -86,6 +92,10 @@ func (g *Guard) Check(ctx context.Context, sessionID, toolCallID string, classif
 		return decision
 	}
 
+	if err := inPlaceTargetIdentity(classification); err != nil {
+		decision.Reason = err.Error()
+		return decision
+	}
 	record, err := g.ledger.Read(sessionID)
 	if err != nil {
 		decision.Reason = "Permanent deletion is blocked because the session record cannot be read (" + err.Error() +
