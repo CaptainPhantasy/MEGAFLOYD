@@ -61,7 +61,10 @@ jobs:
         working-directory: floyd-go
         run: |
           set -euo pipefail
-          go test ./internal/agent/prompt/... ./internal/config/... ./internal/agent/... ./internal/deletionguard/... ./internal/approvalauthority/...
+          go test ./internal/agent/prompt/... ./internal/config/... ./internal/agent/... ./internal/deletionguard/... ./internal/approvalauthority/... ./internal/question/... ./internal/backend/... ./internal/app/... ./internal/server/...
+
+      - name: Verify protected approval authority across OS identities
+        run: bash scripts/verify-approval-authority-linux.sh
 
       - name: Check the comment-free packages
         working-directory: floyd-code

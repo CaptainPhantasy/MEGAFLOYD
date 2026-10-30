@@ -103,23 +103,7 @@ func CanonicalTargets(targets []string) []string {
 
 // ClassifyAll merges the effects of several commands from one tool call.
 func ClassifyAll(commands []string, workingDir string) Classification {
-	merged := Classification{Effect: EffectNone}
-	for _, command := range commands {
-		classification := Classify(command, workingDir)
-		merged.Targets = append(merged.Targets, classification.Targets...)
-		merged.Operations = mergeOperations(merged.Operations, classification.Operations)
-		merged.Recursive = merged.Recursive || classification.Recursive
-		if classification.Effect > merged.Effect {
-			merged.Effect = classification.Effect
-			merged.Command = classification.Command
-			merged.Reason = classification.Reason
-		}
-		if merged.Unresolved == "" {
-			merged.Unresolved = classification.Unresolved
-		}
-	}
-	merged.Targets = CanonicalTargets(merged.Targets)
-	return merged
+	return classifyCommands(commands, workingDir)
 }
 
 // ResolveTarget turns a shell operand into the absolute path a command acts

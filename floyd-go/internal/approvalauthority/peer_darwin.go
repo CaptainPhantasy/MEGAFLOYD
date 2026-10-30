@@ -96,7 +96,13 @@ func verifyPeerRuntime(pid int, path string) error {
 func peerExecutableHash(_ int, path string) (string, error) { return fileHash(path) }
 func prepareClientIdentity() error                          { return nil }
 
-func authenticatedReader(conn *net.UnixConn, _ identity) (io.Reader, error) { return conn, nil }
+// Darwin stream peer metadata cannot authenticate each message's actual
+// writer after descriptor inheritance. Never expose a raw accepted reader.
+func authenticatedReader(*net.UnixConn, identity) (io.Reader, error) {
+	return nil, ErrTransportUnavailable
+}
+
+func authorityTransportSupported() error { return ErrTransportUnavailable }
 
 // validateExecutable excludes hardened-runtime exceptions that would permit
 // loader injection or debugger control despite the runtime flag itself.

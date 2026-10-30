@@ -12,6 +12,7 @@ import (
 )
 
 func TestAuthorityLocalUnknownCannotAuthorizeWithoutBroker(t *testing.T) {
+	requireSupportedAuthorityTransport(t)
 	client, server := net.Pipe()
 	defer client.Close()
 	server.Close()
@@ -22,6 +23,7 @@ func TestAuthorityLocalUnknownCannotAuthorizeWithoutBroker(t *testing.T) {
 }
 
 func TestAuthorityRequiresBrokerPolicyProofBeforeSendingRequest(t *testing.T) {
+	requireSupportedAuthorityTransport(t)
 	for _, local := range []localPolicyStatus{localPolicyDeferred, localPolicyAbsent} {
 		client, server := net.Pipe()
 		defer client.Close()
@@ -36,6 +38,7 @@ func TestAuthorityRequiresBrokerPolicyProofBeforeSendingRequest(t *testing.T) {
 }
 
 func TestAuthorityRequiresFreshPolicyProofOnHistoryResponse(t *testing.T) {
+	requireSupportedAuthorityTransport(t)
 	for _, verified := range []bool{false, true} {
 		client, server := net.Pipe()
 		defer client.Close()

@@ -91,6 +91,7 @@ func TestAuthorityRejectsMalformedProtectedState(t *testing.T) {
 }
 
 func TestAuthorityRejectsUnpinnedSameUserPeer(t *testing.T) {
+	requireSupportedAuthorityTransport(t)
 	socket := filepath.Join(t.TempDir(), "s")
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
 	require.NoError(t, err)
@@ -114,6 +115,7 @@ func TestAuthorityRejectsUnpinnedSameUserPeer(t *testing.T) {
 }
 
 func TestAuthorityProtocolAuthenticatesBeforeReading(t *testing.T) {
+	requireSupportedAuthorityTransport(t)
 	socket := filepath.Join(t.TempDir(), "s")
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
 	require.NoError(t, err)
@@ -186,6 +188,7 @@ func TestAuthorityNamespaceIsBoundToKernelUID(t *testing.T) {
 }
 
 func TestAuthorityPreservesStaleSocketAndRestarts(t *testing.T) {
+	requireSupportedAuthorityTransport(t)
 	socket := filepath.Join(t.TempDir(), "socket")
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
 	require.NoError(t, err)
@@ -205,6 +208,7 @@ func TestAuthorityPreservesStaleSocketAndRestarts(t *testing.T) {
 }
 
 func TestAuthorityChallengeRejectsPrequeuedOrWrongNonce(t *testing.T) {
+	requireSupportedAuthorityTransport(t)
 	for _, prequeue := range []bool{false, true} {
 		t.Run(strconv.FormatBool(prequeue), func(t *testing.T) {
 			socket := filepath.Join(t.TempDir(), "s")
@@ -245,6 +249,7 @@ func TestAuthorityChallengeRejectsPrequeuedOrWrongNonce(t *testing.T) {
 }
 
 func TestAuthorityInheritedDescriptorHelper(t *testing.T) {
+	requireSupportedAuthorityTransport(t)
 	payload := os.Getenv("MEGAFLOYD_AUTHORITY_TEST_PAYLOAD")
 	if payload == "" {
 		return
@@ -258,6 +263,7 @@ func TestAuthorityInheritedDescriptorHelper(t *testing.T) {
 }
 
 func TestAuthorityRejectsInheritedDescriptorSender(t *testing.T) {
+	requireSupportedAuthorityTransport(t)
 	socket := filepath.Join(t.TempDir(), "s")
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
 	require.NoError(t, err)
@@ -294,4 +300,11 @@ func TestAuthorityRejectsInheritedDescriptorSender(t *testing.T) {
 	require.NotEmpty(t, result.Error)
 	<-done
 	require.Nil(t, s.apply(uint32(os.Getuid()), request{Operation: "read", Namespace: "n", Session: "s"}).Data)
+}
+
+func requireSupportedAuthorityTransport(t *testing.T) {
+	t.Helper()
+	if err := authorityTransportSupported(); err != nil {
+		t.Skip("supported approval transport required: " + err.Error())
+	}
 }

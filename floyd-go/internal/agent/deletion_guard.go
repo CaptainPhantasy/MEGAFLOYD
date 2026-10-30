@@ -259,8 +259,9 @@ func (c questionConfirmer) Confirm(ctx context.Context, req deletionguard.Confir
 		return false, errors.New("no question service is available")
 	}
 	answers, err := c.questions.Ask(ctx, question.Request{
-		SessionID:  req.SessionID,
-		ToolCallID: req.ToolCallID,
+		RequireLocalInput: true,
+		SessionID:         req.SessionID,
+		ToolCallID:        req.ToolCallID,
 		Questions: []question.Question{{
 			ID:          "deletion-confirmation-" + strconv.Itoa(req.Stage),
 			Type:        question.TypeYesNo,

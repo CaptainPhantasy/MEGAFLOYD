@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -18,13 +20,16 @@ var removalCommands = []string{"rm", "rmdir", "unlink", "shred", "srm", "wipe"}
 // removal always reports EffectPermanentDeletion even when its targets cannot
 // be proven, because an unproven target set can never satisfy the gate.
 func Classify(command, workingDir string) Classification {
+	return classifyCommand(&classifier{workingDir: workingDir}, command)
+}
+
+func classifyCommand(c *classifier, command string) Classification {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
-		// The interpreter rejects an unparsable command before it has any effect.
-		return Classification{Effect: EffectNone, Reason: "the shell cannot parse the command"}
+		// A shell may execute complete earlier lines before a later parse error.
+		return Classification{Effect: EffectPermanentDeletion, Unresolved: "the shell script cannot be fully inspected because parsing failed", Reason: "An incompletely parsed script cannot establish a safe target set."}
 	}
-	c := &classifier{workingDir: workingDir}
-	dir := workingDir
+	dir := c.workingDir
 	for _, stmt := range file.Stmts {
 		c.statement(stmt, &dir)
 	}
@@ -33,16 +38,79 @@ func Classify(command, workingDir string) Classification {
 
 // classifier collects the effects of one parsed command line.
 type classifier struct {
-	workingDir string
-	changedDir bool
-	effects    []Classification
+	workingDir       string
+	changedDir       bool
+	effects          []Classification
+	movePaths        []string
+	destructivePaths []string
 }
 
 func (c *classifier) add(effect Classification) {
 	if effect.Effect == EffectNone {
 		return
 	}
+	if effect.IsDestructive() {
+		if overlappingPaths(effect.Targets, c.movePaths) {
+			effect.Unresolved = "an earlier move changes a destructive target, so its original data cannot be identified safely"
+		}
+		c.destructivePaths = append(c.destructivePaths, effect.Targets...)
+	}
 	c.effects = append(c.effects, effect)
+}
+
+func overlappingPaths(one, two []string) bool {
+	if overlaps(one, two) || overlaps(two, one) {
+		return true
+	}
+	resolvedOne, resolvedTwo := statePaths(one), statePaths(two)
+	if overlaps(resolvedOne, resolvedTwo) || overlaps(resolvedTwo, resolvedOne) {
+		return true
+	}
+	// Case and Unicode aliases cannot establish disjoint state on every
+	// supported filesystem. Keep literal target identities unchanged, but
+	// conservatively reject these potentially overlapping move sequences.
+	fold := cases.Fold()
+	for i := range resolvedOne {
+		resolvedOne[i] = fold.String(norm.NFC.String(resolvedOne[i]))
+	}
+	for i := range resolvedTwo {
+		resolvedTwo[i] = fold.String(norm.NFC.String(resolvedTwo[i]))
+	}
+	return overlaps(resolvedOne, resolvedTwo) || overlaps(resolvedTwo, resolvedOne)
+}
+
+// statePaths resolves existing directory aliases for comparisons without
+// changing the literal target names or following a final symlink to its data.
+func statePaths(paths []string) []string {
+	resolved := make([]string, 0, len(paths))
+	for _, path := range paths {
+		parent, suffix := filepath.Dir(path), filepath.Base(path)
+		for {
+			if canonical, err := filepath.EvalSymlinks(parent); err == nil {
+				resolved = append(resolved, filepath.Join(canonical, suffix))
+				break
+			}
+			next := filepath.Dir(parent)
+			if next == parent {
+				resolved = append(resolved, path)
+				break
+			}
+			suffix, parent = filepath.Join(filepath.Base(parent), suffix), next
+		}
+	}
+	return resolved
+}
+
+// classifyCommands keeps directory scope independent for separate tool commands
+// but shares observed move effects, since all commands address one filesystem.
+func classifyCommands(commands []string, workingDir string) Classification {
+	combined := &classifier{workingDir: workingDir}
+	for _, command := range commands {
+		current := &classifier{workingDir: workingDir, movePaths: combined.movePaths, destructivePaths: combined.destructivePaths}
+		combined.effects = append(combined.effects, classifyCommand(current, command))
+		combined.movePaths, combined.destructivePaths = current.movePaths, current.destructivePaths
+	}
+	return combined.result()
 }
 
 func (c *classifier) result() Classification {
@@ -118,10 +186,7 @@ func (c *classifier) statement(stmt *syntax.Stmt, dir *string) {
 			c.statement(child, dir)
 		}
 	case *syntax.Subshell:
-		nested := *dir
-		for _, child := range command.Stmts {
-			c.statement(child, &nested)
-		}
+		c.localDirectoryStatements(command.Stmts, *dir)
 	case *syntax.IfClause, *syntax.WhileClause, *syntax.ForClause,
 		*syntax.CaseClause, *syntax.FuncDecl, *syntax.ArithmCmd,
 		*syntax.TestClause, *syntax.DeclClause, *syntax.LetClause,
@@ -142,6 +207,14 @@ func (c *classifier) statement(stmt *syntax.Stmt, dir *string) {
 // Each child statement is owned by statement, avoiding duplicate traversal.
 func (c *classifier) nestedStatements(node syntax.Node, dir string) {
 	syntax.Walk(node, func(child syntax.Node) bool {
+		switch substitution := child.(type) {
+		case *syntax.CmdSubst:
+			c.localDirectoryStatements(substitution.Stmts, dir)
+			return false
+		case *syntax.ProcSubst:
+			c.localDirectoryStatements(substitution.Stmts, dir)
+			return false
+		}
 		if stmt, ok := child.(*syntax.Stmt); ok {
 			nested := dir
 			c.statement(stmt, &nested)
@@ -149,6 +222,23 @@ func (c *classifier) nestedStatements(node syntax.Node, dir string) {
 		}
 		return true
 	})
+}
+
+// localDirectoryStatements shares filesystem effects but restores the outer
+// directory proof: a subshell cannot change its caller's working directory.
+func (c *classifier) localDirectoryStatements(statements []*syntax.Stmt, dir string) {
+	outerChanged, start := c.changedDir, len(c.effects)
+	for _, statement := range statements {
+		c.statement(statement, &dir)
+	}
+	if c.changedDir {
+		for i := start; i < len(c.effects); i++ {
+			if c.effects[i].IsDestructive() && c.effects[i].Unresolved == "" {
+				c.effects[i].Unresolved = "a directory change makes the nested destructive target state unprovable"
+			}
+		}
+	}
+	c.changedDir = outerChanged
 }
 
 func (c *classifier) unresolved(reason string) {
@@ -172,6 +262,10 @@ func (c *classifier) redirect(stmt *syntax.Stmt, dir string) {
 			continue
 		}
 		if name == "/dev/null" {
+			continue
+		}
+		if c.changedDir && !filepath.IsAbs(name) {
+			c.unresolved("a directory change makes the redirect destination state unprovable")
 			continue
 		}
 		target, err := c.resolve(dir, name)
@@ -460,6 +554,14 @@ func (c *classifier) move(args []string, complete bool, dir string) {
 		c.unresolved("the move has no exact source or destination")
 		return
 	}
+	if c.changedDir {
+		for _, path := range append([]string{destination}, sources...) {
+			if !filepath.IsAbs(path) {
+				c.unresolved("a directory change makes the move source or destination state unprovable")
+				return
+			}
+		}
+	}
 	target, err := c.resolve(dir, destination)
 	if err != nil {
 		c.unresolved("the move destination cannot be resolved")
@@ -475,7 +577,7 @@ func (c *classifier) move(args []string, complete bool, dir string) {
 		c.unresolved("the move needs a verified destination directory")
 		return
 	}
-	var overwritten, moved []string
+	var overwritten, moved, affected []string
 	operations := make(map[string]string)
 	seen := make(map[string]bool)
 	for _, source := range sources {
@@ -489,6 +591,12 @@ func (c *classifier) move(args []string, complete bool, dir string) {
 		if intoDirectory {
 			effective = filepath.Join(target, filepath.Base(filepath.Clean(source)))
 		}
+		paths := []string{sourcePath, effective}
+		if overlappingPaths(paths, c.movePaths) || overlappingPaths(paths, c.destructivePaths) {
+			c.unresolved("an earlier operation changes a move source or destination, so overwritten data cannot be identified safely")
+			return
+		}
+		affected = append(affected, paths...)
 		_, err = os.Lstat(effective)
 		if err != nil && !os.IsNotExist(err) {
 			c.unresolved("a move destination cannot be inspected")
@@ -509,9 +617,11 @@ func (c *classifier) move(args []string, complete bool, dir string) {
 	}
 	if len(overwritten) > 0 {
 		c.add(Classification{Effect: EffectPermanentDeletion, Command: "mv", Targets: overwritten, Operations: operations, Reason: "The move replaces existing destination data."})
+		c.movePaths = append(c.movePaths, affected...)
 		return
 	}
 	c.add(Classification{Effect: EffectQuarantine, Command: "mv", Targets: moved, Reason: "The command moves data to " + target + "; a later move can restore it."})
+	c.movePaths = append(c.movePaths, affected...)
 }
 
 // wrapper consumes only documented options whose effect is understood. Unknown
@@ -936,10 +1046,12 @@ func (c *classifier) shellCommand(args []string, complete bool, dir string) {
 		if nestedDir == "" {
 			nestedDir = c.workingDir
 		}
-		nested := Classify(args[i+1], nestedDir)
-		if nested.IsDestructive() {
-			c.add(nested)
+		script, err := syntax.NewParser().Parse(strings.NewReader(args[i+1]), "")
+		if err != nil {
+			c.unresolved("the nested shell script cannot be parsed")
+			return
 		}
+		c.localDirectoryStatements(script.Stmts, nestedDir)
 		return
 	}
 }

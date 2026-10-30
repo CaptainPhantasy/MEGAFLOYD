@@ -20,6 +20,10 @@ import (
 	"time"
 )
 
+// ErrTransportUnavailable reports a platform without authenticated request
+// sender credentials. No socket or approval record is used in this state.
+var ErrTransportUnavailable = errors.New("protected approval authority transport is unsupported on this platform; use quarantine")
+
 const maxMessage = 4 << 20
 
 // Executable is an administrator-pinned, immutable engine image.
@@ -84,6 +88,9 @@ func (c *Client) CompareAndSwap(ctx context.Context, namespace, session string, 
 
 func (c *Client) exchange(ctx context.Context, req request) (response, error) {
 	var result response
+	if err := authorityTransportSupported(); err != nil {
+		return result, err
+	}
 	if err := clientIdentityError; err != nil {
 		return result, err
 	}
@@ -128,6 +135,9 @@ func (c *Client) exchange(ctx context.Context, req request) (response, error) {
 // exchangeAuthenticated is called only after kernel root-peer verification.
 func exchangeAuthenticated(conn net.Conn, req request, localPolicy localPolicyStatus) (response, error) {
 	var result response
+	if err := authorityTransportSupported(); err != nil {
+		return result, err
+	}
 	var greeting challenge
 	if err := json.NewDecoder(io.LimitReader(conn, maxMessage)).Decode(&greeting); err != nil {
 		return result, err
@@ -167,6 +177,9 @@ type server struct {
 // allowed engine account; all pinned code and service paths must be immutable
 // to those engine accounts. Unsupported peer-authentication platforms refuse.
 func Serve(ctx context.Context, config Config) error {
+	if err := authorityTransportSupported(); err != nil {
+		return err
+	}
 	if err := validateConfig(config); err != nil {
 		return err
 	}
@@ -184,6 +197,9 @@ func Serve(ctx context.Context, config Config) error {
 }
 
 func (s *server) serve(ctx context.Context) error {
+	if err := authorityTransportSupported(); err != nil {
+		return err
+	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: s.config.SocketPath, Net: "unix"})
 	if err != nil {
 		return err
@@ -213,6 +229,9 @@ func (s *server) serve(ctx context.Context) error {
 }
 
 func (s *server) handle(conn *net.UnixConn) {
+	if authorityTransportSupported() != nil {
+		return
+	}
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	peer, err := peerIdentity(conn)
 	if err != nil {

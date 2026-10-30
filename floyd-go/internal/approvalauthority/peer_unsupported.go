@@ -35,3 +35,5 @@ func validateLocalEngineAccount() (localPolicyStatus, error) {
 func validateEffectiveAccess(Config, uint32) error { return unsupported() }
 
 func validateNativeACL([]pathAccess) error { return unsupported() }
+
+func authorityTransportSupported() error { return ErrTransportUnavailable }

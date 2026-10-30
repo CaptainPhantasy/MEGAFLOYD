@@ -138,3 +138,5 @@ func validateExecutable(path string) error {
 	}
 	return nil
 }
+
+func authorityTransportSupported() error { return nil }
