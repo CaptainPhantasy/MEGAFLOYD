@@ -120,3 +120,37 @@ func TestDeletionLaunchWrappersCannotHideCommand(t *testing.T) {
 		require.NotEmpty(t, classification.Unresolved, command)
 	}
 }
+
+func TestDeletionXargsOptionalArgumentsPreserveChild(t *testing.T) {
+	t.Parallel()
+	for _, options := range []string{
+		`--eof`, `--replace`, `--max-lines`,
+		`--eof=STOP`, `--replace='{}'`, `--max-lines=1`,
+		`-e`, `-i`, `-l`, `-eSTOP`, `-i'{}'`, `-l1`,
+		`-E STOP`, `-I '{}'`, `-L 1`, `-ESTOP`, `-I'{}'`, `-L1`,
+	} {
+		t.Run(options, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			command := `printf victim | xargs ` + options + ` rm '{}'`
+			classification := Classify(command, dir)
+			require.True(t, classification.IsDestructive(), command)
+			require.NotEmpty(t, classification.Unresolved, command)
+			require.False(t, NewGuard(t.TempDir(), nil).Check(t.Context(), "s", "xargs", classification).Allowed)
+			require.False(t, Classify(`printf safe | xargs `+options+` echo '{}'`, dir).IsDestructive())
+		})
+	}
+	for _, command := range []string{
+		`printf victim | xargs --eof rm`,
+		`printf victim | xargs --replace rm {}`,
+		`printf victim | xargs --eof="$marker" rm`,
+		`printf victim | xargs -I "$marker" rm {}`,
+	} {
+		t.Run(command, func(t *testing.T) {
+			t.Parallel()
+			classification := Classify(command, t.TempDir())
+			require.True(t, classification.IsDestructive())
+			require.NotEmpty(t, classification.Unresolved)
+		})
+	}
+}

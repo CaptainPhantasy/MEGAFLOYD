@@ -20,21 +20,32 @@ import (
 
 // Approval binds the original human answers to the operation and target bytes.
 type Approval struct {
-	TargetSet  string            `json:"target_set"`
-	Targets    []string          `json:"targets"`
-	Command    string            `json:"command"`
-	Recursive  bool              `json:"recursive"`
-	Snapshots  map[string]string `json:"snapshots"`
-	Operations map[string]string `json:"operations,omitempty"`
+	TargetSet  string                `json:"target_set"`
+	Targets    []string              `json:"targets"`
+	Command    string                `json:"command"`
+	Recursive  bool                  `json:"recursive"`
+	Snapshots  map[string]string     `json:"snapshots"`
+	Operations map[string]string     `json:"operations,omitempty"`
+	Moves      map[string]MoveSource `json:"moves,omitempty"`
+}
+
+// MoveSource binds the incoming entry before approval and launch. Relocated
+// omits location, inode and timestamps so copied entries can also be verified.
+// Identity still binds the original source entry before the tool may launch.
+type MoveSource struct {
+	Path      string `json:"path"`
+	Identity  string `json:"identity"`
+	Relocated string `json:"relocated"`
 }
 
 // Attempt records both launch and outcome so a restart cannot assume success.
 type Attempt struct {
-	ToolCallID  string   `json:"tool_call_id"`
-	ApprovalSet string   `json:"approval_set"`
-	Targets     []string `json:"targets"`
-	State       string   `json:"state"`
-	RecordedAt  string   `json:"recorded_at"`
+	ToolCallID  string                `json:"tool_call_id"`
+	ApprovalSet string                `json:"approval_set"`
+	Targets     []string              `json:"targets"`
+	State       string                `json:"state"`
+	RecordedAt  string                `json:"recorded_at"`
+	Moves       map[string]MoveSource `json:"moves,omitempty"`
 }
 
 func snapshotTargets(targets []string) (map[string]string, error) {
@@ -50,6 +61,10 @@ func snapshotTargets(targets []string) (map[string]string, error) {
 }
 
 func snapshot(target string) (string, error) {
+	return snapshotEntry(target, true)
+}
+
+func snapshotEntry(target string, bindParent bool) (string, error) {
 	if _, err := os.Lstat(target); errors.Is(err, os.ErrNotExist) {
 		return "absent", nil
 	} else if err != nil {
@@ -60,7 +75,9 @@ func snapshot(target string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Fprintln(hash, parent)
+	if bindParent {
+		fmt.Fprintln(hash, parent)
+	}
 	err = filepath.Walk(target, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -80,7 +97,17 @@ func snapshot(target string) (string, error) {
 				ino = v.Interface()
 			}
 		}
-		metadata, _ := json.Marshal([]any{rel, info.Mode().String(), info.Size(), info.ModTime().UnixNano(), dev, ino})
+		metadataFields := []any{rel, info.Mode().String(), info.Size(), info.ModTime().UnixNano(), dev, ino}
+		if !bindParent {
+			// mv across filesystems copies payload and type, then unlinks the source.
+			// Inodes and directory allocation sizes necessarily change in that case.
+			var size int64
+			if info.Mode().IsRegular() {
+				size = info.Size()
+			}
+			metadataFields = []any{rel, info.Mode().String(), size}
+		}
+		metadata, _ := json.Marshal(metadataFields)
 		hash.Write(metadata)
 		if info.Mode().IsRegular() {
 			f, err := os.Open(path)
@@ -119,6 +146,9 @@ func sameOperation(a Approval, c Classification) bool {
 		}
 	}
 	for _, target := range c.Targets {
+		if source, move := moveSource(target, c.Operations[target]); move && (a.Moves[target].Path != source || a.Moves[target].Identity == "" || a.Moves[target].Relocated == "") {
+			return false
+		}
 		if a.Operations[target] == "" || a.Operations[target] != c.Operations[target] {
 			return false
 		}
@@ -185,7 +215,7 @@ func reusableApproval(record Record, c Classification) (Approval, bool) {
 		valid := true
 		for _, target := range remaining {
 			now, err := snapshot(target)
-			if err != nil || a.Snapshots[target] == "" || now != a.Snapshots[target] {
+			if err != nil || a.Snapshots[target] == "" || now != a.Snapshots[target] || !unchangedMoveSource(a, target) {
 				valid = false
 				break
 			}
@@ -240,6 +270,10 @@ func recoveryDenial(record Record, c Classification) string {
 }
 
 func (g *Guard) saveApproval(sessionID string, c Classification, snapshots map[string]string) error {
+	moves, err := captureMoveSources(c)
+	if err != nil {
+		return err
+	}
 	for target, before := range snapshots {
 		after, err := snapshot(target)
 		if err != nil {
@@ -261,14 +295,14 @@ func (g *Guard) saveApproval(sessionID string, c Classification, snapshots map[s
 				return errors.New("operation changed after approval")
 			}
 			for target, before := range a.Snapshots {
-				if snapshots[target] != before {
+				if snapshots[target] != before || !reflect.DeepEqual(moves[target], a.Moves[target]) {
 					return errors.New("target changed after approval")
 				}
 			}
 			return nil
 		}
 	}
-	record.Approvals = append(record.Approvals, Approval{TargetSet: c.Digest(), Targets: CanonicalTargets(c.Targets), Command: c.Command, Recursive: c.Recursive, Snapshots: snapshots, Operations: c.Operations})
+	record.Approvals = append(record.Approvals, Approval{TargetSet: c.Digest(), Targets: CanonicalTargets(c.Targets), Command: c.Command, Recursive: c.Recursive, Snapshots: snapshots, Operations: c.Operations, Moves: moves})
 	return g.ledger.write(sessionID, record)
 }
 
@@ -296,7 +330,7 @@ func (g *Guard) BeginExecution(sessionID string, c Classification, callID string
 	if !ok {
 		return fmt.Errorf("%w: the original target identity and operation are not verified", ErrNotConfirmed)
 	}
-	record.Attempts = append(record.Attempts, Attempt{ToolCallID: callID, ApprovalSet: approval.TargetSet, Targets: c.Targets, State: "started", RecordedAt: recordedAt})
+	record.Attempts = append(record.Attempts, Attempt{ToolCallID: callID, ApprovalSet: approval.TargetSet, Targets: c.Targets, State: "started", RecordedAt: recordedAt, Moves: approval.Moves})
 	return g.ledger.write(sessionID, record)
 }
 
@@ -313,6 +347,7 @@ func (g *Guard) RecordOutcome(sessionID string, c Classification, callID string,
 		return ErrNotConfirmed
 	}
 	started := false
+	var launchedMoves map[string]MoveSource
 	for _, attempt := range record.Attempts {
 		if attempt.ToolCallID != callID {
 			continue
@@ -322,6 +357,7 @@ func (g *Guard) RecordOutcome(sessionID string, c Classification, callID string,
 		}
 		if attempt.State == "started" && attempt.ApprovalSet == a.TargetSet && slices.Equal(CanonicalTargets(attempt.Targets), CanonicalTargets(c.Targets)) {
 			started = true
+			launchedMoves = attempt.Moves
 		}
 	}
 	if !started {
@@ -345,7 +381,13 @@ func (g *Guard) RecordOutcome(sessionID string, c Classification, callID string,
 			continue
 		}
 		if !c.RemovesTarget(target) {
-			proven, err := inPlacePostcondition(target, c.Operations[target])
+			proven, err := movePostcondition(target, c.Operations[target], launchedMoves[target])
+			if err != nil {
+				return err
+			}
+			if !proven {
+				proven, err = inPlacePostcondition(target, c.Operations[target])
+			}
 			if err != nil {
 				return err
 			}
@@ -365,6 +407,23 @@ func (g *Guard) RecordOutcome(sessionID string, c Classification, callID string,
 	}
 	if toolFinished {
 		for _, target := range c.Targets {
+			if _, move := moveSource(target, c.Operations[target]); move {
+				proven, err := movePostcondition(target, c.Operations[target], launchedMoves[target])
+				if err != nil {
+					return err
+				}
+				if proven {
+					completed = append(completed, target)
+				} else {
+					current, err := snapshot(target)
+					if err != nil {
+						return err
+					}
+					if current != a.Snapshots[target] || !unchangedMoveSource(a, target) {
+						uncertain = true
+					}
+				}
+			}
 			if c.RemovesTarget(target) && a.Snapshots[target] != "" && a.Snapshots[target] != "absent" {
 				current, err := snapshot(target)
 				if err != nil {
@@ -462,7 +521,7 @@ func inPlacePostcondition(target, signature string) (bool, error) {
 // link itself. A link-only fingerprint cannot approve changing referent data.
 func inPlaceTargetIdentity(c Classification) error {
 	for _, target := range c.Targets {
-		if c.RemovesTarget(target) {
+		if _, move := moveSource(target, c.Operations[target]); c.RemovesTarget(target) || move {
 			continue
 		}
 		info, err := os.Lstat(target)
@@ -477,4 +536,80 @@ func inPlaceTargetIdentity(c Classification) error {
 		}
 	}
 	return nil
+}
+
+// moveSource accepts one classifier-owned move descriptor, whose final operands
+// are the canonical source and effective destination (including directory moves).
+func moveSource(target, signature string) (string, bool) {
+	var operations [][]string
+	if json.Unmarshal([]byte(signature), &operations) != nil || len(operations) != 1 {
+		return "", false
+	}
+	operation := operations[0]
+	if len(operation) < 3 || filepath.Base(operation[0]) != "mv" || operation[len(operation)-1] != target {
+		return "", false
+	}
+	source := operation[len(operation)-2]
+	if !filepath.IsAbs(source) || !filepath.IsAbs(target) || source == target {
+		return "", false
+	}
+	return source, true
+}
+
+func captureMoveSources(c Classification) (map[string]MoveSource, error) {
+	var moves map[string]MoveSource
+	for _, target := range c.Targets {
+		source, move := moveSource(target, c.Operations[target])
+		if !move {
+			continue
+		}
+		identity, err := snapshot(source)
+		if err != nil {
+			return nil, err
+		}
+		if identity == "absent" {
+			return nil, errors.New("move source is absent; its replacement cannot be verified")
+		}
+		relocated, err := snapshotEntry(source, false)
+		if err != nil {
+			return nil, err
+		}
+		if moves == nil {
+			moves = make(map[string]MoveSource)
+		}
+		moves[target] = MoveSource{Path: source, Identity: identity, Relocated: relocated}
+	}
+	return moves, nil
+}
+
+func unchangedMoveSource(a Approval, target string) bool {
+	source, move := moveSource(target, a.Operations[target])
+	if !move {
+		return true
+	}
+	before := a.Moves[target]
+	if before.Path != source || before.Identity == "" || before.Relocated == "" {
+		return false
+	}
+	now, err := snapshot(source)
+	if err != nil || now != before.Identity {
+		return false
+	}
+	relocated, err := snapshotEntry(source, false)
+	return err == nil && relocated == before.Relocated
+}
+
+func movePostcondition(target, signature string, before MoveSource) (bool, error) {
+	source, move := moveSource(target, signature)
+	if !move || before.Path != source || before.Identity == "" || before.Relocated == "" {
+		return false, nil
+	}
+	if _, err := os.Lstat(source); !errors.Is(err, os.ErrNotExist) {
+		if err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	after, err := snapshotEntry(target, false)
+	return err == nil && after != "absent" && after == before.Relocated, err
 }

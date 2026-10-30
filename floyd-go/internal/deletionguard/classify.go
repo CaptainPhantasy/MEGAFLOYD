@@ -994,7 +994,14 @@ func (c *classifier) xargs(args []string, complete bool, dir string) {
 			i++
 			continue
 		}
-		if slices.Contains([]string{"-a", "--arg-file", "-d", "--delimiter", "-E", "--eof", "-I", "--replace", "-L", "--max-lines", "-n", "--max-args", "-P", "--max-procs", "-s", "--max-chars"}, arg) {
+		// GNU optional values belong to this token (long =value or short
+		// attached value). A bare optional flag must leave the child intact.
+		if slices.Contains([]string{"--eof", "--replace", "--max-lines"}, arg) ||
+			(len(arg) >= 2 && !strings.HasPrefix(arg, "--") && strings.ContainsRune("eil", rune(arg[1]))) {
+			i++
+			continue
+		}
+		if slices.Contains([]string{"-a", "--arg-file", "-d", "--delimiter", "-E", "-I", "-L", "-n", "--max-args", "-P", "--max-procs", "-s", "--max-chars"}, arg) {
 			if i+1 >= len(args) {
 				c.unresolved("an xargs option value is missing")
 				return

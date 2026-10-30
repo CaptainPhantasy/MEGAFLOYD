@@ -181,8 +181,43 @@ function canonicalPath(value) {
 /** The default private-store marker; an explicitly configured home takes precedence. */
 const CANONICAL_DATA_DIR_NAME = '.megafloyd';
 
-function isCanonicalDataDir(value, homeDir) {
+/** Match Go's versioned, per-account registry by the resolved workspace key. */
+function isRegisteredWorkspaceDataDir(value, homeDir, workspace) {
+  if (!homeDir || !workspace) return false;
+  let descriptor;
+  try {
+    const cwd = fs.realpathSync(workspace);
+    const registryPath = path.join(homeDir, 'state', 'workspace-data.json');
+    descriptor = fs.openSync(registryPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0));
+    const info = fs.fstatSync(descriptor);
+    const maxBytes = 1024 * 1024;
+    if (!info.isFile() || info.size > maxBytes ||
+      (typeof process.getuid === 'function' && info.uid !== process.getuid())) return false;
+    const bytes = Buffer.alloc(maxBytes + 1);
+    let size = 0;
+    while (size < bytes.length) {
+      const read = fs.readSync(descriptor, bytes, size, bytes.length - size, null);
+      if (read === 0) break;
+      size += read;
+    }
+    if (size > maxBytes) return false;
+    const registry = JSON.parse(bytes.subarray(0, size).toString('utf8'));
+    if (registry?.version !== 1 || !registry.workspaces ||
+      typeof registry.workspaces !== 'object' || Array.isArray(registry.workspaces) ||
+      !Object.hasOwn(registry.workspaces, cwd)) return false;
+    const selected = registry.workspaces[cwd];
+    return typeof selected === 'string' && path.isAbsolute(selected) &&
+      canonicalPath(selected) === canonicalPath(value);
+  } catch {
+    return false;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
+function isCanonicalDataDir(value, homeDir, workspace) {
   if (homeDir) {
+    if (isRegisteredWorkspaceDataDir(value, homeDir, workspace)) return true;
     const root = canonicalPath(path.join(homeDir, 'data'));
     const candidate = canonicalPath(value);
     const relative = path.relative(root, candidate);
@@ -217,13 +252,13 @@ export async function fetchRuntime({
       if (!envelope.ok) return envelope;
       const runtime = envelope.data;
       // A caller that names a workspace but no store has not said which store to
-      // trust, so use the explicitly configured MegaFloyd home or the default
-      // native store. A legacy `.floyd` store is never adopted implicitly.
+      // trust, so use the active home's private workspace binding or native
+      // store. A legacy `.floyd` store is never adopted implicitly.
       const dataDirMismatch =
         workspace && typeof runtime.data_dir === 'string'
           ? dataDir
             ? canonicalPath(runtime.data_dir) !== canonicalPath(dataDir)
-            : !isCanonicalDataDir(runtime.data_dir, homeDir)
+            : !isCanonicalDataDir(runtime.data_dir, homeDir, workspace)
           : false;
       if (
         runtime.engine !== 'go' ||
@@ -263,7 +298,7 @@ export async function fetchStartupMeta({ url, workspace, dataDir, host, homeDir,
     const target = await requestHandoff(url, sessionID, { fetchImpl });
     if (canonicalPath(target.cwd) !== canonicalPath(workspace)) throw new Error('Handoff selected a different workspace');
     if (typeof target.data_dir !== 'string' || !path.isAbsolute(target.data_dir) ||
-      (dataDir ? canonicalPath(target.data_dir) !== canonicalPath(dataDir) : !isCanonicalDataDir(target.data_dir, homeDir))) {
+      (dataDir ? canonicalPath(target.data_dir) !== canonicalPath(dataDir) : !isCanonicalDataDir(target.data_dir, homeDir, workspace))) {
       throw new Error('Handoff selected a different workspace store');
     }
     if (target.host !== runtime.data.host || (host && target.host !== host)) throw new Error('Handoff selected a different Go host');
