@@ -241,7 +241,15 @@ func TestAuthorityChallengeRejectsPrequeuedOrWrongNonce(t *testing.T) {
 			}
 			var result response
 			require.NoError(t, decoder.Decode(&result))
-			require.Contains(t, result.Error, "rejected request sender")
+			if prequeue {
+				// Linux may reject bytes queued before SO_PASSCRED was enabled
+				// at the credential reader, before the nonce can be inspected.
+				require.Contains(t, []string{"invalid approval authority request", "approval authority rejected request sender"}, result.Error)
+			} else {
+				require.Equal(t, "approval authority rejected request sender", result.Error)
+			}
+			require.Zero(t, result.Revision)
+			require.Empty(t, result.Data)
 			<-done
 			require.Nil(t, s.apply(uint32(os.Getuid()), request{Operation: "read", Namespace: "n", Session: "s"}).Data)
 		})
