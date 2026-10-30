@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { requestHandoff, sessionFromURL } from './navigation.mjs';
 
 export const EXPECTED_ENGINE_MAJOR = 2;
 
@@ -131,6 +132,7 @@ export async function fetchMeta({
   token,
   workspace,
   dataDir,
+  homeDir,
   fetchImpl = fetch,
   attempts = 3,
   retryDelayMs = 250,
@@ -152,7 +154,7 @@ export async function fetchMeta({
       if (!envelope.ok) return envelope;
       const meta = interpretMeta(envelope.data);
       if (!meta.ok || workspace === undefined) return meta;
-      const runtime = await fetchRuntime({ port, token, workspace, dataDir, fetchImpl, attempts, retryDelayMs });
+      const runtime = await fetchRuntime({ port, token, workspace, dataDir, homeDir, fetchImpl, attempts, retryDelayMs });
       return runtime.ok
         ? { ...meta, runtime: runtime.data }
         : { ...meta, ok: false, error: runtime.error };
@@ -176,10 +178,16 @@ function canonicalPath(value) {
   }
 }
 
-/** The native private store: a `.megafloyd` directory, never the legacy `.floyd`. */
+/** The default private-store marker; an explicitly configured home takes precedence. */
 const CANONICAL_DATA_DIR_NAME = '.megafloyd';
 
-function isCanonicalDataDir(value) {
+function isCanonicalDataDir(value, homeDir) {
+  if (homeDir) {
+    const root = canonicalPath(path.join(homeDir, 'data'));
+    const candidate = canonicalPath(value);
+    const relative = path.relative(root, candidate);
+    return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+  }
   return path.resolve(value).split(path.sep).includes(CANONICAL_DATA_DIR_NAME);
 }
 
@@ -190,6 +198,7 @@ export async function fetchRuntime({
   workspace,
   dataDir,
   workspaceId,
+  homeDir,
   host,
   timeoutMs = 3000,
   fetchImpl = fetch,
@@ -208,13 +217,13 @@ export async function fetchRuntime({
       if (!envelope.ok) return envelope;
       const runtime = envelope.data;
       // A caller that names a workspace but no store has not said which store to
-      // trust, so only the native `.megafloyd` store may be adopted. A legacy
-      // `.floyd` directory is never accepted implicitly (private-data guard).
+      // trust, so use the explicitly configured MegaFloyd home or the default
+      // native store. A legacy `.floyd` store is never adopted implicitly.
       const dataDirMismatch =
         workspace && typeof runtime.data_dir === 'string'
           ? dataDir
             ? canonicalPath(runtime.data_dir) !== canonicalPath(dataDir)
-            : !isCanonicalDataDir(runtime.data_dir)
+            : !isCanonicalDataDir(runtime.data_dir, homeDir)
           : false;
       if (
         runtime.engine !== 'go' ||
@@ -238,4 +247,29 @@ export async function fetchRuntime({
     }
   }
   return { ok: false, error: `runtime probe failed: ${lastError?.message ?? 'unknown error'}` };
+}
+
+
+/** Validate the selected handoff without confusing it with the adapter's primary workspace. */
+export async function fetchStartupMeta({ url, workspace, dataDir, host, homeDir, fetchImpl = fetch, attempts = 3, retryDelayMs = 250 }) {
+  const port = Number(new URL(url).port);
+  const token = tokenFromUrl(url);
+  const meta = await fetchMeta({ port, token, fetchImpl, attempts, retryDelayMs });
+  if (!meta.ok) return meta;
+  const runtime = await fetchRuntime({ port, token, host, fetchImpl, attempts, retryDelayMs });
+  if (!runtime.ok) return { ...meta, ok: false, error: runtime.error };
+  try {
+    const sessionID = sessionFromURL(url);
+    const target = await requestHandoff(url, sessionID, { fetchImpl });
+    if (canonicalPath(target.cwd) !== canonicalPath(workspace)) throw new Error('Handoff selected a different workspace');
+    if (typeof target.data_dir !== 'string' || !path.isAbsolute(target.data_dir) ||
+      (dataDir ? canonicalPath(target.data_dir) !== canonicalPath(dataDir) : !isCanonicalDataDir(target.data_dir, homeDir))) {
+      throw new Error('Handoff selected a different workspace store');
+    }
+    if (target.host !== runtime.data.host || (host && target.host !== host)) throw new Error('Handoff selected a different Go host');
+    if (sessionID && target.session_id !== sessionID) throw new Error('Handoff selected a different session');
+    return { ...meta, runtime: runtime.data, handoff: target };
+  } catch (error) {
+    return { ...meta, ok: false, error: `handoff probe failed: ${error?.message ?? error}` };
+  }
 }

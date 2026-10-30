@@ -167,7 +167,7 @@ test('shared adapter startup accepts its actual registered port and desktop rele
     'node:net': { default: { createServer: () => ({ unref() {}, once() {}, listen(_port, _host, done) { done(); }, address: () => ({ port: 58627 }), close: done => done() }) } },
     'node:os': { default: { homedir: () => '/fixture/home' } }, 'node:path': { default: path },
     './config.mjs': { DEFAULT_PORT: 58627, ENGINE_START_TIMEOUT_MS: 1000, ENGINE_STOP_TIMEOUT_MS: 100, HOME_DIR: '/fixture/home', WEB_BUNDLE_DIR: '/fixture/web-ui', WEB_SCRIPT: '/fixture/main.mjs', megafloydBinaryCandidates: () => [], nodeWrapperCandidates: () => [] },
-    './meta.mjs': { fetchMeta: async value => { metaPorts.push(value); return { ok: true, warnings: [], runtime: { host, cwd: '/fixture/different-primary-workspace' } }; }, fetchRuntime: async () => ({ ok: true }), handoffUrlFromLine, tokenFromUrl: () => null },
+    './meta.mjs': { fetchStartupMeta: async value => { metaPorts.push(value); return { ok: true, warnings: [], runtime: { host, cwd: '/fixture/different-primary-workspace' }, handoff: { cwd: '/fixture/workspace', data_dir: '/fixture/custom-state', host, session_id: 'actual' } }; }, fetchRuntime: async () => ({ ok: true }), handoffUrlFromLine, tokenFromUrl: () => null },
     './process-owner.mjs': { findOwnedListener: async () => null },
     './redact.mjs': { redactSecrets: value => value },
     './navigation.mjs': { sessionFromURL: () => 'actual', requestHandoff: async () => ({ cwd: '/fixture/workspace', data_dir: '/fixture/custom-state', host, session_id: 'actual' }) },
@@ -184,7 +184,7 @@ test('shared adapter startup accepts its actual registered port and desktop rele
   child.stdout.emit('data', 'Web UI: http://127.0.0.1:57876/sessions/actual\n');
   await tick();
   assert.equal(engine.snapshot().port, 57876, 'registered adapter port wins over a newly reserved free port');
-  assert.equal(metaPorts[0].port, 57876);
+  assert.equal(Number(new URL(metaPorts[0].url).port), 57876);
   assert.equal(metaPorts[0].workspace, '/fixture/workspace', 'the handshake proves the selected workspace');
   assert.equal(metaPorts[0].dataDir, '/fixture/custom-state', 'the handshake proves the selected store');
   assert.equal(engine.snapshot().handoff.data_dir, '/fixture/custom-state');

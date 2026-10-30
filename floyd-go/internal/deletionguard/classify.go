@@ -163,7 +163,7 @@ func (c *classifier) unresolved(reason string) {
 // content; ">>" appends and keeps the prior bytes.
 func (c *classifier) redirect(stmt *syntax.Stmt, dir string) {
 	for _, redir := range stmt.Redirs {
-		if redir.Op != syntax.RdrOut && redir.Op != syntax.ClbOut {
+		if redir.Op != syntax.RdrOut && redir.Op != syntax.RdrClob {
 			continue
 		}
 		name, ok := literalWord(redir.Word)
@@ -182,7 +182,7 @@ func (c *classifier) redirect(stmt *syntax.Stmt, dir string) {
 		producer := *stmt
 		producer.Redirs = nil
 		for _, input := range stmt.Redirs {
-			if input.Op != syntax.RdrOut && input.Op != syntax.ClbOut {
+			if input.Op != syntax.RdrOut && input.Op != syntax.RdrClob {
 				producer.Redirs = append(producer.Redirs, input)
 			}
 		}
@@ -272,7 +272,7 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 		defer func() {
 			for i := start; i < len(c.effects); i++ {
 				effect := &c.effects[i]
-				if effect.Effect != EffectPermanentDeletion {
+				if effect.Effect != EffectPermanentDeletion || effect.Operations != nil {
 					continue
 				}
 				effect.Operations = make(map[string]string, len(effect.Targets))
@@ -291,9 +291,7 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 	}
 	switch name {
 	case "sudo", "doas", "nohup", "time":
-		if len(args) > 1 {
-			c.command(args[1:], complete, dir)
-		}
+		c.wrapper(args, complete, dir)
 	case "command", "builtin", "exec":
 		nested := args[1:]
 		if name == "command" && len(nested) > 0 && (nested[0] == "-v" || nested[0] == "-V") {
@@ -377,57 +375,257 @@ func (c *classifier) removal(command string, paths []string, recursive, complete
 	c.add(effect)
 }
 
-// move classifies a move as quarantine. A move onto an existing file destroys
-// that file's content, so only the overwritten destination is permanent.
+// move checks the effective destination for every source. Moving into a
+// directory can overwrite its existing child just as a direct rename can.
 func (c *classifier) move(args []string, complete bool, dir string) {
-	_, paths := operands(args)
-	if len(paths) < 2 {
+	if !complete {
+		c.unresolved("the move arguments are not literal, so overwritten targets cannot be proven")
 		return
 	}
-	destination := paths[len(paths)-1]
-	sources := paths[:len(paths)-1]
-	if !complete {
-		c.add(Classification{
-			Effect:     EffectQuarantine,
-			Command:    "mv",
-			Unresolved: "the move arguments are not literal",
-			Reason:     "The command moves data; a later move can restore it.",
-		})
+	var paths, options []string
+	destination := ""
+	targetDirectory, noTargetDirectory, noClobber := false, false, false
+	flags := true
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if flags && arg == "--" {
+			flags = false
+			options = append(options, arg)
+			continue
+		}
+		if !flags || !strings.HasPrefix(arg, "-") || arg == "-" {
+			paths = append(paths, arg)
+			continue
+		}
+		switch {
+		case arg == "-t" || arg == "--target-directory":
+			if i+1 >= len(args) {
+				c.unresolved("the move target directory is missing")
+				return
+			}
+			i++
+			destination = args[i]
+			targetDirectory = true
+		case strings.HasPrefix(arg, "--target-directory="):
+			destination = strings.TrimPrefix(arg, "--target-directory=")
+			targetDirectory = true
+		case strings.HasPrefix(arg, "-t") && len(arg) > 2:
+			destination = arg[2:]
+			targetDirectory = true
+		case arg == "-T" || arg == "--no-target-directory":
+			noTargetDirectory = true
+			options = append(options, arg)
+		case arg == "--no-clobber":
+			noClobber = true
+			options = append(options, arg)
+		case arg == "--force" || arg == "--interactive":
+			noClobber = false
+			options = append(options, arg)
+		case !strings.HasPrefix(arg, "--"):
+			for _, flag := range arg[1:] {
+				switch flag {
+				case 'n':
+					noClobber = true
+				case 'f', 'i':
+					noClobber = false
+				case 'v':
+				default:
+					c.unresolved("the move option cannot be inspected")
+					return
+				}
+			}
+			options = append(options, arg)
+		default:
+			c.unresolved("the move option cannot be inspected")
+			return
+		}
+	}
+	if targetDirectory && noTargetDirectory {
+		c.unresolved("the move has conflicting destination options")
+		return
+	}
+	var sources []string
+	if targetDirectory {
+		sources = paths
+	} else {
+		if len(paths) < 2 {
+			return
+		}
+		destination = paths[len(paths)-1]
+		sources = paths[:len(paths)-1]
+	}
+	if len(sources) == 0 || destination == "" {
+		c.unresolved("the move has no exact source or destination")
 		return
 	}
 	target, err := c.resolve(dir, destination)
 	if err != nil {
-		c.add(Classification{
-			Effect:     EffectQuarantine,
-			Command:    "mv",
-			Unresolved: "the move destination could not be resolved",
-			Reason:     "The command moves data; a later move can restore it.",
-		})
+		c.unresolved("the move destination cannot be resolved")
 		return
 	}
-	if info, statErr := os.Lstat(target); statErr == nil && !info.IsDir() {
-		c.add(Classification{
-			Effect:  EffectPermanentDeletion,
-			Command: "mv",
-			Targets: []string{target},
-			Reason:  "The move replaces the existing file " + target + ".",
-		})
+	info, statErr := os.Stat(target)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		c.unresolved("the move destination cannot be inspected")
 		return
 	}
-	var targets []string
+	intoDirectory := statErr == nil && info.IsDir() && !noTargetDirectory
+	if (targetDirectory && !intoDirectory) || (len(sources) > 1 && !intoDirectory) {
+		c.unresolved("the move needs a verified destination directory")
+		return
+	}
+	var overwritten, moved []string
+	operations := make(map[string]string)
+	seen := make(map[string]bool)
 	for _, source := range sources {
-		resolved, err := c.resolve(dir, source)
+		sourcePath, err := c.resolve(dir, source)
 		if err != nil {
-			continue
+			c.unresolved("a move source cannot be resolved")
+			return
 		}
-		targets = append(targets, resolved)
+		moved = append(moved, sourcePath)
+		effective := target
+		if intoDirectory {
+			effective = filepath.Join(target, filepath.Base(filepath.Clean(source)))
+		}
+		_, err = os.Lstat(effective)
+		if err != nil && !os.IsNotExist(err) {
+			c.unresolved("a move destination cannot be inspected")
+			return
+		}
+		if !noClobber && seen[effective] {
+			c.unresolved("multiple move sources address the same destination, so overwritten data cannot be identified safely")
+			return
+		}
+		if !noClobber && err == nil {
+			overwritten = append(overwritten, effective)
+			descriptor := append([]string{args[0]}, options...)
+			descriptor = append(descriptor, sourcePath, effective)
+			data, _ := json.Marshal([][]string{descriptor})
+			operations = mergeOperations(operations, map[string]string{effective: string(data)})
+		}
+		seen[effective] = true
 	}
-	c.add(Classification{
-		Effect:  EffectQuarantine,
-		Command: "mv",
-		Targets: targets,
-		Reason:  "The command moves data to " + target + "; a later move can restore it.",
-	})
+	if len(overwritten) > 0 {
+		c.add(Classification{Effect: EffectPermanentDeletion, Command: "mv", Targets: overwritten, Operations: operations, Reason: "The move replaces existing destination data."})
+		return
+	}
+	c.add(Classification{Effect: EffectQuarantine, Command: "mv", Targets: moved, Reason: "The command moves data to " + target + "; a later move can restore it."})
+}
+
+// wrapper consumes only documented options whose effect is understood. Unknown
+// or directory-changing options cannot hide an uninspected command.
+func (c *classifier) wrapper(args []string, complete bool, dir string) {
+	name := filepath.Base(args[0])
+	i := 1
+	for i < len(args) {
+		arg := args[i]
+		if arg == "--" {
+			i++
+			break
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			if name == "sudo" && strings.Contains(arg, "=") {
+				c.unresolved("wrapper environment assignments can change command resolution")
+				return
+			}
+			break
+		}
+		if (arg == "--help" || arg == "--version") && i == 1 && len(args) == 2 {
+			return
+		}
+		switch name {
+		case "sudo":
+			if slices.Contains([]string{"--non-interactive", "--preserve-env", "--set-home", "--stdin", "--reset-timestamp"}, arg) {
+				i++
+				continue
+			}
+			if slices.Contains([]string{"--user", "--group", "--prompt", "--close-from", "--command-timeout", "--role", "--type"}, arg) {
+				if i+1 >= len(args) {
+					c.unresolved("a wrapper option value is missing")
+					return
+				}
+				i += 2
+				continue
+			}
+			if strings.HasPrefix(arg, "--") {
+				key, _, hasValue := strings.Cut(arg, "=")
+				if hasValue && slices.Contains([]string{"--user", "--group", "--prompt", "--close-from", "--command-timeout", "--role", "--type", "--preserve-env"}, key) {
+					i++
+					continue
+				}
+				c.unresolved("the wrapper option cannot be inspected")
+				return
+			}
+		case "doas":
+			// Short flags below include the documented user/style values.
+		case "nohup":
+			c.unresolved("the wrapper option cannot be inspected")
+			return
+		case "time":
+			if arg == "--" {
+				i++
+				continue
+			}
+			if slices.Contains([]string{"--portability", "--verbose", "--quiet"}, arg) {
+				i++
+				continue
+			}
+			if arg == "--format" {
+				if i+1 >= len(args) {
+					c.unresolved("a wrapper option value is missing")
+					return
+				}
+				i += 2
+				continue
+			}
+		}
+		accepted := true
+		for j := 1; j < len(arg); j++ {
+			flag := arg[j]
+			value := false
+			switch name {
+			case "sudo":
+				if strings.ContainsRune("nEHSk", rune(flag)) {
+					continue
+				}
+				value = strings.ContainsRune("ugpCTrt", rune(flag))
+			case "doas":
+				if strings.ContainsRune("nL", rune(flag)) {
+					continue
+				}
+				value = strings.ContainsRune("ua", rune(flag))
+			case "time":
+				if strings.ContainsRune("pvqa", rune(flag)) {
+					continue
+				}
+				value = flag == 'f'
+			}
+			if !value {
+				accepted = false
+				break
+			}
+			if j+1 == len(arg) {
+				if i+1 >= len(args) {
+					accepted = false
+					break
+				}
+				i++
+			}
+			break
+		}
+		if !accepted {
+			c.unresolved("the wrapper option cannot be inspected")
+			return
+		}
+		i++
+	}
+	if i >= len(args) {
+		if !complete {
+			c.unresolved("the wrapped command is not literal")
+		}
+		return
+	}
+	c.command(args[i:], complete, dir)
 }
 
 // find classifies "find -delete" and "-exec" forms. The matched set cannot be
