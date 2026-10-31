@@ -30,13 +30,23 @@ type Approval struct {
 	Copies     map[string]CopySource `json:"copies,omitempty"`
 }
 
-// MoveSource binds the incoming entry before approval and launch. Relocated
-// omits location, inode and timestamps so copied entries can also be verified.
-// Identity still binds the original source entry before the tool may launch.
+// MoveSource binds the incoming entry before approval and launch. Completion
+// requires that same entry on the same filesystem; matching copied bytes cannot
+// prove attributes that a cross-filesystem copy/unlink move may silently lose.
 type MoveSource struct {
-	Path      string `json:"path"`
-	Identity  string `json:"identity"`
-	Relocated string `json:"relocated"`
+	Path      string             `json:"path"`
+	Identity  string             `json:"identity"`
+	Relocated string             `json:"relocated"`
+	Entry     *MoveEntryIdentity `json:"entry_identity,omitempty"`
+}
+
+// MoveEntryIdentity proves that the original directory entry, with its attached
+// attributes, was renamed rather than recreated from a reduced payload copy.
+type MoveEntryIdentity struct {
+	Device  uint64 `json:"device"`
+	Inode   uint64 `json:"inode"`
+	Type    uint32 `json:"type"`
+	MountID string `json:"mount_id"`
 }
 
 // CopySource binds retained source identity and expected destination bytes.
@@ -156,15 +166,18 @@ func sameOperation(a Approval, c Classification) bool {
 		return false
 	}
 	for _, target := range a.Targets {
-		if a.Snapshots[target] == "" || a.Operations[target] == "" || (compoundSourceOperation(a.Operations[target]) || unsupportedCopyAttributes(a.Operations[target])) {
+		if a.Snapshots[target] == "" || a.Operations[target] == "" || (unsupportedCompoundOperation(a.Operations[target]) || unsupportedCopyAttributes(a.Operations[target])) {
+			return false
+		}
+		if source, move := moveSource(target, a.Operations[target]); move && (a.Moves[target].Path != source || a.Moves[target].Identity == "" || a.Moves[target].Relocated == "" || !validMoveEntry(a.Moves[target].Entry)) {
 			return false
 		}
 	}
 	for _, target := range c.Targets {
-		if compoundSourceOperation(c.Operations[target]) || unsupportedCopyAttributes(c.Operations[target]) {
+		if unsupportedCompoundOperation(c.Operations[target]) || unsupportedCopyAttributes(c.Operations[target]) {
 			return false
 		}
-		if source, move := moveSource(target, c.Operations[target]); move && (a.Moves[target].Path != source || a.Moves[target].Identity == "" || a.Moves[target].Relocated == "") {
+		if source, move := moveSource(target, c.Operations[target]); move && (a.Moves[target].Path != source || a.Moves[target].Identity == "" || a.Moves[target].Relocated == "" || !validMoveEntry(a.Moves[target].Entry)) {
 			return false
 		}
 		if source, copy := copySource(target, c.Operations[target]); copy && (a.Copies[target].Path != source || a.Copies[target].Identity == "" || a.Copies[target].Content == "" || a.Copies[target].OriginalDestinationContent == "" || a.Copies[target].SourceParent == "" || a.Copies[target].DestinationParent == "" || copyPreservesMetadata(c.Operations[target]) != (a.Copies[target].PreserveMetadata != "")) {
@@ -435,7 +448,7 @@ func (g *Guard) recordOutcome(sessionID string, c Classification, callID string,
 		}
 		// Absence proves an unlink outcome, not an in-place transformation.
 		// An already absent unlink target is a successful harmless no-op.
-		if current == "absent" && c.RemovesTarget(target) {
+		if current == "absent" && c.TerminalRemovesTarget(target) {
 			completed = append(completed, target)
 			continue
 		}
@@ -510,7 +523,7 @@ func (g *Guard) recordOutcome(sessionID string, c Classification, callID string,
 					}
 				}
 			}
-			if c.RemovesTarget(target) && a.Snapshots[target] != "" && a.Snapshots[target] != "absent" {
+			if c.TerminalRemovesTarget(target) && a.Snapshots[target] != "" && a.Snapshots[target] != "absent" {
 				current, err := snapshot(target)
 				if err != nil {
 					return err
@@ -651,8 +664,8 @@ func moveSource(target, signature string) (string, bool) {
 func captureMoveSources(c Classification) (map[string]MoveSource, error) {
 	var moves map[string]MoveSource
 	for _, target := range c.Targets {
-		if compoundSourceOperation(c.Operations[target]) {
-			return nil, errors.New("compound copy/move effects cannot verify their source identity; run separately bound operations")
+		if unsupportedCompoundOperation(c.Operations[target]) {
+			return nil, errors.New("compound destructive effects cannot verify a supported terminal outcome; run separately bound operations")
 		}
 		source, move := moveSource(target, c.Operations[target])
 		if !move {
@@ -669,16 +682,27 @@ func captureMoveSources(c Classification) (map[string]MoveSource, error) {
 		if err != nil {
 			return nil, err
 		}
+		entry, err := sameFilesystemMoveSource(source, target)
+		if err != nil {
+			return nil, err
+		}
+		after, err := snapshot(source)
+		if err != nil {
+			return nil, err
+		}
+		if after != identity {
+			return nil, errors.New("move source changed while binding its entry identity")
+		}
 		if moves == nil {
 			moves = make(map[string]MoveSource)
 		}
-		moves[target] = MoveSource{Path: source, Identity: identity, Relocated: relocated}
+		moves[target] = MoveSource{Path: source, Identity: identity, Relocated: relocated, Entry: &entry}
 	}
 	return moves, nil
 }
 
 func unchangedMoveSource(a Approval, target string) bool {
-	if compoundSourceOperation(a.Operations[target]) {
+	if unsupportedCompoundOperation(a.Operations[target]) {
 		return false
 	}
 	source, move := moveSource(target, a.Operations[target])
@@ -686,11 +710,15 @@ func unchangedMoveSource(a Approval, target string) bool {
 		return true
 	}
 	before := a.Moves[target]
-	if before.Path != source || before.Identity == "" || before.Relocated == "" {
+	if before.Path != source || before.Identity == "" || before.Relocated == "" || !validMoveEntry(before.Entry) {
 		return false
 	}
 	now, err := snapshot(source)
 	if err != nil || now != before.Identity {
+		return false
+	}
+	entry, err := sameFilesystemMoveSource(source, target)
+	if err != nil || entry != *before.Entry {
 		return false
 	}
 	relocated, err := snapshotEntry(source, false)
@@ -699,13 +727,27 @@ func unchangedMoveSource(a Approval, target string) bool {
 
 func movePostcondition(target, signature string, before MoveSource) (bool, error) {
 	source, move := moveSource(target, signature)
-	if !move || before.Path != source || before.Identity == "" || before.Relocated == "" {
+	if !move || before.Path != source || before.Identity == "" || before.Relocated == "" || !validMoveEntry(before.Entry) {
 		return false, nil
 	}
 	if _, err := os.Lstat(source); !errors.Is(err, os.ErrNotExist) {
 		if err != nil {
 			return false, err
 		}
+		return false, nil
+	}
+	_, err := os.Lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	entry, err := sameFilesystemMoveSource(target, target)
+	if err != nil {
+		return false, err
+	}
+	if entry != *before.Entry {
 		return false, nil
 	}
 	after, err := snapshotEntry(target, false)
@@ -734,8 +776,8 @@ func captureCopySources(c Classification) (map[string]CopySource, error) {
 		if unsupportedCopyAttributes(c.Operations[target]) {
 			return nil, errors.New("copy attribute preservation cannot be fully verified; use a separately verified copy before authorizing permanent deletion")
 		}
-		if compoundSourceOperation(c.Operations[target]) {
-			return nil, errors.New("compound copy/move effects cannot verify their source identity; run separately bound operations")
+		if unsupportedCompoundOperation(c.Operations[target]) {
+			return nil, errors.New("compound destructive effects cannot verify a supported terminal outcome; run separately bound operations")
 		}
 		source, copy := copySource(target, c.Operations[target])
 		if !copy {
@@ -805,7 +847,7 @@ func unchangedCopySource(a Approval, target string) bool {
 	if unsupportedCopyAttributes(a.Operations[target]) {
 		return false
 	}
-	if compoundSourceOperation(a.Operations[target]) {
+	if unsupportedCompoundOperation(a.Operations[target]) {
 		return false
 	}
 	source, copy := copySource(target, a.Operations[target])
@@ -1010,17 +1052,17 @@ func copyMetadata(info os.FileInfo) (string, error) {
 // source-free. Inspect every per-target operation, independent of whichever
 // command name the combined classification reports. Legacy approvals with these
 // unbound source effects cannot be reused or launched after a restart.
-func compoundSourceOperation(signature string) bool {
+func unsupportedCompoundOperation(signature string) bool {
 	var operations [][]string
 	if json.Unmarshal([]byte(signature), &operations) != nil || len(operations) <= 1 {
 		return false
 	}
 	for _, operation := range operations {
-		if len(operation) > 0 && (filepath.Base(operation[0]) == "cp" || filepath.Base(operation[0]) == "mv") {
+		if len(operation) == 0 || filepath.Base(operation[0]) == "cp" || filepath.Base(operation[0]) == "mv" {
 			return true
 		}
 	}
-	return false
+	return !terminalRemovalOperation(signature)
 }
 
 // Archive and preservation modes promise attributes, including ACLs, beyond
@@ -1061,3 +1103,89 @@ func unsupportedCopyAttributes(signature string) bool {
 	}
 	return false
 }
+
+// Cross-filesystem mv may copy and unlink while silently degrading attributes.
+// Only same-filesystem entry relocation has a complete supported proof here.
+func sameFilesystemMoveSource(source, target string) (MoveEntryIdentity, error) {
+	info, err := os.Lstat(source)
+	if err != nil {
+		return MoveEntryIdentity{}, err
+	}
+	parent, err := os.Stat(filepath.Dir(target))
+	if err != nil {
+		return MoveEntryIdentity{}, err
+	}
+	entry, err := verifyMoveDevices(info, parent)
+	if err != nil {
+		return MoveEntryIdentity{}, err
+	}
+	sourceMount, err := moveMountIdentity(source, true)
+	if err != nil {
+		return MoveEntryIdentity{}, err
+	}
+	targetMount, err := moveMountIdentity(filepath.Dir(target), false)
+	if err != nil {
+		return MoveEntryIdentity{}, err
+	}
+	return verifyMoveMounts(entry, sourceMount, targetMount)
+}
+
+func verifyMoveDevices(source, parent os.FileInfo) (MoveEntryIdentity, error) {
+	entry, err := moveEntryIdentity(source)
+	if err != nil {
+		return MoveEntryIdentity{}, err
+	}
+	destination, err := moveEntryIdentity(parent)
+	if err != nil {
+		return MoveEntryIdentity{}, err
+	}
+	if entry.Device != destination.Device {
+		return MoveEntryIdentity{}, errors.New("cross-filesystem moves cannot verify preservation of all source attributes; permanent overwrite is blocked")
+	}
+	return entry, nil
+}
+
+func moveEntryIdentity(info os.FileInfo) (MoveEntryIdentity, error) {
+	stat := reflect.Indirect(reflect.ValueOf(info.Sys()))
+	if !stat.IsValid() || stat.Kind() != reflect.Struct {
+		return MoveEntryIdentity{}, errors.New("move filesystem identity is unavailable")
+	}
+	number := func(name string) (uint64, bool) {
+		field := stat.FieldByName(name)
+		if !field.IsValid() {
+			return 0, false
+		}
+		switch field.Kind() {
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return field.Uint(), true
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return uint64(field.Int()), true
+		default:
+			return 0, false
+		}
+	}
+	dev, hasDev := number("Dev")
+	ino, hasIno := number("Ino")
+	if !hasDev || !hasIno || ino == 0 {
+		return MoveEntryIdentity{}, errors.New("move device and inode identity are unavailable")
+	}
+	return MoveEntryIdentity{Device: dev, Inode: ino, Type: uint32(info.Mode().Type())}, nil
+}
+
+func verifyMoveMounts(entry MoveEntryIdentity, sourceMount, targetMount string) (MoveEntryIdentity, error) {
+	if sourceMount == "" || targetMount == "" {
+		return MoveEntryIdentity{}, errors.New("move mount identity is unavailable")
+	}
+	if sourceMount != targetMount {
+		return MoveEntryIdentity{}, errors.New("cross-mount moves cannot prove rename preservation; copy/unlink fallback is blocked")
+	}
+	entry.MountID = sourceMount
+	return entry, nil
+}
+
+func validMoveEntry(entry *MoveEntryIdentity) bool {
+	return entry != nil && entry.Inode != 0 && entry.MountID != ""
+}
+
+// Retain the old private helper name for tests of source-bearing compounds.
+func compoundSourceOperation(signature string) bool { return unsupportedCompoundOperation(signature) }

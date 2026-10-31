@@ -153,3 +153,24 @@ func (c Classification) RemovesTarget(target string) bool {
 	}
 	return true
 }
+
+// TerminalRemovesTarget reports whether the last ordered operation unlinks the
+// target. This proves a final absence, but does not authorize earlier writes
+// through a symlink: those must continue to use RemovesTarget's stricter rule.
+func (c Classification) TerminalRemovesTarget(target string) bool {
+	return terminalRemovalOperation(c.Operations[target])
+}
+
+func terminalRemovalOperation(signature string) bool {
+	var operations [][]string
+	if json.Unmarshal([]byte(signature), &operations) != nil || len(operations) == 0 {
+		return false
+	}
+	for _, operation := range operations {
+		if len(operation) == 0 || operation[0] == "" {
+			return false
+		}
+	}
+	last := operations[len(operations)-1]
+	return slices.Contains([]string{"rm", "unlink", "rmdir"}, filepath.Base(last[0]))
+}

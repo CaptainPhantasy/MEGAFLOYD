@@ -66,6 +66,25 @@ jobs:
       - name: Verify protected approval authority across OS identities
         run: bash scripts/verify-approval-authority-linux.sh
 
+      - name: Verify cross-filesystem moves are rejected before execution
+        working-directory: floyd-go
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          name = "TestMoveRecoveryActualLinuxCrossFilesystemDeniedBeforeConfirmation"
+          result = subprocess.run(["go", "test", "-json", "./internal/deletionguard", "-run", "^" + name + "$", "-count=1"], capture_output=True, text=True)
+          sys.stdout.write(result.stdout)
+          sys.stderr.write(result.stderr)
+          if result.returncode:
+              raise SystemExit(result.returncode)
+          events = [json.loads(line) for line in result.stdout.splitlines()]
+          assert any(e.get("Test") == name and e.get("Action") == "pass" for e in events), "Cross-filesystem rejection must actually run and pass"
+          assert not any(e.get("Test") == name and e.get("Action") == "skip" for e in events), "A skipped cross-filesystem fixture is not verification"
+          PY
+
       - name: Check the comment-free packages
         working-directory: floyd-code
         run: |
