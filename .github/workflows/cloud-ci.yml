@@ -57,11 +57,15 @@ jobs:
       - name: Verify the ship manifest policy pin
         run: node scripts/verify-ship-manifest.mjs --checkout-only
 
+      - name: Vet Go packages
+        working-directory: floyd-go
+        run: go vet ./...
+
       - name: Test the prompt and config packages
         working-directory: floyd-go
         run: |
           set -euo pipefail
-          go test ./internal/agent/prompt/... ./internal/config/... ./internal/agent/... ./internal/deletionguard/... ./internal/approvalauthority/... ./internal/question/... ./internal/backend/... ./internal/app/... ./internal/server/...
+          go test ./internal/agent/prompt/... ./internal/config/... ./internal/csync/... ./internal/cmd/... ./internal/agent/... ./internal/deletionguard/... ./internal/approvalauthority/... ./internal/question/... ./internal/backend/... ./internal/app/... ./internal/server/...
 
       - name: Verify protected approval authority across OS identities
         run: bash scripts/verify-approval-authority-linux.sh
