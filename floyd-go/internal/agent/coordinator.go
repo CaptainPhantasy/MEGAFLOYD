@@ -988,18 +988,15 @@ func (c *coordinator) buildMCPTools(agent config.Agent, isSubAgent bool) []fanta
 
 func (c *coordinator) wrapAgentTools(filteredTools []fantasy.AgentTool, isSubAgent bool) []fantasy.AgentTool {
 	plans := c.planService()
-	// Pre hooks run inside the existing guards; terminal observation wraps
-	// those guards so native rejections also emit a correlated event.
-	filteredTools = wrapToolsWithRuntimePre(filteredTools, c.hookDispatcher())
-
-	// Permanent deletion is gated outside the hook wrapper so the decision is
-	// made before user hooks and tool permissions: a hook allow or a generic
-	// permission approval must never stand in for the two confirmations.
+	// Permanent deletion checks the actual post-hook input immediately before
+	// the tool body. A hook allow or generic permission approval cannot supply
+	// either human confirmation, and rewritten targets need their own approval.
 	filteredTools = wrapToolsWithDeletionGuard(
 		filteredTools,
 		c.deletionGuard(),
 		c.cfg.WorkingDir(),
 	)
+	filteredTools = wrapToolsWithRuntimePre(filteredTools, c.hookDispatcher())
 
 	// Active-job scope enforcement runs inside the plan guard so plan mode
 	// remains authoritative for its own file, and outside the hook wrapper

@@ -119,6 +119,13 @@ func (c *classifier) result() Classification {
 		if effect.Effect > out.Effect {
 			out.Effect = effect.Effect
 		}
+	}
+	for _, effect := range c.effects {
+		// Quarantine sources are not destructive targets and must never be
+		// folded into the human authorization for a separate deletion.
+		if effect.Effect != out.Effect {
+			continue
+		}
 		out.Recursive = out.Recursive || effect.Recursive
 		if out.Unresolved == "" {
 			out.Unresolved = effect.Unresolved
@@ -249,11 +256,11 @@ func (c *classifier) unresolved(reason string) {
 	})
 }
 
-// redirect classifies a truncating redirect. Only ">" and ">|" replace existing
-// content; ">>" appends and keeps the prior bytes.
+// redirect classifies truncating redirects, including combined stdout/stderr.
+// Append forms keep the prior bytes.
 func (c *classifier) redirect(stmt *syntax.Stmt, dir string) {
 	for _, redir := range stmt.Redirs {
-		if redir.Op != syntax.RdrOut && redir.Op != syntax.RdrClob {
+		if redir.Op != syntax.RdrOut && redir.Op != syntax.RdrClob && redir.Op != syntax.RdrAll {
 			continue
 		}
 		name, ok := literalWord(redir.Word)
@@ -276,7 +283,7 @@ func (c *classifier) redirect(stmt *syntax.Stmt, dir string) {
 		producer := *stmt
 		producer.Redirs = nil
 		for _, input := range stmt.Redirs {
-			if input.Op != syntax.RdrOut && input.Op != syntax.RdrClob {
+			if input.Op != syntax.RdrOut && input.Op != syntax.RdrClob && input.Op != syntax.RdrAll {
 				producer.Redirs = append(producer.Redirs, input)
 			}
 		}
@@ -312,11 +319,13 @@ func (c *classifier) call(command *syntax.CallExpr, dir *string) {
 		value, ok := literalWord(word)
 		if !ok {
 			complete = false
-			break
+			// Keep positional boundaries and later literal flags. The empty
+			// placeholder is never accepted as a proven operand or executable.
+			value = ""
 		}
 		args = append(args, value)
 	}
-	if len(args) == 0 {
+	if len(args) == 0 || args[0] == "" {
 		if !complete {
 			c.unresolved("the command name is not literal, so its effect cannot be proven")
 			*dir = ""
@@ -354,14 +363,29 @@ func (c *classifier) changeDirectory(args []string, dir string) string {
 }
 
 func (c *classifier) command(args []string, complete bool, dir string) {
+	if len(args) == 0 || args[0] == "" {
+		c.unresolved("the command name is not literal, so its effect cannot be proven")
+		return
+	}
 	name := filepath.Base(args[0])
+	if !complete && slices.Contains(args, "") && slices.Contains(
+		[]string{"sudo", "doas", "nohup", "time", "env", "nice", "timeout", "setsid", "stdbuf", "xargs", "command", "builtin", "exec", "eval", "sh", "bash", "dash", "zsh", "ksh"}, name) {
+		// An expansion can supply options, option values or the executable.
+		// Never let its placeholder be consumed as a proven dispatch token.
+		c.unresolved("the wrapper contains a nonliteral argument, so command dispatch cannot be proven")
+		return
+	}
+	if !complete && slices.Contains([]string{"cp", "truncate", "dd", "git", "mv", "rsync"}, name) {
+		c.unresolved("the command arguments are not literal, so its destructive effects cannot be proven")
+		return
+	}
 	// Wrapper arguments may belong to a nested script rather than the
 	// wrapper itself, so a later --help must not hide that script.
 	if hasInformationalFlag(args[1:]) && !slices.Contains(
 		[]string{"sudo", "doas", "nohup", "time", "env", "nice", "timeout", "setsid", "stdbuf", "xargs", "command", "builtin", "exec", "eval", "sh", "bash", "dash", "zsh", "ksh"}, name) {
 		return
 	}
-	if slices.Contains(removalCommands, name) || slices.Contains([]string{"truncate", "dd", "find", "git", "mv", "rsync"}, name) {
+	if slices.Contains(removalCommands, name) || slices.Contains([]string{"cp", "truncate", "dd", "find", "git", "mv", "rsync"}, name) {
 		start := len(c.effects)
 		defer func() {
 			for i := start; i < len(c.effects); i++ {
@@ -436,6 +460,8 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 		c.git(args, complete, dir)
 	case "mv":
 		c.move(args, complete, dir)
+	case "cp":
+		c.copy(args, dir)
 	case "rsync":
 		if hasDeleteFlag(args[1:]) {
 			_, paths := operands(args)
@@ -454,6 +480,9 @@ func (c *classifier) removal(command string, paths []string, recursive, complete
 		effect.Unresolved = "the command names no target"
 	}
 	for _, name := range paths {
+		if name == "" {
+			continue
+		}
 		target, err := c.resolve(dir, name)
 		if err != nil {
 			if effect.Unresolved == "" {
@@ -622,6 +651,109 @@ func (c *classifier) move(args []string, complete bool, dir string) {
 	}
 	c.add(Classification{Effect: EffectQuarantine, Command: "mv", Targets: moved, Reason: "The command moves data to " + target + "; a later move can restore it."})
 	c.movePaths = append(c.movePaths, affected...)
+}
+
+// copy checks effective destinations rather than treating a copy as harmless:
+// overwriting an existing file destroys its prior contents just like a redirect.
+func (c *classifier) copy(args []string, dir string) {
+	var paths []string
+	var destination string
+	options, noClobber, noTargetDirectory, targetDirectory := true, false, false, false
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case options && arg == "--":
+			options = false
+		case !options || !strings.HasPrefix(arg, "-") || arg == "-":
+			paths = append(paths, arg)
+		case arg == "-t" || arg == "--target-directory":
+			if i+1 >= len(args) {
+				c.unresolved("the copy destination is missing")
+				return
+			}
+			i++
+			destination, targetDirectory = args[i], true
+		case strings.HasPrefix(arg, "--target-directory="):
+			destination, targetDirectory = strings.TrimPrefix(arg, "--target-directory="), true
+		case strings.HasPrefix(arg, "-t") && len(arg) > 2:
+			destination, targetDirectory = arg[2:], true
+		case arg == "-T" || arg == "--no-target-directory":
+			noTargetDirectory = true
+		case arg == "--no-clobber":
+			noClobber = true
+		case arg == "--force" || arg == "--interactive":
+			noClobber = false
+		case !strings.HasPrefix(arg, "--"):
+			for _, flag := range arg[1:] {
+				switch flag {
+				case 'n':
+					noClobber = true
+				case 'f', 'i':
+					noClobber = false
+				case 'R', 'r', 'a', 'p', 'v', 'P', 'L', 'H':
+				default:
+					c.unresolved("the copy option cannot be inspected")
+					return
+				}
+			}
+		default:
+			c.unresolved("the copy option cannot be inspected")
+			return
+		}
+	}
+	if noClobber {
+		return
+	}
+	if !targetDirectory {
+		if len(paths) < 2 {
+			return
+		}
+		destination, paths = paths[len(paths)-1], paths[:len(paths)-1]
+	}
+	if destination == "" || len(paths) == 0 || targetDirectory && noTargetDirectory {
+		c.unresolved("the copy has no verified source and destination")
+		return
+	}
+	target, err := c.resolve(dir, destination)
+	if err != nil || c.changedDir {
+		c.unresolved("the copy destination cannot be resolved safely")
+		return
+	}
+	info, err := os.Stat(target)
+	if err != nil && !os.IsNotExist(err) {
+		c.unresolved("the copy destination cannot be inspected")
+		return
+	}
+	intoDirectory := err == nil && info.IsDir() && !noTargetDirectory
+	if !intoDirectory && (targetDirectory || len(paths) > 1) {
+		c.unresolved("the copy needs a verified destination directory")
+		return
+	}
+	var changed []string
+	for _, source := range paths {
+		effective := target
+		if intoDirectory {
+			effective = filepath.Join(target, filepath.Base(filepath.Clean(source)))
+		}
+		if overlappingPaths([]string{effective}, c.movePaths) || overlappingPaths([]string{effective}, changed) {
+			c.unresolved("an earlier write changes the copy destination, so its original data cannot be identified safely")
+			return
+		}
+		changed = append(changed, effective)
+		if existing, err := os.Lstat(effective); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			c.unresolved("the effective copy destination cannot be inspected")
+			return
+		} else if existing.IsDir() {
+			// Recursive merges may follow existing nested links. A directory
+			// snapshot alone does not approve the referents those writes reach.
+			c.unresolved("a copy merges an existing directory whose exact overwritten entries cannot be proven")
+			return
+		}
+		c.removal("cp", []string{effective}, false, true, dir)
+	}
+	c.movePaths = append(c.movePaths, changed...)
 }
 
 // wrapper consumes only documented options whose effect is understood. Unknown
@@ -887,10 +1019,16 @@ func (c *classifier) find(args []string, complete bool, dir string) {
 		}
 	}
 	if !destructive {
+		if !complete {
+			c.unresolved("nonliteral find arguments may introduce an uninspected destructive action")
+		}
 		return
 	}
 	var roots []string
 	for _, arg := range args[1:] {
+		if arg == "" {
+			continue
+		}
 		if strings.HasPrefix(arg, "-") || arg == "(" || arg == "!" {
 			break
 		}
@@ -922,7 +1060,13 @@ func (c *classifier) git(args []string, complete bool, dir string) {
 	if len(args) < 2 {
 		return
 	}
+	if strings.HasPrefix(args[1], "-") {
+		c.unresolved("git global options can change the repository or command dispatch")
+		return
+	}
 	switch args[1] {
+	case "restore", "checkout":
+		c.unresolved("git " + args[1] + " can discard working-tree data whose exact affected set cannot be proven")
 	case "rm":
 		_, paths := operands(args[1:])
 		c.removal("git rm", paths, false, complete, dir)
@@ -1104,20 +1248,20 @@ func recursiveFlag(flags []string) bool {
 	return false
 }
 
-// hasInformationalFlag reports a help or version request, which has no effect.
+// hasInformationalFlag recognizes only an unambiguous help/version invocation.
+// In a longer argument list the token may be an operand after --, a find
+// predicate value, or another option's value rather than an informational flag.
 func hasInformationalFlag(args []string) bool {
-	for _, arg := range args {
-		if arg == "--help" || arg == "--version" {
-			return true
-		}
-	}
-	return false
+	return len(args) == 1 && (args[0] == "--help" || args[0] == "--version")
 }
 
 // hasDryRunFlag reports a documented dry run for git clean. Short flags may be
 // clustered, as in "-nd".
 func hasDryRunFlag(args []string) bool {
 	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
 		if arg == "--dry-run" {
 			return true
 		}

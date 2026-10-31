@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -59,13 +60,14 @@ type Execution struct {
 
 // Record is the durable per-session deletion record.
 type Record struct {
-	Schema        string         `json:"schema"`
-	SessionID     string         `json:"session_id"`
-	Confirmations []Confirmation `json:"confirmations"`
-	Executions    []Execution    `json:"executions"`
-	Approvals     []Approval     `json:"approvals,omitempty"`
-	Attempts      []Attempt      `json:"attempts,omitempty"`
-	revision      uint64
+	Schema         string          `json:"schema"`
+	SessionID      string          `json:"session_id"`
+	Confirmations  []Confirmation  `json:"confirmations"`
+	Executions     []Execution     `json:"executions"`
+	Approvals      []Approval      `json:"approvals,omitempty"`
+	Attempts       []Attempt       `json:"attempts,omitempty"`
+	BackgroundJobs []BackgroundJob `json:"background_jobs,omitempty"`
+	revision       uint64
 }
 
 // ConfirmationsFor returns the first human confirmation for each stage of one
@@ -128,21 +130,41 @@ type Authority interface {
 // Ledger stores approval records through the protected authority. Its namespace
 // binds records to the canonical data directory without trusting that directory.
 type Ledger struct {
-	dataDir   string
-	mu        *sync.Mutex
-	authority Authority
-	namespace string
+	dataDir    string
+	mu         *sync.Mutex
+	authority  Authority
+	namespace  string
+	background *backgroundEvidence
 }
 
-var ledgerLocks sync.Map
+var (
+	ledgerLocks              sync.Map
+	ledgerBackgroundEvidence sync.Map
+)
 
 // NewLedger connects to the administrator-owned approval authority. An absent
 // authority refuses permanent deletion; no local ledger is adopted as proof.
 func NewLedger(dataDir string) *Ledger {
-	return newLedgerWithAuthority(dataDir, approvalauthority.NewClient(approvalauthority.DefaultSocketPath, 0))
+	return newLedger(dataDir, approvalauthority.NewClient(approvalauthority.DefaultSocketPath, 0), defaultAuthorityIdentity{})
 }
 
+type (
+	defaultAuthorityIdentity struct{}
+	ledgerEvidenceIdentity   struct {
+		store     string
+		authority any
+	}
+)
+
 func newLedgerWithAuthority(dataDir string, authority Authority) *Ledger {
+	var identity any = authority
+	if authority != nil && !reflect.TypeOf(authority).Comparable() {
+		identity = new(byte)
+	}
+	return newLedger(dataDir, authority, identity)
+}
+
+func newLedger(dataDir string, authority Authority, authorityIdentity any) *Ledger {
 	key, err := filepath.Abs(dataDir)
 	if err != nil {
 		key = dataDir
@@ -152,7 +174,8 @@ func newLedgerWithAuthority(dataDir string, authority Authority) *Ledger {
 	}
 	digest := sha256.Sum256([]byte(key))
 	lock, _ := ledgerLocks.LoadOrStore(key, &sync.Mutex{})
-	return &Ledger{dataDir: dataDir, mu: lock.(*sync.Mutex), authority: authority, namespace: hex.EncodeToString(digest[:])}
+	evidence, _ := ledgerBackgroundEvidence.LoadOrStore(ledgerEvidenceIdentity{key, authorityIdentity}, &backgroundEvidence{results: make(map[string]BackgroundResult), bindings: make(map[string]BackgroundJob), slots: make(map[string]bool)})
+	return &Ledger{dataDir: dataDir, mu: lock.(*sync.Mutex), authority: authority, namespace: hex.EncodeToString(digest[:]), background: evidence.(*backgroundEvidence)}
 }
 
 // Dir returns the legacy, untrusted history location for diagnostics only.

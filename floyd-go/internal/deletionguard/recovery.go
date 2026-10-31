@@ -40,12 +40,13 @@ type MoveSource struct {
 
 // Attempt records both launch and outcome so a restart cannot assume success.
 type Attempt struct {
-	ToolCallID  string                `json:"tool_call_id"`
-	ApprovalSet string                `json:"approval_set"`
-	Targets     []string              `json:"targets"`
-	State       string                `json:"state"`
-	RecordedAt  string                `json:"recorded_at"`
-	Moves       map[string]MoveSource `json:"moves,omitempty"`
+	ToolCallID        string                `json:"tool_call_id"`
+	ApprovalSet       string                `json:"approval_set"`
+	Targets           []string              `json:"targets"`
+	State             string                `json:"state"`
+	RecordedAt        string                `json:"recorded_at"`
+	Moves             map[string]MoveSource `json:"moves,omitempty"`
+	BackgroundOutcome *BackgroundResult     `json:"background_outcome,omitempty"`
 }
 
 func snapshotTargets(targets []string) (map[string]string, error) {
@@ -330,17 +331,40 @@ func (g *Guard) BeginExecution(sessionID string, c Classification, callID string
 	if !ok {
 		return fmt.Errorf("%w: the original target identity and operation are not verified", ErrNotConfirmed)
 	}
+	if err := g.ledger.background.reserve(sessionID, callID); err != nil {
+		return err
+	}
 	record.Attempts = append(record.Attempts, Attempt{ToolCallID: callID, ApprovalSet: approval.TargetSet, Targets: c.Targets, State: "started", RecordedAt: recordedAt, Moves: approval.Moves})
-	return g.ledger.write(sessionID, record)
+	if err := g.ledger.write(sessionID, record); err != nil {
+		g.ledger.background.release(sessionID, callID)
+		return err
+	}
+	return nil
 }
 
 // RecordOutcome records proven target successes, retaining uncertain launches.
 func (g *Guard) RecordOutcome(sessionID string, c Classification, callID string, successfulTargets []string, uncertain bool) error {
+	return g.recordOutcome(sessionID, c, callID, successfulTargets, uncertain, nil)
+}
+
+func (g *Guard) recordOutcome(sessionID string, c Classification, callID string, successfulTargets []string, uncertain bool, background *BackgroundResult) error {
 	g.ledger.mu.Lock()
 	defer g.ledger.mu.Unlock()
 	record, err := g.ledger.Read(sessionID)
 	if err != nil {
 		return err
+	}
+	if background != nil {
+		matched := false
+		for _, job := range record.BackgroundJobs {
+			if reflect.DeepEqual(job, background.Job) {
+				matched = true
+				break
+			}
+		}
+		if !matched || background.Job.SessionID != sessionID || background.Job.ToolCallID != callID || !reflect.DeepEqual(background.Job.Classification, c) {
+			return errors.New("background outcome does not match the durable execution identity")
+		}
 	}
 	a, ok := approvalForSubset(record, c)
 	if !ok {
@@ -352,7 +376,16 @@ func (g *Guard) RecordOutcome(sessionID string, c Classification, callID string,
 		if attempt.ToolCallID != callID {
 			continue
 		}
+		if background != nil && attempt.BackgroundOutcome != nil {
+			if reflect.DeepEqual(*attempt.BackgroundOutcome, *background) {
+				return nil
+			}
+			return errors.New("conflicting terminal background outcome")
+		}
 		if attempt.State == "finished" {
+			if background != nil {
+				return nil // repeated terminal observations are idempotent
+			}
 			return errors.New("execution outcome already recorded")
 		}
 		if attempt.State == "started" && attempt.ApprovalSet == a.TargetSet && slices.Equal(CanonicalTargets(attempt.Targets), CanonicalTargets(c.Targets)) {
@@ -443,8 +476,14 @@ func (g *Guard) RecordOutcome(sessionID string, c Classification, callID string,
 	if uncertain {
 		state = "uncertain"
 	}
-	record.Attempts = append(record.Attempts, Attempt{ToolCallID: callID, ApprovalSet: a.TargetSet, Targets: c.Targets, State: state, RecordedAt: g.now().UTC().Format(time.RFC3339Nano)})
-	return g.ledger.write(sessionID, record)
+	record.Attempts = append(record.Attempts, Attempt{ToolCallID: callID, ApprovalSet: a.TargetSet, Targets: c.Targets, State: state, RecordedAt: g.now().UTC().Format(time.RFC3339Nano), BackgroundOutcome: background})
+	if err := g.ledger.write(sessionID, record); err != nil {
+		return err
+	}
+	if background == nil {
+		g.ledger.background.release(sessionID, callID)
+	}
+	return nil
 }
 
 // inPlacePostcondition proves the final size for an empty redirect or one
@@ -456,7 +495,7 @@ func inPlacePostcondition(target, signature string) (bool, error) {
 		return false, nil
 	}
 	operation := operations[0]
-	if (operation[0] == ">" || operation[0] == ">|") && len(operation) == 2 && strings.TrimSpace(operation[1]) == "" {
+	if (operation[0] == ">" || operation[0] == ">|" || operation[0] == "&>") && len(operation) == 2 && strings.TrimSpace(operation[1]) == "" {
 		info, err := os.Lstat(target)
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
