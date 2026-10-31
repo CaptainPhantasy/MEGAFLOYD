@@ -657,10 +657,14 @@ func (c *classifier) move(args []string, complete bool, dir string) {
 // overwriting an existing file destroys its prior contents just like a redirect.
 func (c *classifier) copy(args []string, dir string) {
 	var paths []string
+	var retainedOptions []string
 	var destination string
 	options, noClobber, noTargetDirectory, targetDirectory := true, false, false, false
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
+		if options && strings.HasPrefix(arg, "-") && arg != "-" {
+			retainedOptions = append(retainedOptions, arg)
+		}
 		switch {
 		case options && arg == "--":
 			options = false
@@ -673,6 +677,7 @@ func (c *classifier) copy(args []string, dir string) {
 			}
 			i++
 			destination, targetDirectory = args[i], true
+			retainedOptions = append(retainedOptions, args[i])
 		case strings.HasPrefix(arg, "--target-directory="):
 			destination, targetDirectory = strings.TrimPrefix(arg, "--target-directory="), true
 		case strings.HasPrefix(arg, "-t") && len(arg) > 2:
@@ -751,7 +756,21 @@ func (c *classifier) copy(args []string, dir string) {
 			c.unresolved("a copy merges an existing directory whose exact overwritten entries cannot be proven")
 			return
 		}
-		c.removal("cp", []string{effective}, false, true, dir)
+		sourcePath, err := c.resolve(dir, source)
+		if err != nil {
+			c.unresolved("the copy source cannot be resolved safely")
+			return
+		}
+		descriptor := append([]string{args[0]}, retainedOptions...)
+		descriptor = append(descriptor, sourcePath, effective)
+		data, _ := json.Marshal([][]string{descriptor})
+		c.add(Classification{
+			Effect:     EffectPermanentDeletion,
+			Command:    "cp",
+			Targets:    []string{effective},
+			Operations: map[string]string{effective: string(data)},
+			Reason:     "The copy replaces existing destination data.",
+		})
 	}
 	c.movePaths = append(c.movePaths, changed...)
 }

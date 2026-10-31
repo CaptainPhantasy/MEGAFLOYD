@@ -176,3 +176,41 @@ func TestDeletionInformationalOperandsCannotSuppressEffects(t *testing.T) {
 		require.False(t, Classify(command, dir).IsDestructive(), command)
 	}
 }
+
+func TestDeletionCopyDescriptorsBindEachCanonicalSource(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "destination"), 0o700))
+	for _, name := range []string{"a", "b", "target", "destination/a", "destination/b"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600))
+	}
+	for _, tc := range []struct {
+		command string
+		target  string
+		source  string
+		options []string
+	}{
+		{`cp ./a target`, "target", "a", nil},
+		{`/bin/cp -p -f a target`, "target", "a", []string{"-p", "-f"}},
+		{`cp -f -p a target`, "target", "a", []string{"-f", "-p"}},
+		{`cp -- a target`, "target", "a", []string{"--"}},
+		{`cp -t destination a`, "destination/a", "a", []string{"-t", "destination"}},
+		{`cp --target-directory=destination b`, "destination/b", "b", []string{"--target-directory=destination"}},
+		{`cp a b destination/`, "destination/a", "a", nil},
+		{`cp a b destination/`, "destination/b", "b", nil},
+	} {
+		c := Classify(tc.command, dir)
+		target := filepath.Join(dir, tc.target)
+		var operations [][]string
+		require.NoError(t, json.Unmarshal([]byte(c.Operations[target]), &operations), tc.command)
+		require.Len(t, operations, 1, tc.command)
+		expected := append([]string{operations[0][0]}, tc.options...)
+		expected = append(expected, filepath.Join(dir, tc.source), target)
+		require.Equal(t, expected, operations[0], tc.command)
+	}
+	all := Classify(`cp a b destination/`, dir)
+	retry := Classify(`cp b destination/`, dir)
+	target := filepath.Join(dir, "destination/b")
+	require.Equal(t, all.Operations[target], retry.Operations[target])
+	require.NotEqual(t, Classify(`cp -p -f a target`, dir).Operations[filepath.Join(dir, "target")], Classify(`cp -f -p a target`, dir).Operations[filepath.Join(dir, "target")])
+}
