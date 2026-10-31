@@ -28,6 +28,9 @@ type rewindFile struct {
 	Staged    string       `json:"staged"`
 	moved     bool
 	installed bool
+	directory *rewindDir
+	name      string
+	mode      os.FileMode
 }
 
 // RestoreTurns requires message IDs in chronological order. Missing checkpoints,
@@ -85,42 +88,56 @@ func (s *service) RestoreTurns(ctx context.Context, sid string, messages []strin
 		return nil, "", err
 	}
 	defer release()
-	for _, path := range paths {
-		if err := verifyRewindCurrent(root, byPath[path], false); err != nil {
-			return nil, "", err
-		}
-	}
 	if len(paths) == 0 {
 		return paths, "", commit()
 	}
-	parent := filepath.Join(root, ".quarantine", "rewind")
-	for _, dir := range []string{filepath.Join(root, ".quarantine"), parent} {
-		if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
-			return nil, "", err
-		}
-		info, err := os.Lstat(dir)
-		if err != nil {
-			return nil, "", err
-		}
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return nil, "", fmt.Errorf("unsafe rewind recovery directory: %s", dir)
-		}
-	}
-	recovery, err := os.MkdirTemp(parent, "operation-")
+	workspace, err := openRewindRoot(root)
 	if err != nil {
 		return nil, "", err
 	}
+	defer workspace.Close()
+	directories := []*rewindDir{workspace}
+	for _, path := range paths {
+		file := byPath[path]
+		rel, err := filepath.Rel(root, filepath.Dir(path))
+		if err != nil {
+			return nil, "", err
+		}
+		file.directory, err = workspace.descend(rel)
+		if err != nil {
+			return nil, "", err
+		}
+		defer file.directory.Close()
+		directories = append(directories, file.directory)
+		file.name = filepath.Base(path)
+		if err := verifyRewindCurrent(file, false); err != nil {
+			return nil, "", err
+		}
+	}
+	quarantine, err := workspace.child(".quarantine", true)
+	if err != nil {
+		return nil, "", err
+	}
+	defer quarantine.Close()
+	parent, err := quarantine.child("rewind", true)
+	if err != nil {
+		return nil, "", err
+	}
+	defer parent.Close()
+	recoveryDir, recoveryName, err := parent.temporary()
+	if err != nil {
+		return nil, "", err
+	}
+	defer recoveryDir.Close()
+	directories = append(directories, quarantine, parent, recoveryDir)
+	recovery := filepath.Join(root, ".quarantine", "rewind", recoveryName)
 	entries := make([]*rewindFile, 0, len(paths))
 	for i, path := range paths {
 		file := byPath[path]
 		file.Original = filepath.Join(recovery, fmt.Sprintf("%d.original", i))
 		file.Staged = filepath.Join(recovery, fmt.Sprintf("%d.restore", i))
 		if file.Start.Exists {
-			mode := os.FileMode(0o600)
-			if info, err := os.Lstat(path); err == nil {
-				mode = info.Mode().Perm()
-			}
-			if err := writeRewindFile(file.Staged, []byte(file.Start.Content), mode); err != nil {
+			if err := recoveryDir.write(filepath.Base(file.Staged), []byte(file.Start.Content), file.mode); err != nil {
 				return nil, recovery, err
 			}
 		}
@@ -131,7 +148,7 @@ func (s *service) RestoreTurns(ctx context.Context, sid string, messages []strin
 		Messages []string      `json:"messages"`
 		Files    []*rewindFile `json:"files"`
 	}{sid, messages, entries}, "", "  ")
-	if err := writeRewindFile(filepath.Join(recovery, "manifest.json"), manifest, 0o600); err != nil {
+	if err := recoveryDir.write("manifest.json", manifest, 0o600); err != nil {
 		return nil, recovery, err
 	}
 	rollback := func(cause error) ([]string, string, error) {
@@ -142,22 +159,22 @@ func (s *service) RestoreTurns(ctx context.Context, sid string, messages []strin
 				continue
 			}
 			if file.installed {
-				if err := verifyRewindCurrent(root, file, true); err != nil {
+				if err := verifyRewindCurrent(file, true); err != nil {
 					failures = append(failures, err)
 					continue
 				}
-				if err := os.Rename(file.Path, filepath.Join(recovery, fmt.Sprintf("%d.rolled-back", i))); err != nil {
+				if err := file.directory.move(file.name, recoveryDir, fmt.Sprintf("%d.rolled-back", i)); err != nil {
 					failures = append(failures, err)
 					continue
 				}
 			}
 			if file.moved {
-				if err := os.Link(file.Original, file.Path); err != nil {
+				if err := recoveryDir.link(filepath.Base(file.Original), file.directory, file.name); err != nil {
 					failures = append(failures, err)
 				}
 			}
 		}
-		if err := syncRewindDirectories(recovery, paths); err != nil {
+		if err := syncRewindDirectories(directories...); err != nil {
 			failures = append(failures, err)
 		}
 		if len(failures) > 0 {
@@ -169,29 +186,40 @@ func (s *service) RestoreTurns(ctx context.Context, sid string, messages []strin
 		if err := ctx.Err(); err != nil {
 			return rollback(err)
 		}
-		if err := verifyRewindCurrent(root, file, false); err != nil {
+		if err := verifyRewindBinding(root, workspace, file); err != nil {
+			return rollback(err)
+		}
+		if err := verifyRewindCurrent(file, false); err != nil {
 			return rollback(err)
 		}
 		if file.End.Exists {
-			if err := os.Rename(file.Path, file.Original); err != nil {
+			if err := file.directory.move(file.name, recoveryDir, filepath.Base(file.Original)); err != nil {
 				return rollback(err)
 			}
 			file.moved = true
-			moved, err := readTurnSnapshot(file.Original)
+			moved, _, err := recoveryDir.snapshot(filepath.Base(file.Original))
 			if err != nil || !sameSnapshot(moved, file.End) {
 				return rollback(fmt.Errorf("file changed during rewind; original retained: %s", file.Path))
 			}
 		}
 		if file.Start.Exists {
 			// Link is exclusive: a concurrently created target is never replaced.
-			if err := os.Link(file.Staged, file.Path); err != nil {
+			if err := recoveryDir.link(filepath.Base(file.Staged), file.directory, file.name); err != nil {
 				return rollback(err)
 			}
 			file.installed = true
 		}
 	}
-	if err := syncRewindDirectories(recovery, paths); err != nil {
+	if err := syncRewindDirectories(directories...); err != nil {
 		return rollback(err)
+	}
+	for _, file := range entries {
+		if err := verifyRewindBinding(root, workspace, file); err != nil {
+			return rollback(err)
+		}
+		if err := verifyRewindCurrent(file, true); err != nil {
+			return rollback(err)
+		}
 	}
 	if err := commit(); err != nil {
 		return rollback(err)
@@ -201,26 +229,37 @@ func (s *service) RestoreTurns(ctx context.Context, sid string, messages []strin
 	return paths, recovery, nil
 }
 
-func syncRewindDirectories(recovery string, paths []string) error {
-	dirs := map[string]bool{recovery: true, filepath.Dir(recovery): true}
-	for _, path := range paths {
-		dirs[filepath.Dir(path)] = true
-	}
-	for dir := range dirs {
-		f, err := os.Open(dir)
-		if err != nil {
+func syncRewindDirectories(dirs ...*rewindDir) error {
+	for _, dir := range dirs {
+		if err := dir.Sync(); err != nil {
 			return err
-		}
-		err = f.Sync()
-		closeErr := f.Close()
-		if err != nil {
-			return err
-		}
-		if closeErr != nil {
-			return closeErr
 		}
 	}
 	return nil
+}
+
+// Detect namespace changes before committing, while all actual operations stay
+// bound to the original directories even if a rename happens after this check.
+// Rollback deliberately uses the pinned directories without this check.
+func verifyRewindBinding(root string, workspace *rewindDir, file *rewindFile) error {
+	current, err := openRewindRoot(root)
+	if err != nil {
+		return err
+	}
+	defer current.Close()
+	if err := sameRewindDirectory(workspace, current); err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(root, filepath.Dir(file.Path))
+	if err != nil {
+		return err
+	}
+	parent, err := workspace.descend(rel)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	return sameRewindDirectory(file.directory, parent)
 }
 
 func sameSnapshot(a, b fileSnapshot) bool { return a.Exists == b.Exists && a.Hash == b.Hash }
@@ -234,31 +273,16 @@ func safeRewindPath(root, path string) error {
 	if parts[0] == ".git" || parts[0] == ".quarantine" {
 		return fmt.Errorf("rewind cannot modify repository or recovery metadata: %s", path)
 	}
-	current := root
-	for _, part := range parts {
-		current = filepath.Join(current, part)
-		info, err := os.Lstat(current)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("rewind refuses a symlink target: %s", current)
-		}
-	}
+
 	return nil
 }
 
-func verifyRewindCurrent(root string, file *rewindFile, restored bool) error {
-	if err := safeRewindPath(root, file.Path); err != nil {
-		return err
-	}
-	actual, err := readTurnSnapshot(file.Path)
+func verifyRewindCurrent(file *rewindFile, restored bool) error {
+	actual, mode, err := file.directory.snapshot(file.name)
 	if err != nil {
 		return err
 	}
+	file.mode = mode
 	expected := file.End
 	if restored {
 		expected = file.Start
@@ -267,20 +291,4 @@ func verifyRewindCurrent(root string, file *rewindFile, restored bool) error {
 		return fmt.Errorf("file changed since its checkpoint; rewind preserved it: %s", file.Path)
 	}
 	return nil
-}
-
-func writeRewindFile(path string, data []byte, mode os.FileMode) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	return closeErr
 }

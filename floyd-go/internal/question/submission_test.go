@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -63,7 +64,9 @@ func TestSubmissionPersistsBeforeAcknowledgmentAndRecovers(t *testing.T) {
 	require.Len(t, files, 1)
 	info, err := files[0].Info()
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 	first := <-result
 	require.NoError(t, first.err)
 	require.Equal(t, answers, first.answers)
@@ -82,6 +85,46 @@ func TestSubmissionPersistsBeforeAcknowledgmentAndRecovers(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, answers, replayed)
 	require.Empty(t, restarted.Pending(), "a recorded ordinary answer must survive restart without reasking")
+}
+
+func TestSubmissionPublicationFailureRetainsPendingAnswer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s := NewService()
+	ConfigureStorage(s, dir)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	events := s.Subscribe(ctx)
+	done := make(chan pendingQuestionResult, 1)
+	go func() { a, e := s.Ask(ctx, pendingHandoffQuestion()); done <- pendingQuestionResult{a, e} }()
+	req := awaitPendingQuestion(t, events)
+	answer := []Answer{{QuestionID: req.Questions[0].ID, FillInText: "Keep the answer until it is saved"}}
+	path := s.submissionPath(req.ID)
+	require.NoError(t, os.Mkdir(path, 0o700))
+	// The first-attempt path reaches publication without reading a retry record.
+	accepted, err := s.submit(ctx, req.ID, answer, true, false)
+	require.Error(t, err)
+	require.False(t, accepted)
+	require.Empty(t, s.received, "failed publication must not be acknowledged in memory")
+	require.Len(t, s.Pending(), 1)
+	select {
+	case <-done:
+		t.Fatal("failed publication must not deliver the answer")
+	default:
+	}
+	require.NoError(t, os.Rename(path, filepath.Join(dir, "saved-blocking-directory")))
+	accepted, err = s.SubmitLocal(ctx, req.ID, answer)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	result := <-done
+	require.NoError(t, result.err)
+	require.Equal(t, answer, result.answers)
+
+	restarted := NewService()
+	ConfigureStorage(restarted, dir)
+	replayed, err := restarted.Ask(ctx, pendingHandoffQuestion())
+	require.NoError(t, err)
+	require.Equal(t, answer, replayed)
 }
 
 func TestFailedSubmissionKeepsQuestionPendingForRetry(t *testing.T) {

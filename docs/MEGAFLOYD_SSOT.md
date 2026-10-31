@@ -282,3 +282,22 @@ the earlier `/swarm` note's unverified terminal status for the repaired candidat
 Owner requested testing the 36 packages previously without direct tests and verifying the whole MegaFloyd suite. Checked: all 36 now have 76 named behavior tests; full Go and race suites pass all 118 packages; vet/build pass; web/SDK tests pass 16,778 with 54 explicit skips; desktop tests pass 57/57. Actual signed-candidate CLI/web/desktop shared-session flow and 22-step TUI flow pass with isolated fixture models. Production app and approved instruction fingerprint are unchanged. Source remains local and uncommitted.
 
 Evidence: [package and suite verification](evidence/suite-verification-20261031.md). Previous SSOT SHA-256 before this append: `75f252fb8ecd7bfcee462ce665409e09415e672b76c98f719a6e37ae3ac27ca9`. Evidence invalidators: changes to tested source, packaged web/desktop assets, configuration, platform, or candidate binary. Live paid-provider/company-service behavior is outside this local fixture verification.
+
+
+## 2026-10-31 — Publication, actual installation and PR 11 review
+
+The owner explicitly authorized commit/push, opening a pull request (corrected
+from dictation), Codex review, stopping MegaFloyd processes and an actual Mac mini
+desktop installation with icons and working terminal scripts. This supersedes
+the prior installation exclusion and the earlier local-only evidence status.
+
+Checked: commit `3019aab9a7b946b0283f811616a7b2930e229ad8` is published on
+`codex/megafloyd-modern-hooks`; [PR 11](https://github.com/CaptainPhantasy/MEGAFLOYD/pull/11)
+is open. The corresponding signed desktop release is installed and its normal
+user interface was launched. Seven subsequent Codex findings were reproduced
+or established from platform API behavior and corrected with focused coverage.
+The next committed build and fresh review remain separate verification steps.
+
+[Review correction evidence](evidence/pr11-review-20261031.md) records the fixes,
+platform limits, retained data and separate CodeQL assessment. Previous SSOT
+SHA-256 before this append: `63127941d12b12df6eba9264ecf15a50c10e9c02d3619cece0e1ca068c24fb9a`. Detailed private evidence remains ignored.

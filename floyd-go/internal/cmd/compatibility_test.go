@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/pubsub"
 	"github.com/spf13/cobra"
@@ -184,4 +185,41 @@ func TestRedactedConfigurationMasksURLAndArgumentCredentials(t *testing.T) {
 	require.Contains(t, string(data), "1234")
 	// Redaction changes only the printed copy.
 	require.Contains(t, input["mcp"].(map[string]any)["fixture"].(map[string]any)["url"], "URL_PASSWORD")
+}
+
+func TestRedactedProviderConfigMasksExtraHeaders(t *testing.T) {
+	provider := config.ProviderConfig{
+		ID:      "fixture",
+		BaseURL: "https://example.invalid/v1",
+		ExtraHeaders: map[string]string{
+			"Proxy-Authorization": "FIXTURE_PROXY_CREDENTIAL",
+			"X-Custom-Provider":   "FIXTURE_CUSTOM_CREDENTIAL",
+		},
+	}
+	data, err := redactedJSON(map[string]config.ProviderConfig{"fixture": provider})
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "FIXTURE_PROXY_CREDENTIAL")
+	require.NotContains(t, string(data), "FIXTURE_CUSTOM_CREDENTIAL")
+	var printed map[string]map[string]any
+	require.NoError(t, json.Unmarshal(data, &printed))
+	require.Equal(t, "[redacted]", printed["fixture"]["extra_headers"])
+	require.Equal(t, "https://example.invalid/v1", printed["fixture"]["base_url"])
+	require.Equal(t, "FIXTURE_PROXY_CREDENTIAL", provider.ExtraHeaders["Proxy-Authorization"])
+}
+
+func TestRedactedConfigurationMasksNestedArgumentAssignments(t *testing.T) {
+	for _, field := range []string{"args", "arguments"} {
+		t.Run(field, func(t *testing.T) {
+			args := []string{"--env=API_KEY=NESTED_KEY", "--env=CLIENT_SECRET=NESTED_SECRET=padding", "--option=--env=ACCESS_TOKEN=NESTED_TOKEN", "-e", "PASSWORD=SPLIT_PASSWORD", "--env=PORT=1234", "--option=name=value"}
+			data, err := redactedJSON(map[string]any{field: args})
+			require.NoError(t, err)
+			for _, secret := range []string{"NESTED_KEY", "NESTED_SECRET", "NESTED_TOKEN", "SPLIT_PASSWORD", "padding"} {
+				require.NotContains(t, string(data), secret)
+			}
+			var printed map[string][]string
+			require.NoError(t, json.Unmarshal(data, &printed))
+			require.Equal(t, []string{"--env=API_KEY=[redacted]", "--env=CLIENT_SECRET=[redacted]", "--option=--env=ACCESS_TOKEN=[redacted]", "-e", "PASSWORD=[redacted]", "--env=PORT=1234", "--option=name=value"}, printed[field])
+			require.Equal(t, "--env=API_KEY=NESTED_KEY", args[0])
+		})
+	}
 }

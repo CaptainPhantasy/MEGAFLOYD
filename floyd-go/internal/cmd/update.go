@@ -27,6 +27,7 @@ var (
 )
 
 type releaseAsset struct {
+	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	URL  string `json:"browser_download_url"`
 }
@@ -37,22 +38,7 @@ type cliRelease struct {
 }
 
 func latestCLIRelease(ctx context.Context) (*cliRelease, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	if endpoint, parseErr := url.Parse(latestReleaseURL); parseErr == nil && endpoint.Scheme == "https" && endpoint.Host == "api.github.com" {
-		token := os.Getenv("GH_TOKEN")
-		if token == "" {
-			token = os.Getenv("GITHUB_TOKEN")
-		}
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "MegaFloyd/"+version.Version)
-	response, err := updateHTTPClient.Do(req)
+	response, err := releaseRequest(ctx, latestReleaseURL, "application/vnd.github+json")
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +60,47 @@ func latestCLIRelease(ctx context.Context) (*cliRelease, error) {
 		return nil, errors.New("release metadata is missing its version")
 	}
 	return &release, nil
+}
+
+func releaseRequest(ctx context.Context, target, accept string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	if githubReleaseHost(req.URL) {
+		token := os.Getenv("GH_TOKEN")
+		if token == "" {
+			token = os.Getenv("GITHUB_TOKEN")
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
+	req.Header.Set("Accept", accept)
+	req.Header.Set("User-Agent", "MegaFloyd/"+version.Version)
+	client := *updateHTTPClient
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		// GitHub's signed asset CDN URLs need no account token. Explicitly
+		// strip it even for subdomains, which net/http otherwise trusts.
+		if !githubReleaseHost(next.URL) {
+			next.Header.Del("Authorization")
+		}
+		if next.URL.Scheme != "https" {
+			return errors.New("refusing an insecure release redirect")
+		}
+		if len(via) >= 10 {
+			return errors.New("too many release redirects")
+		}
+		if updateHTTPClient.CheckRedirect != nil {
+			return updateHTTPClient.CheckRedirect(next, via)
+		}
+		return nil
+	}
+	return client.Do(req)
+}
+
+func githubReleaseHost(endpoint *url.URL) bool {
+	return endpoint.Scheme == "https" && endpoint.User == nil && (endpoint.Host == "api.github.com" || endpoint.Host == "github.com")
 }
 
 // Find the updater distributed with the package, or the repository source used
@@ -108,11 +135,13 @@ func fetchReleaseAsset(ctx context.Context, asset releaseAsset, path string) err
 	if !strings.HasPrefix(asset.URL, "https://github.com/"+releaseRepository+"/releases/download/") {
 		return fmt.Errorf("unexpected release asset source for %s", asset.Name)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.URL, nil)
-	if err != nil {
-		return err
+	target := asset.URL
+	if asset.ID > 0 {
+		// The API supports bearer tokens for private release assets and
+		// returns the bytes or a redirect to GitHub's signed asset CDN.
+		target = fmt.Sprintf("https://api.github.com/repos/%s/releases/assets/%d", releaseRepository, asset.ID)
 	}
-	response, err := updateHTTPClient.Do(req)
+	response, err := releaseRequest(ctx, target, "application/octet-stream")
 	if err != nil {
 		return err
 	}

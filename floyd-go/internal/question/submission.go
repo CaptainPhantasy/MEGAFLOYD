@@ -144,17 +144,8 @@ func (s *questionService) saveSubmission(record submissionRecord) error {
 		if closeErr != nil {
 			return fmt.Errorf("save question answer: %w", closeErr)
 		}
-		if err := os.Rename(file.Name(), s.submissionPath(record.Request.ID)); err != nil {
+		if err := publishSubmission(file.Name(), s.submissionPath(record.Request.ID)); err != nil {
 			return fmt.Errorf("save question answer: %w", err)
-		}
-		dir, err := os.Open(s.storageDir)
-		if err != nil {
-			return fmt.Errorf("save question answer: %w", err)
-		}
-		syncErr := dir.Sync()
-		_ = dir.Close()
-		if syncErr != nil {
-			return fmt.Errorf("save question answer: %w", syncErr)
 		}
 	}
 	if s.received == nil {

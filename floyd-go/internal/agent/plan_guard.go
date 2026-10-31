@@ -134,7 +134,15 @@ func (g *planGuardTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy
 
 func planInspectionTool(name string) bool {
 	switch name {
-	case "view", "ls", "glob", "grep", "lsp_references", "lsp_definition", "lsp_symbols", "lsp_diagnostics", "lsp_call_hierarchy", "sourcegraph", "fetch", "web_fetch", "web_search", "agentic_fetch", "floyd_info", "floyd_logs", "hook_explain", "hook_trace", "archive_query", "tool_search", "search_tools", "question", "enter_plan_mode", "job_output", "todo_write", "todos", "read_resource", "read_resources", "list_resources":
+	case tools.ViewToolName, tools.LSToolName, tools.GlobToolName, tools.GrepToolName,
+		tools.ReferencesToolName, tools.DefinitionToolName, tools.SymbolsToolName,
+		tools.DiagnosticsToolName, tools.CallHierarchyToolName, tools.SourcegraphToolName,
+		tools.FetchToolName, tools.WebFetchToolName, tools.WebSearchToolName,
+		tools.AgenticFetchToolName, tools.FloydInfoToolName, tools.FloydLogsToolName,
+		tools.HookExplainToolName, tools.HookTraceToolName, tools.ArchiveQueryToolName,
+		tools.QuestionToolName, tools.EnterPlanModeToolName, tools.JobOutputToolName,
+		tools.TodosToolName, tools.ReadMCPResourceToolName, tools.ListMCPResourcesToolName,
+		"tool_search", "search_tools", "todo_write":
 		return true
 	default:
 		return false

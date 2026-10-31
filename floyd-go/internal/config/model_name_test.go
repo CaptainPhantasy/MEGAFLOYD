@@ -26,3 +26,26 @@ func TestResolveModelNamesAndAmbiguity(t *testing.T) {
 	_, err = ResolveModel(cfg, "absent")
 	require.ErrorContains(t, err, "no configured model")
 }
+
+func TestResolveModelProviderPrefixScopesNamespacedIDs(t *testing.T) {
+	t.Parallel()
+	cfg := &Config{Providers: csync.NewMap[string, ProviderConfig]()}
+	cfg.Providers.Set("anthropic", ProviderConfig{Models: []catwalk.Model{{ID: "claude-sonnet", Name: "Sonnet"}}})
+	cfg.Providers.Set("openrouter", ProviderConfig{Models: []catwalk.Model{{ID: "anthropic/claude-sonnet", Name: "Sonnet"}, {ID: "anthropic/unique", Name: "Unique"}}})
+	for _, input := range []string{"anthropic/claude-sonnet", "ANTHROPIC/sonnet"} {
+		model, err := ResolveModel(cfg, input)
+		require.NoError(t, err)
+		require.Equal(t, SelectedModel{Provider: "anthropic", Model: "claude-sonnet"}, model)
+	}
+	model, err := ResolveModel(cfg, "openrouter/anthropic/claude-sonnet")
+	require.NoError(t, err)
+	require.Equal(t, SelectedModel{Provider: "openrouter", Model: "anthropic/claude-sonnet"}, model)
+	_, err = ResolveModel(cfg, "anthropic/unique")
+	require.ErrorContains(t, err, "no configured model")
+	_, err = ResolveModel(cfg, "anthropic/")
+	require.ErrorContains(t, err, "model name after")
+	cfg.Providers.Del("anthropic")
+	model, err = ResolveModel(cfg, "anthropic/claude-sonnet")
+	require.NoError(t, err)
+	require.Equal(t, SelectedModel{Provider: "openrouter", Model: "anthropic/claude-sonnet"}, model)
+}

@@ -14,11 +14,22 @@ func ResolveModel(cfg *Config, name string) (SelectedModel, error) {
 	if cfg == nil || cfg.Providers == nil || name == "" {
 		return SelectedModel{}, fmt.Errorf("enter a configured model name or provider/model")
 	}
+	query, providerScope := name, ""
+	if prefix, rest, qualified := strings.Cut(name, "/"); qualified {
+		for providerID := range cfg.Providers.Seq2() {
+			if strings.EqualFold(prefix, providerID) {
+				query, providerScope = rest, prefix
+				break
+			}
+		}
+	}
+	if query == "" {
+		return SelectedModel{}, fmt.Errorf("enter a configured model name after the provider prefix")
+	}
 	var exact, partial []SelectedModel
 	for providerID, provider := range cfg.Providers.Seq2() {
-		query := name
-		if prefix, rest, qualified := strings.Cut(name, "/"); qualified && strings.EqualFold(prefix, providerID) {
-			query = rest
+		if providerScope != "" && !strings.EqualFold(providerScope, providerID) {
+			continue
 		}
 		for _, model := range provider.Models {
 			id, label := strings.ToLower(model.ID), strings.ToLower(model.Name)

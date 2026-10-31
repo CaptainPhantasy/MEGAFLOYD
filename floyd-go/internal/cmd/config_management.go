@@ -68,7 +68,7 @@ func redactedJSON(value any) ([]byte, error) {
 		case map[string]any:
 			for key, value := range x {
 				lower := strings.ToLower(key)
-				if credentialName(key) || lower == "headers" || lower == "env" {
+				if credentialName(key) || lower == "headers" || lower == "extra_headers" || lower == "env" {
 					if value != nil && value != "" {
 						x[key] = "[redacted]"
 					}
@@ -161,12 +161,25 @@ func redactCredentialArgs(args []any) {
 			redactNext = false
 			continue
 		}
-		key, _, assigned := strings.Cut(value, "=")
-		if assigned && credentialArgument(key) {
-			args[i] = key + "=[redacted]"
-			continue
-		}
-		if strings.HasPrefix(value, "-") && credentialArgument(value) {
+		if strings.Contains(value, "=") {
+			// Wrappers such as --env=API_KEY=value contain another assignment.
+			// Inspect each name, stopping at the first credential value so its
+			// complete remainder (including any further '=') stays hidden.
+			remaining := value
+			prefix := ""
+			for {
+				key, rest, assigned := strings.Cut(remaining, "=")
+				if !assigned {
+					break
+				}
+				prefix += key + "="
+				if credentialArgument(key) {
+					args[i] = prefix + "[redacted]"
+					break
+				}
+				remaining = rest
+			}
+		} else if strings.HasPrefix(value, "-") && credentialArgument(value) {
 			redactNext = true
 		}
 	}

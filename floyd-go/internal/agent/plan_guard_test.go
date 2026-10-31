@@ -306,7 +306,7 @@ func TestPlanGuardRejectsUnprovenMutationsDespitePermissionGrants(t *testing.T) 
 	plans := plan.NewService(t.TempDir())
 	_, err := plans.Enter("plan")
 	require.NoError(t, err)
-	for _, name := range []string{"bash", "parallel_bash", "apply_patch", "agent", "mcp_fixture_mutate"} {
+	for _, name := range []string{"bash", "parallel_bash", "apply_patch", "agent", "mcp_fixture_mutate", "archive_query", "read_resource", "read_resources", "list_resources"} {
 		t.Run(name, func(t *testing.T) {
 			ran := false
 			perms := permission.NewPermissionService(t.TempDir(), true, []string{name})
@@ -324,4 +324,28 @@ func TestPlanGuardRejectsUnprovenMutationsDespitePermissionGrants(t *testing.T) 
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.True(t, ran)
+}
+
+func TestPlanGuardAllowsRegisteredInspectionTools(t *testing.T) {
+	t.Parallel()
+	plans := plan.NewService(t.TempDir())
+	_, err := plans.Enter("inspection-plan")
+	require.NoError(t, err)
+	inspectionTools := []fantasy.AgentTool{
+		tools.NewArchiveQueryTool(nil, t.TempDir()),
+		tools.NewReadMCPResourceTool(nil, nil),
+		tools.NewListMCPResourcesTool(nil, nil),
+	}
+	for _, registered := range inspectionTools {
+		name := registered.Info().Name
+		t.Run(name, func(t *testing.T) {
+			ran := false
+			inner := planGuardRecordingTool{name: name, ran: &ran}
+			wrapped := wrapToolsWithPlanGuard([]fantasy.AgentTool{inner}, plans, nil, t.TempDir())[0]
+			response, err := wrapped.Run(planTestContext("inspection-plan"), fantasy.ToolCall{Name: name, Input: `{}`})
+			require.NoError(t, err)
+			require.False(t, response.IsError, response.Content)
+			require.True(t, ran, "registered inspection tool must execute in plan mode")
+		})
+	}
 }
