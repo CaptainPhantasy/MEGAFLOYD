@@ -63,3 +63,32 @@ func TestDeletionCopyActualParallelRecovery(t *testing.T) {
 		require.Equal(t, expected, string(data), name)
 	}
 }
+
+func TestDeletionCopyCompoundCannotEnterTool(t *testing.T) {
+	for _, command := range []string{
+		"truncate -s 0 destination; cp source destination",
+		"rm destination; cp source destination",
+		"cp source destination; truncate -s 0 destination",
+		"cp source destination; cp other destination",
+	} {
+		t.Run(command, func(t *testing.T) {
+			f := newDeletionFixture(t)
+			f.answers = []bool{true, true}
+			for _, name := range []string{"source", "other", "destination"} {
+				require.NoError(t, os.WriteFile(f.target(name), []byte(name), 0o600))
+			}
+			// The recording body never executes shell commands. Unsupported
+			// source-bearing compounds must be denied even with two answers.
+			response, ran := f.run("compound-copy", command)
+			require.False(t, ran, "an unbound compound copy must never enter the tool")
+			require.True(t, response.IsError, response.Content)
+			require.Empty(t, f.asked)
+			require.Empty(t, f.record("compound-copy").Attempts)
+			for _, name := range []string{"source", "other", "destination"} {
+				data, err := os.ReadFile(f.target(name))
+				require.NoError(t, err)
+				require.Equal(t, name, string(data))
+			}
+		})
+	}
+}

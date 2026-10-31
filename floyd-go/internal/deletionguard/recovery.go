@@ -156,11 +156,14 @@ func sameOperation(a Approval, c Classification) bool {
 		return false
 	}
 	for _, target := range a.Targets {
-		if a.Snapshots[target] == "" || a.Operations[target] == "" {
+		if a.Snapshots[target] == "" || a.Operations[target] == "" || compoundSourceOperation(a.Operations[target]) {
 			return false
 		}
 	}
 	for _, target := range c.Targets {
+		if compoundSourceOperation(c.Operations[target]) {
+			return false
+		}
 		if source, move := moveSource(target, c.Operations[target]); move && (a.Moves[target].Path != source || a.Moves[target].Identity == "" || a.Moves[target].Relocated == "") {
 			return false
 		}
@@ -648,6 +651,9 @@ func moveSource(target, signature string) (string, bool) {
 func captureMoveSources(c Classification) (map[string]MoveSource, error) {
 	var moves map[string]MoveSource
 	for _, target := range c.Targets {
+		if compoundSourceOperation(c.Operations[target]) {
+			return nil, errors.New("compound copy/move effects cannot verify their source identity; run separately bound operations")
+		}
 		source, move := moveSource(target, c.Operations[target])
 		if !move {
 			continue
@@ -672,6 +678,9 @@ func captureMoveSources(c Classification) (map[string]MoveSource, error) {
 }
 
 func unchangedMoveSource(a Approval, target string) bool {
+	if compoundSourceOperation(a.Operations[target]) {
+		return false
+	}
 	source, move := moveSource(target, a.Operations[target])
 	if !move {
 		return true
@@ -722,6 +731,9 @@ func copySource(target, signature string) (string, bool) {
 func captureCopySources(c Classification) (map[string]CopySource, error) {
 	var copies map[string]CopySource
 	for _, target := range c.Targets {
+		if compoundSourceOperation(c.Operations[target]) {
+			return nil, errors.New("compound copy/move effects cannot verify their source identity; run separately bound operations")
+		}
 		source, copy := copySource(target, c.Operations[target])
 		if !copy {
 			continue
@@ -787,6 +799,9 @@ func captureCopySources(c Classification) (map[string]CopySource, error) {
 }
 
 func unchangedCopySource(a Approval, target string) bool {
+	if compoundSourceOperation(a.Operations[target]) {
+		return false
+	}
 	source, copy := copySource(target, a.Operations[target])
 	if !copy {
 		return true
@@ -980,4 +995,21 @@ func copyMetadata(info os.FileInfo) (string, error) {
 	}
 	bytes, err := json.Marshal([]any{info.Mode().String(), info.ModTime().UnixNano(), uid.Interface(), gid.Interface()})
 	return string(bytes), err
+}
+
+// A single-source binder must never treat an unsupported compound signature as
+// source-free. Inspect every per-target operation, independent of whichever
+// command name the combined classification reports. Legacy approvals with these
+// unbound source effects cannot be reused or launched after a restart.
+func compoundSourceOperation(signature string) bool {
+	var operations [][]string
+	if json.Unmarshal([]byte(signature), &operations) != nil || len(operations) <= 1 {
+		return false
+	}
+	for _, operation := range operations {
+		if len(operation) > 0 && (filepath.Base(operation[0]) == "cp" || filepath.Base(operation[0]) == "mv") {
+			return true
+		}
+	}
+	return false
 }

@@ -2,6 +2,8 @@ package deletionguard
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -418,4 +420,82 @@ func TestCopyRecoveryMissingOriginalDestinationPayloadFailsClosed(t *testing.T) 
 			require.Empty(t, record.Executions)
 		})
 	}
+}
+
+func TestCopyRecoveryRefusesCompoundSourceOperationsBeforeConfirmations(t *testing.T) {
+	for _, command := range []string{"truncate -s 0 b; cp source b", "rm b; cp source b"} {
+		t.Run(command, func(t *testing.T) {
+			guard, dir, _, confirmer := recoveryFixture(t)
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "source"), []byte("approved source"), 0o600))
+			c := Classify(command, dir)
+			require.True(t, c.IsDestructive())
+			require.Empty(t, c.Unresolved, "regression must reach recovery validation")
+			before := confirmer.calls
+			decision := guard.Check(t.Context(), "compound-copy", "approve", c)
+			require.False(t, decision.Allowed, "compound copy must not be treated as source-free")
+			require.Equal(t, before, confirmer.calls)
+			record, err := guard.Ledger().Read("compound-copy")
+			require.NoError(t, err)
+			require.Empty(t, record.Confirmations)
+			require.Empty(t, record.Approvals)
+		})
+	}
+}
+
+func TestCopyRecoveryLegacyCompoundApprovalCannotLaunchChangedSource(t *testing.T) {
+	for _, command := range []string{"truncate -s 0 b; cp source b", "rm b; cp source b"} {
+		t.Run(command, func(t *testing.T) {
+			guard, dir, _, _ := recoveryFixture(t)
+			source := filepath.Join(dir, "source")
+			require.NoError(t, os.WriteFile(source, []byte("original source"), 0o600))
+			c := Classify(command, dir)
+			snapshots, err := snapshotTargets(c.Targets)
+			require.NoError(t, err)
+			record, err := guard.Ledger().Read("legacy-compound")
+			require.NoError(t, err)
+			// This is the protected record produced by the previous implementation:
+			// two answers and target snapshots, with compound copy source unbound.
+			record.Approvals = []Approval{{TargetSet: c.Digest(), Targets: c.Targets, Command: c.Command, Recursive: c.Recursive, Snapshots: snapshots, Operations: c.Operations}}
+			for stage := 1; stage <= 2; stage++ {
+				record.Confirmations = append(record.Confirmations, Confirmation{ID: fmt.Sprintf("legacy-%d", stage), Stage: stage, TargetSet: c.Digest(), Targets: c.Targets, Source: humanSource, RecordedAt: time.Unix(1700000000+int64(stage), 0).UTC().Format(time.RFC3339Nano)})
+			}
+			require.NoError(t, guard.ledger.write("legacy-compound", record))
+			require.NoError(t, os.Rename(source, filepath.Join(dir, "quarantined-original-source")))
+			require.NoError(t, os.WriteFile(source, []byte("substituted source"), 0o600))
+			restarted := testGuard(guard.ledger.dataDir, nil)
+			require.Error(t, restarted.BeginExecution("legacy-compound", c, "launch"), "changed compound source cannot bypass locked launch validation")
+			require.False(t, restarted.Check(t.Context(), "legacy-compound", "retry", c).Allowed)
+			after, err := guard.Ledger().Read("legacy-compound")
+			require.NoError(t, err)
+			require.Empty(t, after.Attempts)
+			require.Len(t, after.Confirmations, 2)
+		})
+	}
+}
+
+func TestCopyRecoveryCompoundMoveAndCopyDescriptorsCannotSkipBinding(t *testing.T) {
+	dir := t.TempDir()
+	target, source := filepath.Join(dir, "destination"), filepath.Join(dir, "source")
+	for _, command := range []string{"cp", "mv"} {
+		for _, first := range []bool{false, true} {
+			operations := [][]string{{"truncate", "-s", "0"}, {command, source, target}}
+			if first {
+				operations[0], operations[1] = operations[1], operations[0]
+			}
+			encoded, err := json.Marshal(operations)
+			require.NoError(t, err)
+			signature := string(encoded)
+			require.True(t, compoundSourceOperation(signature))
+			c := Classification{Effect: EffectPermanentDeletion, Targets: []string{target}, Operations: map[string]string{target: signature}}
+			approval := Approval{TargetSet: c.Digest(), Targets: c.Targets, Snapshots: map[string]string{target: "snapshot"}, Operations: c.Operations}
+			require.False(t, sameOperation(approval, c))
+			require.False(t, unchangedCopySource(approval, target))
+			require.False(t, unchangedMoveSource(approval, target))
+			_, err = captureCopySources(c)
+			require.Error(t, err)
+			_, err = captureMoveSources(c)
+			require.Error(t, err)
+		}
+	}
+	require.False(t, compoundSourceOperation(`[["truncate","-s","0"],["rm"]]`), "compound operations without external source binding retain existing handling")
 }
