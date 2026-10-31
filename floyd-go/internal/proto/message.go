@@ -21,6 +21,7 @@ type CreateMessageParams struct {
 
 // Message represents a message in the proto layer.
 type Message struct {
+	RunID            string        `json:"run_id,omitempty"`
 	ID               string        `json:"id"`
 	Role             MessageRole   `json:"role"`
 	SessionID        string        `json:"session_id"`

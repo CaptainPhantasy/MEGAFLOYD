@@ -18,13 +18,14 @@ const DefaultStatusTTL = 5 * time.Second
 
 // Status is the status bar and help model.
 type Status struct {
-	com        *common.Common
-	hideHelp   bool
-	help       help.Model
-	helpKm     help.KeyMap
-	msg        util.InfoMsg
-	width      int
-	planActive bool
+	com         *common.Common
+	hideHelp    bool
+	help        help.Model
+	helpKm      help.KeyMap
+	msg         util.InfoMsg
+	width       int
+	planActive  bool
+	swarmActive bool
 }
 
 // NewStatus creates a new status bar and help model.
@@ -63,34 +64,67 @@ func (s *Status) SetPlanActive(active bool) {
 	s.applyHelpWidth()
 }
 
+// SetSwarmActive shows or hides the swarm-mode pill. Swarm state is per
+// session and durable, so the pill reflects stored state rather than a
+// transient toggle.
+func (s *Status) SetSwarmActive(active bool) {
+	if s.swarmActive == active {
+		return
+	}
+	s.swarmActive = active
+	s.applyHelpWidth()
+}
+
 func (s *Status) applyHelpWidth() {
 	helpStyle := s.com.Styles.Status.Help
 	horizontalPadding := helpStyle.GetPaddingLeft() + helpStyle.GetPaddingRight()
 	width := s.width - horizontalPadding
-	if s.planActive {
-		width -= lipgloss.Width(s.planPill()) + 1
-	}
+	width -= s.pillsWidth()
 	s.help.SetWidth(max(width, 0))
 }
 
-func (s *Status) planPill() string {
+// pills returns the active mode pills in draw order, left to right.
+func (s *Status) pills() []string {
 	// Pills.Focused carries a rounded border, which is three rows tall.
 	// The status bar is one row, so use the borderless base pill.
-	return s.com.Styles.Pills.Base.Render("plan")
+	var out []string
+	if s.planActive {
+		out = append(out, s.com.Styles.Pills.Base.Render("plan"))
+	}
+	if s.swarmActive {
+		out = append(out, s.com.Styles.Pills.Base.Render("swarm"))
+	}
+	return out
 }
 
-func (s *Status) drawPlanPill(scr uv.Screen, area uv.Rectangle) {
-	if !s.planActive {
+// pillsWidth is the horizontal space the mode pills occupy, including
+// the one-column gap before each.
+func (s *Status) pillsWidth() int {
+	width := 0
+	for _, pill := range s.pills() {
+		width += lipgloss.Width(pill) + 1
+	}
+	return width
+}
+
+func (s *Status) drawPills(scr uv.Screen, area uv.Rectangle) {
+	pills := s.pills()
+	if len(pills) == 0 {
 		return
 	}
-	pill := s.planPill()
-	width := lipgloss.Width(pill)
-	if width == 0 || width >= area.Dx() {
-		return
+	x := area.Max.X
+	// Draw right to left so the first pill in the list stays leftmost.
+	for i := len(pills) - 1; i >= 0; i-- {
+		width := lipgloss.Width(pills[i])
+		if width == 0 || width >= area.Dx() {
+			continue
+		}
+		x -= width
+		pillArea := area
+		pillArea.Min.X = x
+		uv.NewStyledString(pills[i]).Draw(scr, pillArea)
+		x -= 1
 	}
-	pillArea := area
-	pillArea.Min.X = area.Max.X - width
-	uv.NewStyledString(pill).Draw(scr, pillArea)
 }
 
 // ShowingAll returns whether the full help view is shown.
@@ -117,7 +151,7 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 
 	// Render notifications
 	if s.msg.IsEmpty() {
-		s.drawPlanPill(scr, area)
+		s.drawPills(scr, area)
 		return
 	}
 
@@ -145,11 +179,9 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	indWidth := lipgloss.Width(ind)
 	msgPad := msgStyle.GetPaddingLeft() + msgStyle.GetPaddingRight()
 	avail := max(0, area.Dx()-indWidth-msgPad)
-	// The plan pill is drawn last so notifications cannot hide the mode.
-	// Reserve its width here or the message tail is painted over.
-	if s.planActive {
-		avail = max(0, avail-lipgloss.Width(s.planPill())-1)
-	}
+	// Mode pills are drawn last so notifications cannot hide them.
+	// Reserve their width here or the message tail is painted over.
+	avail = max(0, avail-s.pillsWidth())
 	msg := strings.Join(strings.Split(s.msg.Msg, "\n"), " ")
 	msg = ansi.Truncate(msg, avail, "…")
 	if w := lipgloss.Width(msg); w < avail {
@@ -160,9 +192,9 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	// Draw the info message over the help view
 	uv.NewStyledString(ind+info).Draw(scr, area)
 
-	// The plan pill is drawn last so transient notifications never hide
-	// the active mode.
-	s.drawPlanPill(scr, area)
+	// The mode pills are drawn last so transient notifications never hide
+	// an active mode.
+	s.drawPills(scr, area)
 }
 
 // clearInfoMsgCmd returns a command that clears the info message after the

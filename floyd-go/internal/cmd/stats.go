@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"html/template"
 	"os"
 	"os/user"
@@ -17,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/db"
@@ -157,17 +158,24 @@ func runStats(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("failed to gather stats from projects: %w", err)
 		}
 	default:
-		cfg, err := config.Init("", dataDir, false)
+		cwd, err := ResolveCwd(cmd)
 		if err != nil {
-			return fmt.Errorf("failed to initialize config: %w", err)
+			return err
 		}
-		if dataDir == "" {
-			dataDir = cfg.Config().Options.DataDirectory
+		cfg, _, err := config.Inspect(ctx, cwd, dataDir)
+		if err != nil {
+			return fmt.Errorf("read configuration: %w", err)
 		}
-		if shouldEnableMetrics(cfg.Config()) {
+		dataDir = cfg.Options.DataDirectory
+		if _, err := os.Stat(filepath.Join(dataDir, "floyd.db")); os.IsNotExist(err) {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No usage yet. Start a session to record token usage and costs.")
+			return err
+		} else if err != nil {
+			return err
+		}
+		if shouldEnableMetrics(cfg) {
 			event.Init()
 		}
-
 		event.StatsViewed()
 
 		conn, err := db.Connect(ctx, dataDir)
@@ -185,14 +193,16 @@ func runStats(cmd *cobra.Command, _ []string) error {
 	}
 
 	if len(projectStats) == 0 {
-		return fmt.Errorf("no data available: no projects found")
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "No usage yet. No projects have recorded sessions.")
+		return err
 	}
 
 	// Merge stats from all projects.
 	mergedStats := mergeStats(projectStats)
 
 	if mergedStats.Total.TotalSessions == 0 {
-		return fmt.Errorf("no data available: no sessions found in database")
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "No usage yet. Start a session to record token usage and costs.")
+		return err
 	}
 
 	currentUser, err := user.Current()
@@ -217,9 +227,9 @@ func runStats(cmd *cobra.Command, _ []string) error {
 
 	outputDataDir := dataDir
 	if outputDataDir == "" {
-		cfg, err := config.Init("", "", false)
+		cfg, _, err := inspectCommandConfig(cmd)
 		if err == nil {
-			outputDataDir = cfg.Config().Options.DataDirectory
+			outputDataDir = cfg.Options.DataDirectory
 		}
 	}
 	if outputDataDir == "" {

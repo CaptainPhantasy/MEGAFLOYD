@@ -16,6 +16,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/deletionguard"
 	"github.com/legacy-ai/floyd/internal/hookruntime"
+	"github.com/legacy-ai/floyd/internal/permission"
 	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/pubsub"
 	"github.com/legacy-ai/floyd/internal/question"
@@ -96,6 +97,9 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 	defer accept.Close()
 
 	ctx := ws.ctx
+	if msg.NonInteractive {
+		ctx = permission.WithNonInteractive(ctx)
+	}
 	if msg.RunID != "" {
 		ctx = agent.WithRunID(ctx, msg.RunID)
 	}
@@ -106,7 +110,7 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 		// A clean completion (err == nil, no cancel raced the context)
 		// may trigger the heartbeat auto-continue so the session does
 		// not sit idle between turns.
-		if err == nil && ctx.Err() == nil {
+		if err == nil && ctx.Err() == nil && !msg.NonInteractive {
 			b.maybeHeartbeat(ws, msg)
 		}
 		return

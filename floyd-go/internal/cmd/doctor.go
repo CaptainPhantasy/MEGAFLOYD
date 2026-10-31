@@ -1,81 +1,105 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
-	"time"
 
-	"github.com/legacy-ai/floyd/internal/config"
-	"github.com/legacy-ai/floyd/internal/runhealth"
+	"github.com/legacy-ai/floyd/internal/agent/prompt"
+	"github.com/legacy-ai/floyd/internal/version"
 	"github.com/spf13/cobra"
 )
 
 var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Show MegaFloyd runtime health and resilience state",
-	Long:  "Displays quality gates, degradation controls, consistency lock, auto-stabilize status, and recent failure/circuit state.",
+	Use: "doctor", Short: "Check the installation, configuration, models, and tool environment",
+	Long: "Inspect this binary and effective workspace configuration without starting an agent or contacting model providers. Use mcp test to check live MCP connections.", Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		cwd, err := ResolveCwd(cmd)
 		if err != nil {
 			return err
 		}
-		dataDir, _ := cmd.Flags().GetString("data-dir")
-		cfgStore, err := config.Load(cwd, dataDir, false)
+		cfg, paths, err := inspectCommandConfig(cmd)
 		if err != nil {
-			return fmt.Errorf("failed to initialize config: %w", err)
+			return fmt.Errorf("configuration invalid: %w", err)
 		}
-		cfg := cfgStore.Config()
-
-		isSF := runhealth.Enabled()
-		legacyControls := isSuperFloydBinary()
-		st, err := loadRuntimeHealth(cfg.Options.DataDirectory)
+		exe, err := os.Executable()
 		if err != nil {
 			return err
 		}
-		st.Failures = keepRecentFailures(st.Failures, time.Now().Add(-retryBudgetWindow).Unix())
-		stabilizeNow := legacyControls && shouldStabilizeFromBenchmarks(cmd.Context(), cfgStore)
-		consistencyErr := enforceConsistencyLock(cfgStore)
-
-		fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-		fmt.Println("║                     MegaFloyd DOCTOR                       ║")
-		fmt.Println("╠══════════════════════════════════════════════════════════════╣")
-		fmt.Printf("║ Binary lane                : %-31s ║\n", yesNo(isSF))
-		fmt.Printf("║ Active mode                : %-31s ║\n", truncate(strings.ToUpper(cmd.Root().Use), 31))
-		fmt.Printf("║ Max parallelism            : %-31s ║\n", getMaxParallelism())
-		fmt.Printf("║ Quality gates enabled      : %-31s ║\n", yesNo(legacyControls && qualityGatesEnabled()))
-		fmt.Printf("║ Degradation controls       : %-31s ║\n", yesNo(isSF))
-		fmt.Printf("║ Consistency lock enabled   : %-31s ║\n", yesNo(legacyControls && consistencyLockEnabled()))
-		fmt.Printf("║ Auto-stabilize enabled     : %-31s ║\n", yesNo(legacyControls && autoStabilizeEnabled()))
-		fmt.Printf("║ Auto-stabilize active now  : %-31s ║\n", yesNo(stabilizeNow))
-		fmt.Printf("║ Runtime data dir           : %-31s ║\n", truncate(cfg.Options.DataDirectory, 31))
-		fmt.Printf("║ Failure records (1h)       : %-31d ║\n", len(st.Failures))
-		fmt.Println("╠══════════════════════════════════════════════════════════════╣")
-		if !legacyControls {
-			fmt.Printf("║ Consistency check          : %-31s ║\n", "inactive")
-		} else if consistencyErr == nil {
-			fmt.Printf("║ Consistency check          : %-31s ║\n", "PASS")
+		type check struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+			Detail string `json:"detail"`
+		}
+		checks := []check{{"binary", "ok", exe}, {"version", "ok", version.Version + " (build " + version.BuildID + ")"}, {"platform", "ok", runtime.GOOS + "/" + runtime.GOARCH}, {"workspace", "ok", cwd}, {"data_directory", "ok", cfg.Options.DataDirectory}, {"configuration", "ok", fmt.Sprintf("%d file(s) loaded", len(paths))}}
+		if version.Version == "devel" {
+			checks[1].Status = "development"
+		}
+		for _, name := range []string{"git", "rg", "sh"} {
+			path, err := exec.LookPath(name)
+			status := "ok"
+			if err != nil {
+				status = "missing"
+				path = "Install " + name + " or add it to PATH"
+			}
+			checks = append(checks, check{name, status, path})
+		}
+		providers := cfg.Providers.Copy()
+		enabled := 0
+		for _, p := range providers {
+			if !p.Disable {
+				enabled++
+			}
+		}
+		state := "ok"
+		detail := fmt.Sprintf("%d configured provider(s); credentials and connectivity are not probed", enabled)
+		if enabled == 0 {
+			state = "setup_required"
+			detail = "Run megafloyd to select a provider, or megafloyd config set providers.<id> '<JSON>'"
+		}
+		checks = append(checks, check{"providers", state, detail})
+		for slot, selection := range cfg.Models {
+			state := "ok"
+			if !cfg.IsModelAvailable(selection.Provider, selection.Model) {
+				state = "missing"
+			}
+			checks = append(checks, check{"model_" + string(slot), state, selection.Provider + "/" + selection.Model})
+		}
+		standard := prompt.CheckStandard(prompt.StandardPolicySHA256(), prompt.StandardCandidates())
+		state = "embedded"
+		if standard.BundlePath != "" {
+			state = "ok"
+		}
+		if standard.BundlePresent && !standard.Match {
+			state = "mismatch"
+		}
+		checks = append(checks, check{"instruction_standard", state, standard.LoadedSHA256})
+		asJSON, _ := cmd.Flags().GetBool("json")
+		if asJSON {
+			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(checks); err != nil {
+				return err
+			}
 		} else {
-			fmt.Printf("║ Consistency check          : %-31s ║\n", "FAIL")
-			fmt.Printf("║ Consistency detail         : %-31s ║\n", truncate(consistencyErr.Error(), 31))
+			for _, c := range checks {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%-22s %-15s %s\n", c.Name, c.Status, c.Detail); err != nil {
+					return err
+				}
+			}
+			for _, path := range paths {
+				fmt.Fprintf(cmd.OutOrStdout(), "Loaded configuration: %s\n", path)
+			}
 		}
-
-		if len(st.Failures) > 0 {
-			last := st.Failures[len(st.Failures)-1]
-			fmt.Printf("║ Last failure hash          : %-31s ║\n", truncate(last.Hash, 31))
-			fmt.Printf("║ Last failure class         : %-31s ║\n", truncate(last.ExitClass, 31))
-			fmt.Printf("║ Last failure message       : %-31s ║\n", truncate(last.Message, 31))
+		if standard.BundlePresent && !standard.Match {
+			return fmt.Errorf("instruction standard differs from the embedded build; rebuild or restore the matching package")
 		}
-		fmt.Println("╚══════════════════════════════════════════════════════════════╝")
-
-		if !isSF {
-			fmt.Println("Note: persistent run health is disabled for this runtime profile.")
-		}
-		fmt.Println("Env toggles: SUPERFLOYD_QUALITY_GATES, SUPERFLOYD_DEGRADATION_CONTROLS, SUPERFLOYD_CONSISTENCY_LOCK, SUPERFLOYD_AUTOSTABILIZE")
 		return nil
 	},
 }
 
+func init() { doctorCmd.Flags().Bool("json", false, "Emit structured diagnostic results") }
 func yesNo(v bool) string {
 	if v {
 		return "yes"
@@ -85,10 +109,10 @@ func yesNo(v bool) string {
 
 func truncate(s string, max int) string {
 	s = strings.TrimSpace(s)
-	if len([]rune(s)) <= max {
+	r := []rune(s)
+	if len(r) <= max {
 		return s
 	}
-	r := []rune(s)
 	if max <= 1 {
 		return string(r[:max])
 	}
@@ -96,9 +120,8 @@ func truncate(s string, max int) string {
 }
 
 func getMaxParallelism() string {
-	v := os.Getenv("SUPERFLOYD_MAX_PARALLEL")
-	if v == "" {
-		return "default (1)"
+	if v := os.Getenv("SUPERFLOYD_MAX_PARALLEL"); v != "" {
+		return v
 	}
-	return v
+	return "default (1)"
 }

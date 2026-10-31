@@ -6,9 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -269,7 +272,16 @@ func Ship(endpoint string, events []Event, allowRemote bool) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	response, err := http.Post(endpoint, "application/json", bytes.NewReader(body))
+	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(request *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("too many redirects")
+		}
+		if !allowRemote && !isLocalEndpoint(request.URL.String()) {
+			return fmt.Errorf("refusing to redirect local telemetry to non-local endpoint")
+		}
+		return nil
+	}}
+	response, err := client.Post(endpoint, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return 0, fmt.Errorf("post traces: %w", err)
 	}
@@ -281,10 +293,14 @@ func Ship(endpoint string, events []Event, allowRemote bool) (int, error) {
 }
 
 func isLocalEndpoint(endpoint string) bool {
-	for _, prefix := range []string{"http://127.0.0.1", "http://localhost", "http://[::1]"} {
-		if len(endpoint) >= len(prefix) && endpoint[:len(prefix)] == prefix {
-			return true
-		}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
 	}
-	return false
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

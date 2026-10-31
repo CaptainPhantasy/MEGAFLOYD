@@ -458,3 +458,23 @@ func TestBuildAuthRuntimeRequiresHost(t *testing.T) {
 	_, err := buildAuthRuntime()
 	require.ErrorIs(t, err, megafloydauth.ErrNotConfigured)
 }
+
+func TestSetupTokenRunsDeviceFlowAndStoresCredential(t *testing.T) {
+	now := time.Now()
+	token := megafloydauth.Token{AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ExpiresAt: now.Add(time.Hour).Unix(), TokenType: "Bearer"}
+	flow := &fakeAuthFlow{auth: megafloydauth.DeviceAuthorization{DeviceCode: "fixture", UserCode: "TEST-ONLY"}, polls: []megafloydauth.PollResult{{Status: megafloydauth.PollSuccess, Token: token}}}
+	manager, store, name := newTestManager(t, flow, now)
+	path, err := store.Path(name)
+	require.NoError(t, err)
+	useAuthRuntime(t, &authRuntime{Manager: manager, StorePath: path, Host: "fixture"})
+	c, _, err := rootCmd.Find([]string{"setup-token"})
+	require.NoError(t, err)
+	out, err := runAuthCommand(t, c, c.RunE)
+	require.NoError(t, err)
+	require.Contains(t, out, "Logged in")
+	require.NotContains(t, out, "fixture-access")
+	stored, ok, err := store.Load(name)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, token, stored)
+}

@@ -14,6 +14,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/list"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
+	"github.com/legacy-ai/floyd/internal/ui/util"
 )
 
 // CommandsID is the identifier for the commands dialog.
@@ -105,7 +106,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 	c.input.Focus()
 
 	c.keyMap.Select = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
+		key.WithKeys("enter"),
 		key.WithHelp("enter", "confirm"),
 	)
 	c.keyMap.UpDown = key.NewBinding(
@@ -122,11 +123,11 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 	)
 	c.keyMap.Tab = key.NewBinding(
 		key.WithKeys("tab"),
-		key.WithHelp("tab", "switch selection"),
+		key.WithHelp("tab", "next category"),
 	)
 	c.keyMap.ShiftTab = key.NewBinding(
 		key.WithKeys("shift+tab"),
-		key.WithHelp("shift+tab", "switch selection prev"),
+		key.WithHelp("shift+tab", "previous category"),
 	)
 	closeKey := CloseKey
 	closeKey.SetHelp("esc", "cancel")
@@ -159,21 +160,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		c.dockerMCPAvailable = &msg.available
 		c.dockerMCPCheckInFlight = false
 		if c.selected == SystemCommands {
-			// Preserve the current selection across the rebuild to avoid reset
-			var prevID string
-			if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
-				prevID = item.id
-			}
-			c.setCommandItems(c.selected)
-			if prevID != "" {
-				for i, it := range c.list.FilteredItems() {
-					if ci, ok := it.(*CommandItem); ok && ci != nil && ci.id == prevID {
-						c.list.SetSelected(i)
-						c.list.ScrollToSelected()
-						break
-					}
-				}
-			}
+			c.refreshCommandItems()
 		}
 		return nil
 	case spinner.TickMsg:
@@ -214,14 +201,15 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 				if name == "" {
 					break
 				}
-				_, known := commands.Builtin(strings.ToLower(name))
-				exact := false
-				if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
-					exact = item.ID() == "cmd_"+strings.ToLower(name)
-				}
-				hasArgs := len(fields) > 1
+				spec, known := commands.Builtin(strings.ToLower(name))
 				slashPrefixed := strings.HasPrefix(typed, "/")
-				if (hasArgs && known) || (slashPrefixed && !exact) {
+				// An exact command name is an invocation. Fuzzy matches in
+				// another row's argument hint must not redirect it (for
+				// example, "provider" also matches /logout [provider]).
+				if known && len(fields) == 1 {
+					return ActionRunBuiltin{Name: spec.Name, FromPalette: true}
+				}
+				if known || slashPrefixed {
 					input := typed
 					if !slashPrefixed {
 						input = "/" + typed
@@ -234,6 +222,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 					return item.Action()
 				}
 			}
+			return ActionCmd{Cmd: util.ReportWarn("No matching command. Change the filter or press Esc to go back.")}
 		case key.Matches(msg, c.keyMap.Tab):
 			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
 				c.selected = c.nextCommandType()
@@ -362,19 +351,21 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // ShortHelp implements [help.KeyMap].
 func (c *Commands) ShortHelp() []key.Binding {
-	return []key.Binding{
-		c.keyMap.Tab,
+	bindings := []key.Binding{
 		c.keyMap.UpDown,
 		c.keyMap.Select,
 		c.keyMap.Close,
 	}
+	if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
+		bindings = append([]key.Binding{c.keyMap.Tab, c.keyMap.ShiftTab}, bindings...)
+	}
+	return bindings
 }
 
 // FullHelp implements [help.KeyMap].
 func (c *Commands) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{c.keyMap.Select, c.keyMap.Next, c.keyMap.Previous, c.keyMap.Tab},
-		{c.keyMap.Close},
+		c.ShortHelp(),
 	}
 }
 
@@ -472,6 +463,26 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 	c.input.SetValue("")
 }
 
+// refreshCommandItems retains input and selection when background discovery
+// updates a category. Only an explicit category change resets the filter.
+func (c *Commands) refreshCommandItems() {
+	query := c.input.Value()
+	var selectedID string
+	if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
+		selectedID = item.id
+	}
+	c.setCommandItems(c.selected)
+	c.input.SetValue(query)
+	c.list.SetFilter(strings.TrimPrefix(query, "/"))
+	for i, item := range c.list.FilteredItems() {
+		if command, ok := item.(*CommandItem); ok && command.id == selectedID {
+			c.list.SetSelected(i)
+			c.list.ScrollToSelected()
+			break
+		}
+	}
+}
+
 // builtinShortcut returns the keybinding hint for a builtin command, or
 // the empty string when the command has no direct keybinding.
 func builtinShortcut(name string) string {
@@ -507,7 +518,7 @@ func builtinPaletteItems(t *styles.Styles) []*CommandItem {
 			"/"+spec.Name,
 			builtinShortcut(spec.Name),
 			ActionRunBuiltin{Name: spec.Name, FromPalette: true},
-		).WithDescription(spec.Description)
+		).WithDescription(spec.Description).WithArgumentHint(spec.ArgumentHint)
 		if len(spec.Aliases) > 0 {
 			item = item.WithAliases(spec.Aliases...)
 		}
@@ -585,7 +596,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
 	c.customCommands = customCommands
 	if c.selected == UserCommands {
-		c.setCommandItems(c.selected)
+		c.refreshCommandItems()
 	}
 }
 
@@ -593,7 +604,7 @@ func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
 func (c *Commands) SetMCPPrompts(mcpPrompts []commands.MCPPrompt) {
 	c.mcpPrompts = mcpPrompts
 	if c.selected == MCPPrompts {
-		c.setCommandItems(c.selected)
+		c.refreshCommandItems()
 	}
 }
 

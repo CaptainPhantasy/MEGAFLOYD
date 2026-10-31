@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/agent"
 	"github.com/legacy-ai/floyd/internal/agent/notify"
 	agentprompt "github.com/legacy-ai/floyd/internal/agent/prompt"
@@ -120,6 +122,7 @@ func NewWithQuestionService(ctx context.Context, conn *sql.DB, store *config.Con
 	messages := message.NewService(q, message.WithDB(conn))
 	files := history.NewService(q, conn)
 	cfg := store.Config()
+	question.ConfigureStorage(questions, filepath.Join(cfg.Options.DataDirectory, "question-answers"))
 	if err := ConfigureOutputReview(ctx, messages, cfg); err != nil {
 		return nil, fmt.Errorf("initialize output review: %w", err)
 	}
@@ -316,6 +319,7 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 // given prompt, printing to stdout.
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {
 	slog.Info("Running in non-interactive mode")
+	ctx = permission.WithNonInteractive(agent.WithRunID(ctx, uuid.NewString()))
 
 	// Re-initialize the coder agent without interactive-only tools.
 	if err := app.InitCoderAgentNonInteractive(ctx); err != nil {
@@ -374,7 +378,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 
 	// force update of agent models before running so mcp tools are loaded
-	app.AgentCoordinator.UpdateModels(ctx)
+	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
+		return err
+	}
 
 	defer stopSpinner()
 
@@ -397,9 +403,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 	}
 
-	// Automatically approve all permission requests for this non-interactive
-	// session.
-	app.Permissions.AutoApproveSession(sess.ID)
+	if sink, ok := output.(interface{ SetSession(string) }); ok {
+		sink.SetSession(sess.ID)
+	}
 
 	// Report session identity to herdr.
 	app.ReportCurrentSession(sess.ID)
@@ -409,6 +415,8 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		err    error
 	}
 	done := make(chan response, 1)
+	messageEvents := app.Messages.Subscribe(ctx)
+	completions := app.runCompletions.Subscribe(ctx)
 
 	go func(ctx context.Context, sessionID, prompt string) {
 		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
@@ -423,7 +431,6 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}(ctx, sess.ID, prompt)
 
-	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
 	var printed bool
 
@@ -447,18 +454,39 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		select {
 		case result := <-done:
 			stopSpinner()
-			if result.err != nil {
-				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
-					slog.Debug("Non-interactive: agent processing cancelled", "session_id", sess.ID)
-					return nil
+			// The run publishes its authoritative completion before returning.
+			// Reconcile it even if select observed done before the last message.
+			rc, completeSeen := takeRunCompletion(completions, sess.ID, agent.RunIDFromContext(ctx))
+			if completeSeen {
+				if rc.Cancelled {
+					return context.Canceled
 				}
+				if rc.Error != "" {
+					return fmt.Errorf("agent processing failed: %s", rc.Error)
+				}
+				if rc.MessageID != "" {
+					n := messageReadBytes[rc.MessageID]
+					if n < len(rc.Text) {
+						if _, err := io.WriteString(output, rc.Text[n:]); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			if result.err != nil {
 				return fmt.Errorf("agent processing failed: %w", result.err)
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if !completeSeen {
+				return fmt.Errorf("agent returned without a confirmed run completion")
 			}
 			return nil
 
 		case event := <-messageEvents:
 			msg := event.Payload
-			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
+			if msg.SessionID == sess.ID && msg.RunID == agent.RunIDFromContext(ctx) && msg.Role == message.Assistant && len(msg.Parts) > 0 {
 				stopSpinner()
 
 				content := msg.Content().String()
@@ -478,7 +506,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 				// Ignore initial whitespace-only messages.
 				if printed || strings.TrimSpace(part) != "" {
 					printed = true
-					fmt.Fprint(output, part)
+					if _, err := fmt.Fprint(output, part); err != nil {
+						return err
+					}
 				}
 				messageReadBytes[msg.ID] = len(content)
 			}

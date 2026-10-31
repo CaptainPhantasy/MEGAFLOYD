@@ -182,12 +182,12 @@ func formatQuestionAnswers(sty *styles.Styles, content string, width int) string
 		// Show question text in subtle style, answer on same line.
 		qText := sty.Tool.TodoStatusNote.Render(b.question)
 		line := fmt.Sprintf("%s %s %s", icon, qText, answer)
-		line = ansi.Truncate(line, width, "…")
+		line = ansi.Wrap(line, max(1, width), "")
 		lines = append(lines, line)
 
 		for _, note := range b.notes {
 			noteLine := sty.Tool.TodoStatusNote.Render("  ╰ " + note)
-			noteLine = ansi.Truncate(noteLine, width, "…")
+			noteLine = ansi.Wrap(noteLine, max(1, width), "")
 			lines = append(lines, noteLine)
 		}
 	}

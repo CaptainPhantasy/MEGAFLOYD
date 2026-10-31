@@ -70,8 +70,8 @@ func (g *planGuardTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy
 
 	status, err := g.plans.Status(sessionID)
 	if err != nil {
-		slog.Warn("Failed to read plan state; allowing tool call", "tool", call.Name, "error", err)
-		return g.inner.Run(ctx, call)
+		slog.Warn("Failed to read plan state; blocking tool call", "tool", call.Name, "error", err)
+		return fantasy.NewTextErrorResponse("Plan mode state cannot be verified: " + err.Error()), nil
 	}
 	if !status.Active {
 		return g.inner.Run(ctx, call)
@@ -120,9 +120,25 @@ func (g *planGuardTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy
 		return fantasy.NewTextErrorResponse(
 			call.Name + " is not available in plan mode because it would mutate scheduled work that runs after plan exit. Call exit_plan_mode first.",
 		), nil
+	default:
+		// A generic permission grant does not prove a tool is read-only. Shell,
+		// delegated agents and MCP tools can mutate through many indirect paths.
+		// Planning uses the known inspection tools and the current plan file.
+		if !planInspectionTool(call.Name) {
+			return fantasy.NewTextErrorResponse(call.Name + " is unavailable in plan mode because its read-only behavior is not guaranteed. Use the inspection tools or exit plan mode first."), nil
+		}
 	}
 
 	return g.inner.Run(ctx, call)
+}
+
+func planInspectionTool(name string) bool {
+	switch name {
+	case "view", "ls", "glob", "grep", "lsp_references", "lsp_definition", "lsp_symbols", "lsp_diagnostics", "lsp_call_hierarchy", "sourcegraph", "fetch", "web_fetch", "web_search", "agentic_fetch", "floyd_info", "floyd_logs", "hook_explain", "hook_trace", "archive_query", "tool_search", "search_tools", "question", "enter_plan_mode", "job_output", "todo_write", "todos", "read_resource", "read_resources", "list_resources":
+		return true
+	default:
+		return false
+	}
 }
 
 func planReviewDescription(status plan.Status) string {

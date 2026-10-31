@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/legacy-ai/floyd/internal/version"
@@ -29,7 +32,9 @@ const (
 )
 
 var (
-	client posthog.Client
+	privacyDisabled atomic.Bool
+	clientMu        sync.Mutex
+	client          posthog.Client
 
 	baseProps = posthog.NewProperties().
 			Set("GOOS", runtime.GOOS).
@@ -43,20 +48,40 @@ var (
 )
 
 func SetNonInteractive(nonInteractive bool) {
+	clientMu.Lock()
+	defer clientMu.Unlock()
 	baseProps = baseProps.
 		Set(nonInteractiveAttrName, nonInteractive).
 		Set(nonInteractiveNestedAttrName, nonInteractive && os.Getenv("CRUSH") == "1")
 }
 
 func SetContinueBySessionID(continueBySessionID bool) {
+	clientMu.Lock()
+	defer clientMu.Unlock()
 	baseProps = baseProps.Set(continueSessionByIDAttrName, continueBySessionID)
 }
 
 func SetContinueLastSession(continueLastSession bool) {
+	clientMu.Lock()
+	defer clientMu.Unlock()
 	baseProps = baseProps.Set(continueLastSessionAttrName, continueLastSession)
 }
 
 func Init() {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	if privacyDisabled.Load() {
+		return
+	}
+	for _, key := range []string{"DO_NOT_TRACK", "FLOYD_DISABLE_METRICS", "MEGAFLOYD_DISABLE_METRICS"} {
+		disabled, _ := strconv.ParseBool(os.Getenv(key))
+		if disabled {
+			return
+		}
+	}
+	if client != nil {
+		return
+	}
 	key := os.Getenv(telemetryKeyEnv)
 	if key == "" {
 		slog.Debug("PostHog telemetry disabled", "reason", telemetryKeyEnv+" is not set")
@@ -75,9 +100,18 @@ func Init() {
 	distinctId = getDistinctId()
 }
 
-func GetID() string { return distinctId }
+func GetID() string {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	return distinctId
+}
 
 func Alias(userID string) {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	if privacyDisabled.Load() {
+		return
+	}
 	if client == nil || distinctId == fallbackId || distinctId == "" || userID == "" {
 		return
 	}
@@ -93,6 +127,11 @@ func Alias(userID string) {
 
 // send logs an event to PostHog with the given event name and properties.
 func send(event string, props ...any) {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	if privacyDisabled.Load() {
+		return
+	}
 	if client == nil {
 		return
 	}
@@ -109,6 +148,11 @@ func send(event string, props ...any) {
 
 // Error logs an error event to PostHog with the error type and message.
 func Error(errToLog any, props ...any) {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	if privacyDisabled.Load() {
+		return
+	}
 	if client == nil || distinctId == "" || errToLog == nil {
 		return
 	}
@@ -131,6 +175,8 @@ func Error(errToLog any, props ...any) {
 }
 
 func Flush() {
+	clientMu.Lock()
+	defer clientMu.Unlock()
 	if client == nil {
 		return
 	}
@@ -162,3 +208,11 @@ func pairsToProps(props ...any) posthog.Properties {
 func isEven(n int) bool {
 	return n%2 == 0
 }
+
+// SetPrivacyDisabled blocks new analytics immediately while preserving the explicit operator-key opt-in.
+func SetPrivacyDisabled(disabled bool) {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	privacyDisabled.Store(disabled)
+}
+func PrivacyDisabled() bool { return privacyDisabled.Load() }

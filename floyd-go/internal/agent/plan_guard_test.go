@@ -301,3 +301,27 @@ func TestPlanGuardEmptyPlanDoesNotPrompt(t *testing.T) {
 	default:
 	}
 }
+
+func TestPlanGuardRejectsUnprovenMutationsDespitePermissionGrants(t *testing.T) {
+	plans := plan.NewService(t.TempDir())
+	_, err := plans.Enter("plan")
+	require.NoError(t, err)
+	for _, name := range []string{"bash", "parallel_bash", "apply_patch", "agent", "mcp_fixture_mutate"} {
+		t.Run(name, func(t *testing.T) {
+			ran := false
+			perms := permission.NewPermissionService(t.TempDir(), true, []string{name})
+			tool := wrapToolsWithPlanGuard([]fantasy.AgentTool{planGuardRecordingTool{name: name, ran: &ran}}, plans, perms, t.TempDir())[0]
+			resp, err := tool.Run(permission.WithNonInteractive(planTestContext("plan")), fantasy.ToolCall{Name: name, Input: `{"command":"printf plan > marker.txt","description":"fixture"}`})
+			require.NoError(t, err)
+			require.True(t, resp.IsError)
+			require.False(t, ran)
+			require.Contains(t, resp.Content, "plan mode")
+		})
+	}
+	ran := false
+	view := wrapToolsWithPlanGuard([]fantasy.AgentTool{planGuardRecordingTool{name: "view", ran: &ran}}, plans, nil, t.TempDir())[0]
+	resp, err := view.Run(planTestContext("plan"), fantasy.ToolCall{Name: "view"})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.True(t, ran)
+}
