@@ -146,7 +146,20 @@ func redactCredentialURL(value string) string {
 }
 
 func credentialArgument(name string) bool {
-	return credentialName(name) || name == "-H" || name == "--header" || name == "--headers" || name == "-u" || name == "--user"
+	// curl permits variable expansion on long options; classify the underlying
+	// value-bearing option using the same list.
+	name = strings.TrimPrefix(name, "--expand-")
+	name = strings.TrimPrefix(name, "--")
+	switch name {
+	case "-H", "-u", "-U", "-b", "-E", "-x",
+		"header", "headers", "proxy-header", "user", "proxy-user",
+		"cookie", "cert", "proxy-cert", "oauth2-bearer", "pass", "proxy-pass",
+		"proxy", "preproxy", "proxy1.0", "socks5", "socks5-hostname",
+		"ftp-account", "key", "proxy-key", "tlspassword", "proxy-tlspassword":
+		return true
+	default:
+		return credentialName(name)
+	}
 }
 
 // Short options can be grouped: -sSHvalue and -vuvalue carry credentials just
@@ -155,7 +168,7 @@ func credentialShortOption(value string) string {
 	if !strings.HasPrefix(value, "-") || strings.HasPrefix(value, "--") {
 		return ""
 	}
-	if index := strings.IndexAny(value[1:], "Hu"); index >= 0 {
+	if index := strings.IndexAny(value[1:], "HuUbEx"); index >= 0 {
 		return value[:index+2]
 	}
 	return ""
