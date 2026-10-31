@@ -92,3 +92,33 @@ func TestDeletionCopyCompoundCannotEnterTool(t *testing.T) {
 		})
 	}
 }
+
+func TestDeletionCopyArchiveCannotEnterTool(t *testing.T) {
+	for _, command := range []string{
+		"cp -a source destination",
+		"cp -av source destination",
+		"cp -pa source destination; rm source",
+		"cp -p source destination",
+		"cp -pv source destination; rm source",
+	} {
+		t.Run(command, func(t *testing.T) {
+			f := newDeletionFixture(t)
+			f.answers = []bool{true, true}
+			for _, name := range []string{"source", "destination"} {
+				require.NoError(t, os.WriteFile(f.target(name), []byte(name), 0o600))
+			}
+			// Requested archive/mode preservation includes security attributes
+			// which a shell exit alone cannot prove. The body executes nothing.
+			response, ran := f.run("archive-copy", command)
+			require.False(t, ran, "an unverified archive must never enter the tool")
+			require.True(t, response.IsError, response.Content)
+			require.Empty(t, f.asked)
+			require.Empty(t, f.record("archive-copy").Attempts)
+			for _, name := range []string{"source", "destination"} {
+				data, err := os.ReadFile(f.target(name))
+				require.NoError(t, err)
+				require.Equal(t, name, string(data))
+			}
+		})
+	}
+}

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -174,44 +176,22 @@ func TestCopyRecoveryRefusesNonregularOrSymlinkSourceBeforeConfirmation(t *testi
 	}
 }
 
-func TestCopyRecoveryPreserveModeAndPlainCopySemantics(t *testing.T) {
-	for _, mode := range []string{"plain different mode", "preserved", "wrong mode", "wrong timestamp"} {
-		t.Run(mode, func(t *testing.T) {
-			guard, dir, _, _ := recoveryFixture(t)
-			source, target := filepath.Join(dir, "source"), filepath.Join(dir, "b")
-			require.NoError(t, os.WriteFile(source, []byte("payload"), 0o600))
-			require.NoError(t, os.Chmod(target, 0o644))
-			fixed := time.Unix(1700000000, 123000000)
-			require.NoError(t, os.Chtimes(source, fixed, fixed))
-			command := "cp -p source b"
-			if mode == "plain different mode" {
-				command = "cp source b"
-			}
-			c := Classify(command, dir)
-			require.True(t, guard.Check(t.Context(), "copy", "approve", c).Allowed)
-			require.NoError(t, guard.BeginExecution("copy", c, "launch"))
-			require.NoError(t, os.Rename(target, filepath.Join(dir, "quarantined-b")))
-			resultMode := os.FileMode(0o600)
-			if mode == "plain different mode" || mode == "wrong mode" {
-				resultMode = 0o644
-			}
-			require.NoError(t, os.WriteFile(target, []byte("payload"), resultMode))
-			require.NoError(t, os.Chmod(target, resultMode))
-			if mode != "wrong timestamp" {
-				require.NoError(t, os.Chtimes(target, fixed, fixed))
-			}
-			require.NoError(t, guard.RecordOutcome("copy", c, "launch", c.Targets, false))
-			record, err := guard.Ledger().Read("copy")
-			require.NoError(t, err)
-			if mode == "preserved" || mode == "plain different mode" {
-				require.Len(t, record.Executions, 1)
-				require.Equal(t, "finished", record.Attempts[1].State)
-			} else {
-				require.Empty(t, record.Executions)
-				require.Equal(t, "uncertain", record.Attempts[1].State)
-			}
-		})
-	}
+func TestCopyRecoveryPlainCopyKeepsDestinationMode(t *testing.T) {
+	guard, dir, _, _ := recoveryFixture(t)
+	source, target := filepath.Join(dir, "source"), filepath.Join(dir, "b")
+	require.NoError(t, os.WriteFile(source, []byte("payload"), 0o600))
+	require.NoError(t, os.Chmod(target, 0o644))
+	c := Classify("cp source b", dir)
+	require.True(t, guard.Check(t.Context(), "copy", "approve", c).Allowed)
+	require.NoError(t, guard.BeginExecution("copy", c, "launch"))
+	require.NoError(t, os.Rename(target, filepath.Join(dir, "quarantined-b")))
+	require.NoError(t, os.WriteFile(target, []byte("payload"), 0o644))
+	require.NoError(t, os.Chmod(target, 0o644))
+	require.NoError(t, guard.RecordOutcome("copy", c, "launch", c.Targets, false))
+	record, err := guard.Ledger().Read("copy")
+	require.NoError(t, err)
+	require.Len(t, record.Executions, 1)
+	require.Equal(t, "finished", record.Attempts[1].State)
 }
 
 type copyConfirmationMutator struct {
@@ -295,41 +275,6 @@ func TestCopyRecoveryPreserveOptionsStopAtDelimiterAndSkipDirectoryValue(t *test
 		require.False(t, copyPreservesMetadata(signature), signature)
 	}
 	require.True(t, copyPreservesMetadata(`[["cp","-pv","--","/fixture/source","/fixture/destination"]]`))
-}
-
-func TestCopyRecoveryMissingPreservationEvidenceCannotFallBackToPlainCopy(t *testing.T) {
-	for _, field := range []string{"approval", "launch"} {
-		t.Run(field, func(t *testing.T) {
-			guard, dir, c := copyRecoveryFixture(t, "cp -p source b")
-			target := filepath.Join(dir, "b")
-			simulateFixtureCopy(t, dir)
-			require.NoError(t, os.Chmod(target, 0o644))
-			record, err := guard.Ledger().Read("copy")
-			require.NoError(t, err)
-			if field == "approval" {
-				bound := record.Approvals[0].Copies[target]
-				require.NotEmpty(t, bound.PreserveMetadata)
-				bound.PreserveMetadata = ""
-				record.Approvals[0].Copies[target] = bound
-			} else {
-				bound := record.Attempts[0].Copies[target]
-				require.NotEmpty(t, bound.PreserveMetadata)
-				bound.PreserveMetadata = ""
-				record.Attempts[0].Copies[target] = bound
-			}
-			require.NoError(t, guard.ledger.write("copy", record))
-			err = guard.RecordOutcome("copy", c, "launch", c.Targets, false)
-			if field == "approval" {
-				require.ErrorIs(t, err, ErrNotConfirmed)
-			} else {
-				require.NoError(t, err)
-			}
-			record, err = guard.Ledger().Read("copy")
-			require.NoError(t, err)
-			require.Empty(t, record.Executions)
-			require.False(t, guard.Check(t.Context(), "copy", "retry", c).Allowed)
-		})
-	}
 }
 
 func TestCopyRecoveryFailedUnchangedCopyIsNotCompleted(t *testing.T) {
@@ -498,4 +443,136 @@ func TestCopyRecoveryCompoundMoveAndCopyDescriptorsCannotSkipBinding(t *testing.
 		}
 	}
 	require.False(t, compoundSourceOperation(`[["truncate","-s","0"],["rm"]]`), "compound operations without external source binding retain existing handling")
+}
+
+func TestCopyRecoveryAttributePreservationIsRefusedBeforeConfirmation(t *testing.T) {
+	for _, option := range []string{"-a", "-va", "-pa", "-p", "-vp"} {
+		t.Run(option, func(t *testing.T) {
+			guard, dir, _, confirmer := recoveryFixture(t)
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "source"), []byte("payload"), 0o600))
+			c := Classify("cp "+option+" source b; rm source", dir)
+			require.True(t, c.IsDestructive())
+			require.Empty(t, c.Unresolved)
+			before := confirmer.calls
+			decision := guard.Check(t.Context(), "archive-copy", "approve", c)
+			require.False(t, decision.Allowed, "POSIX metadata alone must not authorize archive-copy completion")
+			require.Equal(t, before, confirmer.calls)
+			record, err := guard.Ledger().Read("archive-copy")
+			require.NoError(t, err)
+			require.Empty(t, record.Confirmations)
+			require.Empty(t, record.Approvals)
+		})
+	}
+}
+
+func TestCopyRecoveryArchiveOptionsCannotHideInOrBorrowOperands(t *testing.T) {
+	for _, signature := range []string{
+		`[["cp","-p","/fixture/source","/fixture/destination"]]`,
+		`[["cp","--preserve=mode","/fixture/source","/fixture/destination"]]`,
+		`[["cp","-a","/fixture/source","/fixture/destination"]]`,
+		`[["cp","-vpa","/fixture/source","/fixture/destination"]]`,
+		`[["cp","-atdestination","/fixture/source","/fixture/destination"]]`,
+		`[["cp","--archive","/fixture/source","/fixture/destination"]]`,
+		`[["cp","--archive","source"]]`,
+	} {
+		require.True(t, unsupportedCopyAttributes(signature), signature)
+	}
+	for _, signature := range []string{
+		`[["cp","-t","-a","/fixture/source","/fixture/-a/source"]]`,
+		`[["cp","-t","-p","/fixture/source","/fixture/-p/source"]]`,
+		`[["cp","-tp","/fixture/source","/fixture/p/source"]]`,
+		`[["cp","--","--preserve","destination"]]`,
+		`[["cp","--","-p","destination"]]`,
+		`[["cp","-ta","/fixture/source","/fixture/a/source"]]`,
+		`[["cp","--target-directory","--archive","/fixture/source","/fixture/--archive/source"]]`,
+		`[["cp","--target-directory=-a","/fixture/source","/fixture/-a/source"]]`,
+		`[["cp","--","-a","destination"]]`,
+	} {
+		require.False(t, unsupportedCopyAttributes(signature), signature)
+	}
+}
+
+func TestCopyRecoveryLegacyArchiveCannotAuthorizeSourceRemoval(t *testing.T) {
+	for _, option := range []string{"-a", "--archive", "-va", "-p", "--preserve", "--preserve=mode,ownership,timestamps"} {
+		t.Run(option, func(t *testing.T) {
+			guard, dir, _, _ := recoveryFixture(t)
+			source, target := filepath.Join(dir, "source"), filepath.Join(dir, "b")
+			require.NoError(t, os.WriteFile(source, []byte("archive payload"), 0o600))
+			plain := Classify("cp source b", dir)
+			copies, err := captureCopySources(plain)
+			require.NoError(t, err)
+			info, err := os.Stat(source)
+			require.NoError(t, err)
+			bound := copies[target]
+			bound.PreserveMetadata, err = copyMetadata(info)
+			require.NoError(t, err)
+			// Reconstruct the old archive descriptor directly so the long-option
+			// regression also covers protected history from older classifiers.
+			encoded, err := json.Marshal([][]string{{"cp", option, source, target}})
+			require.NoError(t, err)
+			c := ClassifyAll([]string{"cp -a source b", "rm source"}, dir)
+			c.Operations[target] = string(encoded)
+			snapshots, err := snapshotTargets(c.Targets)
+			require.NoError(t, err)
+			record, err := guard.Ledger().Read("legacy-archive")
+			require.NoError(t, err)
+			record.Approvals = []Approval{{TargetSet: c.Digest(), Targets: c.Targets, Command: c.Command, Recursive: c.Recursive, Snapshots: snapshots, Operations: c.Operations, Copies: map[string]CopySource{target: bound}}}
+			for stage := 1; stage <= 2; stage++ {
+				record.Confirmations = append(record.Confirmations, Confirmation{ID: fmt.Sprintf("archive-%d", stage), Stage: stage, TargetSet: c.Digest(), Targets: c.Targets, Source: humanSource, RecordedAt: time.Unix(1700000000+int64(stage), 0).UTC().Format(time.RFC3339Nano)})
+			}
+			require.NoError(t, guard.ledger.write("legacy-archive", record))
+			require.Error(t, guard.BeginExecution("legacy-archive", c, "launch"))
+			require.False(t, guard.Check(t.Context(), "legacy-archive", "retry", c).Allowed)
+			require.False(t, guard.Check(t.Context(), "legacy-archive", "source-remainder", Classify("rm source", dir)).Allowed)
+			// Even matching bytes and all metadata currently checked cannot prove the
+			// archive's unverified extended attributes. Preserve the old fixture bytes.
+			simulateFixtureCopy(t, dir)
+			require.NoError(t, os.Chtimes(target, info.ModTime(), info.ModTime()))
+			proven, err := copyPostcondition(target, string(encoded), bound)
+			require.NoError(t, err)
+			require.False(t, proven)
+			record, err = guard.Ledger().Read("legacy-archive")
+			require.NoError(t, err)
+			require.Empty(t, record.Executions)
+			require.Empty(t, record.Attempts)
+			require.Len(t, record.Confirmations, 2)
+		})
+	}
+}
+
+func TestCopyRecoveryActualACLChangeCannotAuthorizePreservingCopy(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("isolated native ACL fixture uses macOS chmod; preservation rejection runs on every platform")
+	}
+	guard, dir, _, confirmer := recoveryFixture(t)
+	source := filepath.Join(dir, "source")
+	require.NoError(t, os.WriteFile(source, []byte("private ACL regression fixture"), 0o600))
+	before, err := snapshot(source)
+	require.NoError(t, err)
+	info, err := os.Lstat(source)
+	require.NoError(t, err)
+	ordinaryBefore, err := copyMetadata(info)
+	require.NoError(t, err)
+	// Modify only this test-owned file inside its private temporary directory.
+	// No account, service, workspace, or existing user ACL is changed.
+	output, err := exec.CommandContext(t.Context(), "/bin/chmod", "+a", "everyone allow read", source).CombinedOutput()
+	require.NoError(t, err, string(output))
+	output, err = exec.CommandContext(t.Context(), "/bin/ls", "-lde", source).CombinedOutput()
+	require.NoError(t, err, string(output))
+	require.Regexp(t, `(?m)^\s*0: (?:everyone|group:everyone|ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C) allow read$`, string(output))
+	after, err := snapshot(source)
+	require.NoError(t, err)
+	info, err = os.Lstat(source)
+	require.NoError(t, err)
+	ordinaryAfter, err := copyMetadata(info)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "the ordinary source fingerprint does not capture this real ACL change")
+	require.Equal(t, ordinaryBefore, ordinaryAfter, "mode/mtime/uid/gid do not prove requested ACL preservation")
+	calls := confirmer.calls
+	decision := guard.Check(t.Context(), "acl-copy", "approve", Classify("cp -p source b; rm source", dir))
+	require.False(t, decision.Allowed)
+	require.Equal(t, calls, confirmer.calls)
+	record, err := guard.Ledger().Read("acl-copy")
+	require.NoError(t, err)
+	require.Empty(t, record.Confirmations)
 }

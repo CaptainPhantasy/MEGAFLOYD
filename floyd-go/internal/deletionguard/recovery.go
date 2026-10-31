@@ -156,12 +156,12 @@ func sameOperation(a Approval, c Classification) bool {
 		return false
 	}
 	for _, target := range a.Targets {
-		if a.Snapshots[target] == "" || a.Operations[target] == "" || compoundSourceOperation(a.Operations[target]) {
+		if a.Snapshots[target] == "" || a.Operations[target] == "" || (compoundSourceOperation(a.Operations[target]) || unsupportedCopyAttributes(a.Operations[target])) {
 			return false
 		}
 	}
 	for _, target := range c.Targets {
-		if compoundSourceOperation(c.Operations[target]) {
+		if compoundSourceOperation(c.Operations[target]) || unsupportedCopyAttributes(c.Operations[target]) {
 			return false
 		}
 		if source, move := moveSource(target, c.Operations[target]); move && (a.Moves[target].Path != source || a.Moves[target].Identity == "" || a.Moves[target].Relocated == "") {
@@ -731,6 +731,9 @@ func copySource(target, signature string) (string, bool) {
 func captureCopySources(c Classification) (map[string]CopySource, error) {
 	var copies map[string]CopySource
 	for _, target := range c.Targets {
+		if unsupportedCopyAttributes(c.Operations[target]) {
+			return nil, errors.New("copy attribute preservation cannot be fully verified; use a separately verified copy before authorizing permanent deletion")
+		}
 		if compoundSourceOperation(c.Operations[target]) {
 			return nil, errors.New("compound copy/move effects cannot verify their source identity; run separately bound operations")
 		}
@@ -799,6 +802,9 @@ func captureCopySources(c Classification) (map[string]CopySource, error) {
 }
 
 func unchangedCopySource(a Approval, target string) bool {
+	if unsupportedCopyAttributes(a.Operations[target]) {
+		return false
+	}
 	if compoundSourceOperation(a.Operations[target]) {
 		return false
 	}
@@ -833,6 +839,9 @@ func unchangedCopySource(a Approval, target string) bool {
 }
 
 func copyPostcondition(target, signature string, before CopySource) (bool, error) {
+	if unsupportedCopyAttributes(signature) {
+		return false, nil
+	}
 	source, copy := copySource(target, signature)
 	if !copy || before.Path != source || before.Identity == "" || before.Content == "" || before.OriginalDestinationContent == "" || copyPreservesMetadata(signature) != (before.PreserveMetadata != "") {
 		return false, nil
@@ -957,8 +966,8 @@ func sameCopyEntry(a, b os.FileInfo) bool {
 	return b.Mode().IsRegular() && os.SameFile(a, b) && a.Mode() == b.Mode() && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime())
 }
 
-// Preserve-mode copies require the source's ordinary POSIX metadata as well as
-// its bytes. Plain copying into an existing file may keep destination mode.
+// This parser reads legacy POSIX preservation fields. Preservation modes are
+// rejected separately because these fields cannot prove ACLs or all attributes.
 func copyPreservesMetadata(signature string) bool {
 	var operations [][]string
 	if json.Unmarshal([]byte(signature), &operations) != nil || len(operations) != 1 {
@@ -1009,6 +1018,45 @@ func compoundSourceOperation(signature string) bool {
 	for _, operation := range operations {
 		if len(operation) > 0 && (filepath.Base(operation[0]) == "cp" || filepath.Base(operation[0]) == "mv") {
 			return true
+		}
+	}
+	return false
+}
+
+// Archive and preservation modes promise attributes, including ACLs, beyond
+// the metadata this recovery proof verifies. They cannot authorize source deletion.
+// Scan ordered options in every descriptor, skipping option values and honoring
+// -- so directory values and literal operand names are never read as flags.
+func unsupportedCopyAttributes(signature string) bool {
+	var operations [][]string
+	if json.Unmarshal([]byte(signature), &operations) != nil {
+		return false
+	}
+	for _, op := range operations {
+		if len(op) == 0 || filepath.Base(op[0]) != "cp" {
+			continue
+		}
+		for i := 1; i < len(op); i++ {
+			arg := op[i]
+			switch {
+			case arg == "--":
+				i = len(op)
+			case arg == "-t" || arg == "--target-directory":
+				i++
+			case strings.HasPrefix(arg, "--target-directory="):
+			case arg == "--archive" || arg == "--preserve" || strings.HasPrefix(arg, "--preserve="):
+				return true
+			case strings.HasPrefix(arg, "--"):
+			case strings.HasPrefix(arg, "-"):
+				for _, flag := range arg[1:] {
+					if flag == 't' {
+						break
+					} // the remaining cluster is the -t value
+					if flag == 'a' || flag == 'p' {
+						return true
+					}
+				}
+			}
 		}
 	}
 	return false
