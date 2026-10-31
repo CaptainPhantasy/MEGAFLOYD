@@ -223,3 +223,31 @@ func TestRedactedConfigurationMasksNestedArgumentAssignments(t *testing.T) {
 		})
 	}
 }
+
+func TestRedactedConfigurationMasksAttachedShortOptions(t *testing.T) {
+	for _, field := range []string{"args", "arguments"} {
+		t.Run(field, func(t *testing.T) {
+			args := []string{"-HAuthorization: Bearer ATTACHED_HEADER", "--port", "1234", "-uuser:ATTACHED_PASSWORD", "--mode=stdio", "-HX-Custom: ATTACHED_CUSTOM=padding", "-uuser:ATTACHED_EQUALS=padding", "-H", "Authorization: Bearer SEPARATE_HEADER", "-u", "user:SEPARATE_PASSWORD", "--env=-HAuthorization: NESTED_HEADER", "--transport=stdio"}
+			data, err := redactedJSON(map[string]any{field: args})
+			require.NoError(t, err)
+			var printed map[string][]string
+			require.NoError(t, json.Unmarshal(data, &printed))
+			require.Equal(t, []string{"-H[redacted]", "--port", "1234", "-u[redacted]", "--mode=stdio", "-H[redacted]", "-u[redacted]", "-H", "[redacted]", "-u", "[redacted]", "--env=-H[redacted]", "--transport=stdio"}, printed[field])
+			require.Equal(t, "-HAuthorization: Bearer ATTACHED_HEADER", args[0])
+		})
+	}
+}
+
+func TestRedactedConfigurationMasksGroupedShortOptions(t *testing.T) {
+	for _, field := range []string{"args", "arguments"} {
+		t.Run(field, func(t *testing.T) {
+			args := []string{"-sSHAuthorization: Bearer GROUPED_HEADER", "--port", "1234", "-vuuser:GROUPED_PASSWORD", "-sSH", "Authorization: Bearer SEPARATE_HEADER", "-vu", "user:SEPARATE_PASSWORD", "--env=-sSHAuthorization: NESTED_HEADER", "--env=-vu", "user:NESTED_PASSWORD", "--user-agent=curl", "-sSv"}
+			data, err := redactedJSON(map[string]any{field: args})
+			require.NoError(t, err)
+			var printed map[string][]string
+			require.NoError(t, json.Unmarshal(data, &printed))
+			require.Equal(t, []string{"-sSH[redacted]", "--port", "1234", "-vu[redacted]", "-sSH", "[redacted]", "-vu", "[redacted]", "--env=-sSH[redacted]", "--env=-vu", "[redacted]", "--user-agent=curl", "-sSv"}, printed[field])
+			require.Equal(t, "-sSHAuthorization: Bearer GROUPED_HEADER", args[0])
+		})
+	}
+}

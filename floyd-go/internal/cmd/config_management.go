@@ -149,6 +149,18 @@ func credentialArgument(name string) bool {
 	return credentialName(name) || name == "-H" || name == "--header" || name == "--headers" || name == "-u" || name == "--user"
 }
 
+// Short options can be grouped: -sSHvalue and -vuvalue carry credentials just
+// like -Hvalue and -uvalue. Long option names are inspected separately.
+func credentialShortOption(value string) string {
+	if !strings.HasPrefix(value, "-") || strings.HasPrefix(value, "--") {
+		return ""
+	}
+	if index := strings.IndexAny(value[1:], "Hu"); index >= 0 {
+		return value[:index+2]
+	}
+	return ""
+}
+
 func redactCredentialArgs(args []any) {
 	redactNext := false
 	for i, arg := range args {
@@ -161,6 +173,14 @@ func redactCredentialArgs(args []any) {
 			redactNext = false
 			continue
 		}
+		if option := credentialShortOption(value); option != "" {
+			if option == value {
+				redactNext = true
+			} else {
+				args[i] = option + "[redacted]"
+			}
+			continue
+		}
 		if strings.Contains(value, "=") {
 			// Wrappers such as --env=API_KEY=value contain another assignment.
 			// Inspect each name, stopping at the first credential value so its
@@ -168,6 +188,14 @@ func redactCredentialArgs(args []any) {
 			remaining := value
 			prefix := ""
 			for {
+				if option := credentialShortOption(remaining); option != "" {
+					if option == remaining {
+						redactNext = true
+					} else {
+						args[i] = prefix + option + "[redacted]"
+					}
+					break
+				}
 				key, rest, assigned := strings.Cut(remaining, "=")
 				if !assigned {
 					break
