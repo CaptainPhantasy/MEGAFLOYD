@@ -137,9 +137,10 @@ type coordinator struct {
 	plans     *plan.Service
 	plansOnce sync.Once
 	// Workflow state survives tool reconstruction after model/config changes.
-	workflows     *workflow.Engine
-	workflowOnce  sync.Once
-	toolRefreshMu sync.Mutex
+	workflows        *workflow.Engine
+	workflowOnce     sync.Once
+	toolRefreshMu    sync.Mutex
+	runtimeControlMu sync.Mutex
 
 	selector     *AgentSelector
 	currentAgent SessionAgent
@@ -274,6 +275,9 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		}
 	}
 
+	if _, _, err := c.restoreRuntimeChild(ctx, sessionID); err != nil {
+		return nil, err
+	}
 	settings, err := c.sessionSettingsSnapshot(ctx, accept, sessionID)
 	if err != nil {
 		return nil, err
@@ -345,6 +349,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return selectedAgent.Run(ctx, SessionAgentCall{
 			SessionID:            sessionID,
 			RunID:                runID,
+			NoHumanInteraction:   permission.IsNonInteractive(ctx),
 			Prompt:               prompt,
 			SystemPromptAddition: role,
 			RunSettings:          settings,
@@ -383,6 +388,13 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		// emitted, so it does not publish a duplicate fallback for the
 		// error it is about to receive.
 		MarkRunCompletePublished(ctx)
+	}
+	if childRun {
+		taskErr := originalErr
+		if hasLatest && latest.Cancelled {
+			taskErr = context.Canceled
+		}
+		c.recordRuntimeFollowup(sessionID, result, taskErr)
 	}
 	return result, originalErr
 }
@@ -1412,8 +1424,15 @@ func isExactoSupported(modelID string) bool {
 func (c *coordinator) BeginAccepted(sessionID string) *AcceptedRun {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	selected, _, restoreErr := c.restoreRuntimeChild(ctx, sessionID)
+	if selected == nil {
+		selected = c.currentAgent
+	}
 	settings, err := c.captureSessionRunSettings(ctx, sessionID)
-	accepted := c.runtimeSessionAgent(sessionID).BeginAccepted(sessionID)
+	if restoreErr != nil {
+		err = restoreErr
+	}
+	accepted := selected.BeginAccepted(sessionID)
 	if accepted != nil {
 		accepted.runSettings = &settings
 		accepted.settingsErr = err
@@ -1671,12 +1690,13 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 
 // subAgentParams holds the parameters for running a sub-agent.
 type subAgentParams struct {
-	Agent          SessionAgent
-	SessionID      string
-	AgentMessageID string
-	ToolCallID     string
-	Prompt         string
-	SessionTitle   string
+	Agent             SessionAgent
+	RuntimeDefinition *runtimeAgentSnapshot
+	SessionID         string
+	AgentMessageID    string
+	ToolCallID        string
+	Prompt            string
+	SessionTitle      string
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
@@ -1693,6 +1713,9 @@ func (c *coordinator) runSubAgentInline(ctx context.Context, params subAgentPara
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
 
+	if err := c.prepareRuntimeChild(ctx, session.ID, params); err != nil {
+		return fantasy.ToolResponse{}, err
+	}
 	// Call session setup function if provided
 	if params.SessionSetup != nil {
 		params.SessionSetup(session.ID)
@@ -1719,17 +1742,18 @@ func (c *coordinator) runSubAgentInline(ctx context.Context, params subAgentPara
 	// Run the agent
 	run := func() (*fantasy.AgentResult, error) {
 		return params.Agent.Run(hookruntime.WithParent(ctx, params.ToolCallID), SessionAgentCall{
-			SessionID:        session.ID,
-			Prompt:           params.Prompt,
-			MaxOutputTokens:  maxTokens,
-			ProviderOptions:  getProviderOptions(model, providerCfg),
-			Temperature:      model.ModelCfg.Temperature,
-			TopP:             model.ModelCfg.TopP,
-			TopK:             model.ModelCfg.TopK,
-			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
-			PresencePenalty:  model.ModelCfg.PresencePenalty,
-			NonInteractive:   true,
-			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+			SessionID:          session.ID,
+			Prompt:             params.Prompt,
+			MaxOutputTokens:    maxTokens,
+			ProviderOptions:    getProviderOptions(model, providerCfg),
+			Temperature:        model.ModelCfg.Temperature,
+			TopP:               model.ModelCfg.TopP,
+			TopK:               model.ModelCfg.TopK,
+			FrequencyPenalty:   model.ModelCfg.FrequencyPenalty,
+			PresencePenalty:    model.ModelCfg.PresencePenalty,
+			NonInteractive:     true,
+			NoHumanInteraction: permission.IsNonInteractive(ctx),
+			OnAuthRefresh:      c.makeAuthRefreshCallback(providerCfg),
 		})
 	}
 	result, err := run()

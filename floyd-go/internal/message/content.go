@@ -167,6 +167,7 @@ func (m *Message) ShellCommands() []ShellCommand {
 }
 
 type Message struct {
+	RunID            string
 	ID               string
 	Role             MessageRole
 	SessionID        string

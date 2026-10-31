@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"runtime"
@@ -84,7 +85,7 @@ func (m *Manager) Initialize(config Config) {
 		m.config.Endpoint = config.Endpoint
 	}
 	if config.AdditionalData != nil {
-		m.config.AdditionalData = config.AdditionalData
+		m.config.AdditionalData = maps.Clone(config.AdditionalData)
 	}
 	if !config.Enabled {
 		m.config.Enabled = false
@@ -102,6 +103,7 @@ func (m *Manager) Track(eventType EventType, properties map[string]any) {
 		return
 	}
 
+	properties = maps.Clone(properties)
 	if properties == nil {
 		properties = map[string]any{}
 	}

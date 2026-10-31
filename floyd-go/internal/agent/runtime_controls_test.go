@@ -27,6 +27,7 @@ func (a *runtimeBlockedChild) IsSessionBusy(string) bool { return a.running.Load
 func (a *runtimeBlockedChild) Model() Model {
 	return Model{ModelCfg: config.SelectedModel{Provider: "unit-only"}}
 }
+
 func (a *runtimeBlockedChild) Run(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
 	a.running.Store(true)
 	defer a.running.Store(false)
@@ -41,7 +42,7 @@ func TestCanonicalSubagentDetachAndCancelUseSameChild(t *testing.T) {
 	require.NoError(t, err)
 	providers := csync.NewMap[string, config.ProviderConfig]()
 	providers.Set("unit-only", config.ProviderConfig{})
-	c := &coordinator{sessions: env.sessions, cfg: config.NewTestStore(&config.Config{Providers: providers})}
+	c := &coordinator{sessions: env.sessions, cfg: config.NewTestStore(&config.Config{Providers: providers, Options: &config.Options{DataDirectory: t.TempDir()}})}
 	t.Cleanup(func() { c.RuntimeCancelTasks(); runtimeTaskStores.Delete(c) })
 	child := &runtimeBlockedChild{entered: make(chan struct{})}
 	parentCtx, cancelParent := context.WithCancel(t.Context())

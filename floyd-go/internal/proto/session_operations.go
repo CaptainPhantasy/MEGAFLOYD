@@ -16,7 +16,8 @@ type SessionUndoRequest struct {
 }
 
 type SessionUndoResponse struct {
-	Session      Session `json:"session"`
-	RemovedTurns int     `json:"removed_turns"`
-	UndoRecordID string  `json:"undo_record_id"`
+	RemovedMessageIDs []string `json:"removed_message_ids"`
+	Session           Session  `json:"session"`
+	RemovedTurns      int      `json:"removed_turns"`
+	UndoRecordID      string   `json:"undo_record_id"`
 }

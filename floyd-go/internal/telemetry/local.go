@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 
 	_ "modernc.org/sqlite"
 )
@@ -140,15 +141,18 @@ func (s *LocalStore) Query(ctx context.Context, eventType EventType, limit int) 
 	var events []LocalEvent
 	for rows.Next() {
 		var e LocalEvent
-		var ts string
-		if err := rows.Scan(&e.ID, &e.Type, &ts, &e.Properties); err != nil {
+		var ts, properties string
+		if err := rows.Scan(&e.ID, &e.Type, &ts, &properties); err != nil {
 			return nil, fmt.Errorf("scan local event: %w", err)
 		}
-		e.Timestamp, _ = time.Parse(time.RFC3339, ts)
+		e.Properties = json.RawMessage(properties)
+		e.Timestamp, err = time.Parse(time.RFC3339, ts)
+		if err != nil {
+			return nil, fmt.Errorf("parse local event timestamp: %w", err)
+		}
 		events = append(events, e)
 	}
-
-	return events, nil
+	return events, rows.Err()
 }
 
 // GetStats returns aggregated statistics from the local store.
@@ -180,12 +184,29 @@ func (s *LocalStore) GetStats(ctx context.Context) (*StatsSummary, error) {
 		}
 		stats.EventsByType[t] = count
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
 	rows.Close()
 
 	// First and last event
-	s.db.QueryRowContext(ctx, "SELECT MIN(timestamp), MAX(timestamp) FROM events").Scan(
-		&stats.FirstEvent, &stats.LastEvent,
-	)
+	var first, last sql.NullString
+	if err := s.db.QueryRowContext(ctx, "SELECT MIN(timestamp), MAX(timestamp) FROM events").Scan(&first, &last); err != nil {
+		return nil, err
+	}
+	if first.Valid {
+		stats.FirstEvent, err = time.Parse(time.RFC3339, first.String)
+		if err != nil {
+			return nil, fmt.Errorf("parse first event timestamp: %w", err)
+		}
+	}
+	if last.Valid {
+		stats.LastEvent, err = time.Parse(time.RFC3339, last.String)
+		if err != nil {
+			return nil, fmt.Errorf("parse last event timestamp: %w", err)
+		}
+	}
 
 	return stats, nil
 }

@@ -79,6 +79,27 @@ func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string
 	return w.app.Sessions.ParseAgentToolSessionID(sessionID)
 }
 
+// Swarm reads the session's durable parallel-dispatch state.
+func (w *AppWorkspace) Swarm(ctx context.Context, sessionID string) (proto.SwarmState, error) {
+	st, err := agent.RuntimeSwarm(ctx, w.app.Sessions, sessionID)
+	if err != nil {
+		return proto.SwarmState{}, err
+	}
+	return proto.SwarmState{Active: st.Active, MaxParallel: st.MaxParallel}, nil
+}
+
+// SetSwarm updates the session's durable parallel-dispatch state.
+func (w *AppWorkspace) SetSwarm(ctx context.Context, sessionID string, active *bool, parallel *int) (proto.SwarmState, error) {
+	st, err := agent.SetRuntimeSwarm(ctx, w.app.Sessions, sessionID, active, parallel)
+	if err != nil {
+		return proto.SwarmState{}, err
+	}
+	if c, ok := w.app.AgentCoordinator.(interface{ RuntimeSwarmChanged() }); ok {
+		c.RuntimeSwarmChanged()
+	}
+	return proto.SwarmState{Active: st.Active, MaxParallel: st.MaxParallel}, nil
+}
+
 // SetCurrentSession reports the active session to herdr so the pane
 // can persist a resumable reference. Multi-client presence tracking
 // is irrelevant in single-client local mode, but herdr still needs

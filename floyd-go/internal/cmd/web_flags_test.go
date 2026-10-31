@@ -21,13 +21,14 @@ func TestWebFlagsRegisteredOnRootAndRun(t *testing.T) {
 	}
 }
 
-func TestResumeWithoutWebIsRejected(t *testing.T) {
+func TestResumeWithoutWebUsesTerminalHandler(t *testing.T) {
 	t.Parallel()
 
+	called := false
 	cmd := &cobra.Command{
 		Use: "test",
 		RunE: func(*cobra.Command, []string) error {
-			t.Fatal("RunE must not run when --resume is rejected")
+			called = true
 			return nil
 		},
 	}
@@ -36,8 +37,8 @@ func TestResumeWithoutWebIsRejected(t *testing.T) {
 
 	err := cmd.Execute()
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "requires --web")
+	require.NoError(t, err)
+	require.True(t, called)
 }
 
 func TestInstallWebHandoffPreservesExistingRun(t *testing.T) {

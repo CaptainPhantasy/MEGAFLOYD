@@ -20,8 +20,15 @@ type RuntimeSwarmRequest struct {
 	Active      *bool `json:"active,omitempty"`
 	MaxParallel *int  `json:"max_parallel,omitempty"`
 }
+
+// SwarmState is the durable parallel-dispatch state of one session.
+type SwarmState struct {
+	Active      bool `json:"active"`
+	MaxParallel int  `json:"max_parallel"`
+}
 type RuntimeSubagentRequest struct {
-	Prompt      string `json:"prompt"`
-	Profile     string `json:"profile,omitempty"`
-	Description string `json:"description,omitempty"`
+	NonInteractive bool   `json:"non_interactive,omitempty"`
+	Prompt         string `json:"prompt"`
+	Profile        string `json:"profile,omitempty"`
+	Description    string `json:"description,omitempty"`
 }

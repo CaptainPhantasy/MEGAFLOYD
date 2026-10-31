@@ -62,6 +62,15 @@ type QuestionForm struct {
 	// the entire question batch. The UI sets this to wire up
 	// workspace cancellation.
 	OnCancel func()
+
+	// Submission commands run outside Update. The form keeps its draft until
+	// the UI acknowledges success or reports an error for this exact batch.
+	OnSubmit        func([]question.Answer) tea.Cmd
+	OnCancelRequest func() tea.Cmd
+	pendingCmd      tea.Cmd
+	submitting      bool
+	submissionError string
+	resolved        bool
 }
 
 // NewQuestionForm creates a tabbed multi-question form from a
@@ -199,6 +208,12 @@ func (f *QuestionForm) firstUnanswered() int {
 // HandleKey routes keys to the active tab. Returns true when the
 // entire batch is submitted.
 func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+	if f.resolved {
+		return key.Matches(msg, f.keyClose), nil
+	}
+	if f.submitting {
+		return false, nil
+	}
 	// Tab navigation works on all tabs including confirm.
 	switch {
 	case key.Matches(msg, f.keyNextTab):
@@ -213,7 +228,7 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	if f.isConfirmTab() {
 		done, cmd := f.confirmComp.HandleKey(msg)
 		if done {
-			return true, cmd
+			return false, tea.Batch(cmd, f.TakeCommand())
 		}
 		return false, cmd
 	}
@@ -221,7 +236,7 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	// Global keys for question tabs.
 	if key.Matches(msg, f.keyClose) {
 		f.cancel()
-		return true, nil
+		return false, f.TakeCommand()
 	}
 
 	// Route to active question.
@@ -235,7 +250,7 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 				f.switchTab(f.activeIdx + 1)
 			} else if !f.hasConfirm {
 				f.submit()
-				return true, cmd
+				return false, tea.Batch(cmd, f.TakeCommand())
 			}
 			return false, cmd
 		}
@@ -304,6 +319,9 @@ func (f *QuestionForm) syncConfirmAnswers() {
 
 // submit collects stored responses and calls OnAnswer.
 func (f *QuestionForm) submit() {
+	if f.submitting {
+		return
+	}
 	responses := make([]question.Answer, f.numQuestions)
 	for i, ans := range f.answers {
 		if ans != nil {
@@ -314,17 +332,54 @@ func (f *QuestionForm) submit() {
 			}
 		}
 	}
-	if f.OnAnswer != nil {
+	f.submitting = true
+	f.submissionError = ""
+	if f.OnSubmit != nil {
+		f.pendingCmd = f.OnSubmit(responses)
+	} else if f.OnAnswer != nil {
 		f.OnAnswer(responses)
+	} else {
+		f.SubmissionFailed("Question delivery is unavailable. Your answer is still here.")
 	}
 }
 
 // cancel calls OnCancel to signal that the user dismissed the
 // question batch without answering.
 func (f *QuestionForm) cancel() {
-	if f.OnCancel != nil {
-		f.OnCancel()
+	if f.submitting {
+		return
 	}
+	f.submitting = true
+	f.submissionError = ""
+	if f.OnCancelRequest != nil {
+		f.pendingCmd = f.OnCancelRequest()
+	} else if f.OnCancel != nil {
+		f.OnCancel()
+	} else {
+		f.SubmissionFailed("Question cancellation is unavailable. Your answer is still here.")
+	}
+}
+
+// TakeCommand returns the pending submission once, including mouse submits.
+func (f *QuestionForm) TakeCommand() tea.Cmd {
+	cmd := f.pendingCmd
+	f.pendingCmd = nil
+	return cmd
+}
+
+// SubmissionFailed restores editing without discarding any answer.
+func (f *QuestionForm) SubmissionFailed(message string) {
+	f.submitting = false
+	f.submissionError = message
+}
+
+// Submitting reports whether this form awaits its delivery acknowledgment.
+func (f *QuestionForm) Submitting() bool { return f.submitting }
+
+// ResolvedExternally leaves the displayed answer readable until dismissed.
+func (f *QuestionForm) ResolvedExternally() {
+	f.resolved = true
+	f.SubmissionFailed("This question has already ended. Your draft is still here; Esc dismisses it.")
 }
 
 // ShortHelp returns key bindings for the status bar.
@@ -358,6 +413,9 @@ func (f *QuestionForm) Height(width int) int {
 		}
 	}
 	h += maxQ
+	if f.submitting || f.submissionError != "" {
+		h += 2
+	}
 	return h
 }
 
@@ -439,6 +497,15 @@ func (f *QuestionForm) getQuestionText(idx int) string {
 // without tab chrome.
 func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	contentY := area.Min.Y
+	if f.submitting || f.submissionError != "" {
+		status := f.submissionError
+		if f.submitting {
+			status = "Sending your answer…"
+		}
+		drawStyledText(scr, image.Rect(area.Min.X, area.Min.Y, area.Max.X, area.Min.Y+1), ansi.Truncate(status, area.Dx(), "…"))
+		area.Min.Y += 2
+		contentY = area.Min.Y
+	}
 
 	if f.showTabs {
 		const tabPadX = 1
@@ -727,6 +794,9 @@ func (f *QuestionForm) SetHover(x, y int) {
 // HandlePaste implements PasteableEditor. Forwards paste events
 // to the active question component if it supports pasting.
 func (f *QuestionForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	if f.submitting {
+		return nil
+	}
 	if f.isConfirmTab() {
 		return nil
 	}
@@ -742,6 +812,9 @@ func (f *QuestionForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 // the click landed on a tab and switches to it, or delegates to
 // the active component for content-area clicks.
 func (f *QuestionForm) HandleMouseClick(x, y int) (bool, bool) {
+	if f.submitting {
+		return false, true
+	}
 	// Check tabs first.
 	if f.showTabs && f.compositor != nil {
 		hit := f.compositor.Hit(x, y)
@@ -758,7 +831,8 @@ func (f *QuestionForm) HandleMouseClick(x, y int) (bool, bool) {
 
 	// Delegate to active component.
 	if f.isConfirmTab() && f.confirmComp != nil {
-		return f.confirmComp.HandleMouseClick(x, y)
+		_, handled := f.confirmComp.HandleMouseClick(x, y)
+		return false, handled
 	}
 	if f.activeIdx < len(f.questions) {
 		done, handled := f.questions[f.activeIdx].HandleMouseClick(x, y)
@@ -772,7 +846,7 @@ func (f *QuestionForm) HandleMouseClick(x, y int) (bool, bool) {
 					return false, true
 				} else if !f.hasConfirm {
 					f.submit()
-					return true, true
+					return false, true
 				}
 			}
 			return false, true

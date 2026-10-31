@@ -8,11 +8,13 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/legacy-ai/floyd/internal/agent/ralph"
 	"github.com/legacy-ai/floyd/internal/commands"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/plan"
+	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/dialog"
@@ -255,6 +257,41 @@ func (w *builtinTestWorkspace) SetConfigField(_ config.Scope, key string, value 
 	return nil
 }
 
+func (w *builtinTestWorkspace) RalphGoal(ctx context.Context, sid, action, objective string) (*ralph.State, error) {
+	svc := ralph.New(w.cfg.Options.DataDirectory)
+	switch action {
+	case "start":
+		return svc.Start(sid, objective, ralph.DefaultMaxIterations, "")
+	case "cancel":
+		_, err := svc.Cancel()
+		return nil, err
+	default:
+		return svc.StatusChecked()
+	}
+}
+
+func (w *builtinTestWorkspace) Plan(ctx context.Context, sid string, in *proto.RuntimePlanRequest) (proto.RuntimePlan, error) {
+	svc := plan.NewService(w.cfg.Options.DataDirectory)
+	if in != nil {
+		switch in.Action {
+		case "enter":
+			if _, err := svc.Enter(sid); err != nil {
+				return proto.RuntimePlan{}, err
+			}
+		case "clear":
+			if err := svc.Clear(sid); err != nil {
+				return proto.RuntimePlan{}, err
+			}
+		case "cancel":
+			if err := svc.Cancel(sid); err != nil {
+				return proto.RuntimePlan{}, err
+			}
+		}
+	}
+	state, err := svc.Status(sid)
+	return proto.RuntimePlan{Active: state.Active, ID: state.ID, Path: state.Path, Content: state.Content}, err
+}
+
 func newBuiltinTestUI(cfg *config.Config) (*UI, *dialog.Overlay) {
 	st := styles.CharmtonePantera()
 	ws := &builtinTestWorkspace{cfg: cfg, workDir: "/tmp/work"}
@@ -390,6 +427,7 @@ func TestPlanCommandSubcommands(t *testing.T) {
 
 	cmd := ui.runBuiltin("plan", "", false)
 	require.NotNil(t, cmd)
+	ui.Update(cmd())
 	require.True(t, ui.status.planActive, "/plan must show the plan pill")
 
 	status, err := svc.Status("sess-1")
@@ -399,7 +437,7 @@ func TestPlanCommandSubcommands(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(status.Path, []byte("# Plan\n\n1. Do it."), 0o644))
 
-	ui.runBuiltin("plan", "status", false)
+	ui.Update(ui.runBuiltin("plan", "status", false)())
 	info, ok := overlay.Dialog(dialog.InfoID).(*dialog.Info)
 	require.True(t, ok, "/plan status must open the info panel")
 	require.Contains(t, info.Body(), status.Path)
@@ -407,7 +445,7 @@ func TestPlanCommandSubcommands(t *testing.T) {
 	require.Contains(t, info.Body(), "1. Do it.")
 	require.True(t, ui.status.planActive)
 
-	ui.runBuiltin("plan", "clear", false)
+	ui.Update(ui.runBuiltin("plan", "clear", false)())
 	content, err := os.ReadFile(status.Path)
 	require.NoError(t, err)
 	require.Empty(t, content)
@@ -416,7 +454,7 @@ func TestPlanCommandSubcommands(t *testing.T) {
 	require.True(t, status.Active, "clear must keep plan mode active")
 	require.True(t, ui.status.planActive)
 
-	ui.runBuiltin("plan", "cancel", false)
+	ui.Update(ui.runBuiltin("plan", "cancel", false)())
 	status, err = svc.Status("sess-1")
 	require.NoError(t, err)
 	require.False(t, status.Active)

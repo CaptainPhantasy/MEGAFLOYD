@@ -105,9 +105,8 @@ func IsFileTooBig(filePath string, sizeLimit int64) (bool, error) {
 	return false, nil
 }
 
-// CopyToClipboard copies the given text to the clipboard using both OSC 52
-// (terminal escape sequence) and native clipboard for maximum compatibility.
-// Returns a command that reports success to the user with the given message.
+// CopyToClipboard copies text and reports native delivery, or explicitly
+// identifies a terminal request whose delivery cannot be acknowledged.
 func CopyToClipboard(text, successMessage string) tea.Cmd {
 	return CopyToClipboardWithCallback(text, successMessage, nil)
 }
@@ -116,13 +115,10 @@ func CopyToClipboard(text, successMessage string) tea.Cmd {
 // before showing the success message.
 // This is useful when you need to perform additional actions like clearing UI state.
 func CopyToClipboardWithCallback(text, successMessage string, callback tea.Cmd) tea.Cmd {
-	return tea.Sequence(
-		tea.SetClipboard(text),
-		func() tea.Msg {
-			clipboard.WriteText(text)
-			return nil
-		},
-		callback,
-		util.ReportInfo(successMessage),
-	)
+	return func() tea.Msg {
+		if err := clipboard.WriteText(text); err != nil {
+			return tea.Sequence(tea.SetClipboard(text), callback, util.ReportWarn("Copy requested from the terminal; clipboard delivery is not confirmed."))()
+		}
+		return tea.Sequence(callback, util.ReportInfo(successMessage))()
+	}
 }

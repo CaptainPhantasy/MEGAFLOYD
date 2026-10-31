@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -23,9 +22,8 @@ import (
 	"github.com/legacy-ai/floyd/internal/experiments"
 	"github.com/legacy-ai/floyd/internal/megafloydweb"
 	"github.com/legacy-ai/floyd/internal/message"
-	"github.com/legacy-ai/floyd/internal/plan"
+	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/session"
-	"github.com/legacy-ai/floyd/internal/shell"
 	"github.com/legacy-ai/floyd/internal/ui/dialog"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
 	"github.com/legacy-ai/floyd/internal/ui/util"
@@ -44,6 +42,8 @@ type builtinHandlerID uint8
 
 const (
 	handlerUnknown builtinHandlerID = iota
+	handlerLibrary
+	handlerPreference
 	handlerYolo
 	handlerAuto
 	handlerPermission
@@ -92,6 +92,10 @@ const (
 // builtinHandlerFor maps a canonical command name to its handler.
 func builtinHandlerFor(name string) builtinHandlerID {
 	switch name {
+	case "context", "cost", "vim", "terminal-setup", "output-style", "privacy-settings":
+		return handlerPreference
+	case "hooks", "rewind", "file-history", "release-notes", "todos", "agents", "skills", "doctor", "prompt", "codebase", "session", "import", "telemetry", "memory":
+		return handlerLibrary
 	case "yolo":
 		return handlerYolo
 	case "auto":
@@ -197,13 +201,18 @@ func builtinNeedsArgs(name string) bool {
 // builtinResultMsg carries the outcome of an asynchronous builtin handler
 // back to the Update loop, which owns all model mutation.
 type builtinResultMsg struct {
-	Title     string
-	Body      string
-	Info      string
-	Err       error
-	Clipboard string
-	Send      string
-	ReloadTUI bool
+	Title           string
+	Body            string
+	Info            string
+	Err             error
+	Clipboard       string
+	Send            string
+	ReloadTUI       bool
+	SessionID       string
+	SessionTitle    *string
+	Messages        []message.Message
+	RefreshMessages bool
+	PlanActive      *bool
 }
 
 // parseSlashInput splits a leading-slash input into a command name and
@@ -256,6 +265,10 @@ func (m *UI) runBuiltin(name, args string, fromPalette bool) tea.Cmd {
 	}
 
 	switch builtinHandlerFor(spec.Name) {
+	case handlerPreference:
+		return m.preferenceCommand(spec.Name, args)
+	case handlerLibrary:
+		return m.libraryCommand(spec.Name, args)
 	case handlerYolo:
 		yolo := m.toggleYoloMode()
 		status := "off"
@@ -275,16 +288,22 @@ func (m *UI) runBuiltin(name, args string, fromPalette bool) tea.Cmd {
 		return m.openDialog(dialog.ConfigAuditID)
 
 	case handlerModel:
+		if strings.TrimSpace(args) != "" {
+			return m.selectNamedModel(args, config.SelectedModelTypeLarge)
+		}
 		return m.openDialog(dialog.ModelsID)
 
 	case handlerSecondaryModel:
+		if strings.TrimSpace(args) != "" {
+			return m.selectNamedModel(args, config.SelectedModelTypeSmall)
+		}
 		return m.openModelsDialogForType(dialog.ModelTypeSmall)
 
 	case handlerEffort:
 		return m.openEffortPicker()
 
 	case handlerProvider:
-		return m.openDialog(dialog.ModelsID)
+		return m.providerCommand(args)
 
 	case handlerHelp:
 		m.status.ToggleHelp()
@@ -307,7 +326,7 @@ func (m *UI) runBuiltin(name, args string, fromPalette bool) tea.Cmd {
 		return m.openDialog(dialog.SessionsID)
 
 	case handlerTasks:
-		return m.showInfo("Background Tasks", m.tasksReport())
+		return m.tasksCommand(args)
 
 	case handlerMCP:
 		return m.openDialog(dialog.MCPServersID)
@@ -334,7 +353,7 @@ func (m *UI) runBuiltin(name, args string, fromPalette bool) tea.Cmd {
 		sessionID := m.session.ID
 		ws := m.com.Workspace
 		return func() tea.Msg {
-			if err := ws.AgentSummarize(context.Background(), sessionID); err != nil {
+			if err := ws.Summarize(context.Background(), sessionID, args); err != nil {
 				return builtinResultMsg{Err: err}
 			}
 			return builtinResultMsg{Info: "Session compacted."}
@@ -392,7 +411,7 @@ func (m *UI) runBuiltin(name, args string, fromPalette bool) tea.Cmd {
 		))
 
 	case handlerSwarm:
-		return m.runSwarm(args)
+		return m.swarmCommand(args)
 
 	case handlerBtw:
 		return m.runBtw(args)
@@ -590,38 +609,13 @@ func (m *UI) openEffortPicker() tea.Cmd {
 	return util.ReportInfo("The current model has no reasoning effort settings.")
 }
 
-// tasksReport lists the in-process background shells. In client/server
-// mode the shells live in the server process, so this list belongs to
-// whatever process owns the TUI.
+// tasksReport is called by the diagnostic export worker, never the UI loop.
 func (m *UI) tasksReport() string {
-	if _, local := m.com.Workspace.(ralphWorkspace); !local {
-		return "Background tasks are owned by the server process in client/server mode and are not exposed through the protocol."
+	tasks, err := m.com.Workspace.Tasks(context.Background())
+	if err != nil {
+		return "Could not read tasks: " + err.Error()
 	}
-	mgr := shell.GetBackgroundShellManager()
-	ids := mgr.List()
-	if len(ids) == 0 {
-		return "No background tasks."
-	}
-	sort.Strings(ids)
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "Background tasks: %d\n", len(ids))
-	for _, id := range ids {
-		bg, ok := mgr.Get(id)
-		if !ok {
-			continue
-		}
-		status := "running"
-		if _, _, done, _ := bg.GetOutput(); done {
-			status = "completed"
-		}
-		label := bg.Description
-		if label == "" {
-			label = bg.Command
-		}
-		fmt.Fprintf(&b, "\n[%s] %s\n  %s\n  %s\n", id, status, label, bg.WorkingDir)
-	}
-	return b.String()
+	return formatTasks(tasks)
 }
 
 // usageReport renders token, context, budget, and quota usage.
@@ -749,14 +743,16 @@ func (m *UI) titleCommand(args string) tea.Cmd {
 		}
 		return m.showInfo("Session Title", name)
 	}
-	sess := *m.session
-	sess.Title = title
-	ws := m.com.Workspace
+	sessionID := m.session.ID
+	ws, ok := m.com.Workspace.(workspace.SessionTitleWorkspace)
+	if !ok {
+		return util.ReportError(fmt.Errorf("workspace does not support atomic session renaming"))
+	}
 	return func() tea.Msg {
-		if _, err := ws.SaveSession(context.Background(), sess); err != nil {
+		if err := ws.RenameSession(context.Background(), sessionID, title); err != nil {
 			return builtinResultMsg{Err: err}
 		}
-		return builtinResultMsg{Info: "Session renamed to: " + title}
+		return builtinResultMsg{Info: "Session renamed to: " + title, SessionID: sessionID, SessionTitle: &title}
 	}
 }
 
@@ -796,7 +792,6 @@ func (m *UI) exportDebugZip() tea.Cmd {
 	path := resolveExportPath("", workDir, sess.ID, "zip")
 	statusText := m.statusReport()
 	usageText := buildUsageReport(&sess, m.com.Config())
-	tasksText := m.tasksReport()
 	return func() tea.Msg {
 		msgs, err := ws.ListMessages(context.Background(), sess.ID)
 		if err != nil {
@@ -806,7 +801,7 @@ func (m *UI) exportDebugZip() tea.Cmd {
 			"session.md":    []byte(buildSessionMarkdown(&sess, msgs, workDir)),
 			"status.txt":    []byte(statusText),
 			"usage.txt":     []byte(usageText),
-			"tasks.txt":     []byte(tasksText),
+			"tasks.txt":     []byte(m.tasksReport()),
 			"messages.json": mustJSON(msgs),
 			"metadata.json": mustJSON(map[string]any{
 				"version":       version.Version,
@@ -953,10 +948,11 @@ func (m *UI) copyLastAssistant() tea.Cmd {
 		if text == "" {
 			return builtinResultMsg{Err: fmt.Errorf("no assistant message to copy")}
 		}
-		clipboard.WriteText(text)
+		if err := clipboard.WriteText(text); err != nil {
+			return builtinResultMsg{Clipboard: text, Info: "System clipboard unavailable; copy requested from the terminal (delivery is not confirmed)."}
+		}
 		return builtinResultMsg{
-			Clipboard: text,
-			Info:      "Last assistant message copied to clipboard.",
+			Info: "Last assistant message copied to clipboard.",
 		}
 	}
 }
@@ -1028,68 +1024,42 @@ func (m *UI) planCommand(args string) tea.Cmd {
 	if m.session == nil {
 		return util.ReportWarn("No active session. Send a prompt first, then use /plan.")
 	}
-	cfg := m.com.Config()
-	if cfg == nil || cfg.Options == nil || cfg.Options.DataDirectory == "" {
-		return util.ReportError(fmt.Errorf("data directory is not configured"))
+	action := strings.ToLower(strings.TrimSpace(args))
+	if action == "" {
+		action = "enter"
 	}
-
-	svc := plan.NewService(cfg.Options.DataDirectory)
-	sessionID := m.session.ID
-
-	switch strings.ToLower(strings.TrimSpace(args)) {
-	case "", "enter":
-		status, err := svc.Status(sessionID)
-		if err != nil {
-			return util.ReportError(err)
-		}
-		if status.Active {
-			m.status.SetPlanActive(true)
-			return util.ReportInfo("Plan mode is already active. Plan file: " + status.Path)
-		}
-		entered, err := svc.Enter(sessionID)
-		if err != nil {
-			return util.ReportError(err)
-		}
-		m.status.SetPlanActive(true)
-		return util.ReportInfo("Plan mode active. Write the plan to: " + entered.Path)
-
-	case "status":
-		status, err := svc.Status(sessionID)
-		if err != nil {
-			return util.ReportError(err)
-		}
-		m.status.SetPlanActive(status.Active)
-		if !status.Active {
-			return m.showInfo("Plan", "No active plan. Run /plan to enter plan mode.")
-		}
-		content := status.Content
-		runes := []rune(content)
-		if len(runes) > 4000 {
-			content = string(runes[:4000]) + "\n…"
-		}
-		body := fmt.Sprintf("Plan file: %s\nPlan ID: %s\n\n", status.Path, status.ID)
-		if strings.TrimSpace(content) == "" {
-			body += "(empty — write the plan before calling exit_plan_mode)"
-		} else {
-			body += content
-		}
-		return m.showInfo("Plan", body)
-
-	case "clear":
-		if err := svc.Clear(sessionID); err != nil {
-			return util.ReportError(err)
-		}
-		return util.ReportInfo("Plan file cleared.")
-
-	case "cancel":
-		if err := svc.Cancel(sessionID); err != nil {
-			return util.ReportError(err)
-		}
-		m.status.SetPlanActive(false)
-		return util.ReportInfo("Plan mode cancelled. The plan file is kept.")
-
+	switch action {
+	case "enter", "status", "clear", "cancel":
 	default:
 		return util.ReportWarn("Usage: /plan [enter|status|clear|cancel]")
+	}
+	ws, sid := m.com.Workspace, m.session.ID
+	return func() tea.Msg {
+		var request *proto.RuntimePlanRequest
+		if action != "status" {
+			request = &proto.RuntimePlanRequest{Action: action}
+		}
+		state, err := ws.Plan(context.Background(), sid, request)
+		if err != nil {
+			return builtinResultMsg{Err: err}
+		}
+		result := builtinResultMsg{SessionID: sid, PlanActive: &state.Active}
+		switch action {
+		case "enter":
+			result.Info = "Plan mode active. Plan file: " + state.Path
+		case "clear":
+			result.Info = "Plan file cleared."
+		case "cancel":
+			result.Info = "Plan mode cancelled. The plan file is kept."
+		case "status":
+			result.Title = "Plan"
+			if !state.Active {
+				result.Body = "No active plan. Run /plan to enter plan mode."
+			} else {
+				result.Body = fmt.Sprintf("Plan file: %s\nPlan ID: %s\n\n%s", state.Path, state.ID, state.Content)
+			}
+		}
+		return result
 	}
 }
 
@@ -1097,57 +1067,35 @@ func (m *UI) goalCommand(args string) tea.Cmd {
 	if m.session == nil {
 		return util.ReportWarn("No active session. Send a prompt first, then start a goal.")
 	}
-	cfg := m.com.Config()
-	if cfg == nil || cfg.Options == nil || cfg.Options.DataDirectory == "" {
-		return util.ReportError(fmt.Errorf("data directory is not configured"))
-	}
-	if _, local := m.com.Workspace.(storeWorkspace); !local {
-		return util.ReportWarn("Goals require a local workspace; the server API does not expose the Ralph loop yet.")
-	}
-	dataDir := cfg.Options.DataDirectory
-	loop := ralph.New(dataDir)
 	action, objective := parseGoalArgs(args)
-
-	switch action {
-	case goalShowStatus:
-		return func() tea.Msg {
-			state := loop.Status()
-			if state == nil {
-				return builtinResultMsg{Title: "Goal", Body: "No active goal."}
-			}
-			body := fmt.Sprintf(
-				"Iteration: %d\nMax iterations: %d\nCompletion promise: %s\nStarted: %s\n\n%s",
-				state.Iteration, state.MaxIterations, orDash(state.CompletionPromise), state.StartedAt, state.Prompt,
-			)
-			return builtinResultMsg{Title: "Goal", Body: body}
-		}
-	case goalCancelGoal:
-		return func() tea.Msg {
-			iteration, err := loop.Cancel()
-			if err != nil {
-				return builtinResultMsg{Info: "No active goal to cancel."}
-			}
-			return builtinResultMsg{Info: fmt.Sprintf("Goal cancelled at iteration %d.", iteration)}
-		}
-	case goalUnsupported:
-		return util.ReportInfo("Goal pause, resume, replacement and queues are not supported; use /goal cancel and /goal <objective>.")
+	if action == goalUnsupported {
+		return util.ReportWarn("Use /goal status, /goal cancel, or /goal <objective>.")
 	}
-
-	if m.isAgentBusy() {
+	if action == goalStart && m.isAgentBusy() {
 		return util.ReportWarn("Agent is busy, please wait before starting a goal.")
 	}
-	sessionID := m.session.ID
+	ws, sid := m.com.Workspace, m.session.ID
 	return func() tea.Msg {
-		if loop.Status() != nil {
-			return builtinResultMsg{Info: "A goal is already active; use /goal cancel first."}
+		operation := "status"
+		if action == goalStart {
+			operation = "start"
+		} else if action == goalCancelGoal {
+			operation = "cancel"
 		}
-		if err := startRalphGoal(dataDir, sessionID, objective); err != nil {
-			return builtinResultMsg{Err: fmt.Errorf("failed to start goal: %w", err)}
+		state, err := ws.RalphGoal(context.Background(), sid, operation, objective)
+		if err != nil {
+			return builtinResultMsg{Err: err}
 		}
-		return builtinResultMsg{
-			Info: "Goal started; the Ralph loop will continue after each turn.",
-			Send: objective,
+		if action == goalCancelGoal {
+			return builtinResultMsg{Info: "Goal cancelled."}
 		}
+		if action == goalStart {
+			return builtinResultMsg{Info: "Goal started; work will continue after each turn.", Send: objective, SessionID: sid}
+		}
+		if state == nil {
+			return builtinResultMsg{Title: "Goal", Body: "No active goal."}
+		}
+		return builtinResultMsg{Title: "Goal", Body: fmt.Sprintf("Iteration: %d\nMax iterations: %d\nCompletion promise: %s\nStarted: %s\n\n%s", state.Iteration, state.MaxIterations, orDash(state.CompletionPromise), state.StartedAt, state.Prompt)}
 	}
 }
 
@@ -1155,25 +1103,13 @@ func (m *UI) forkSession() tea.Cmd {
 	if m.session == nil {
 		return util.ReportWarn("No active session to fork.")
 	}
-	ws, ok := m.com.Workspace.(ralphWorkspace)
-	if !ok {
-		return util.ReportWarn("Forking requires a local workspace; the server API does not expose fork yet.")
-	}
-	sessionID := m.session.ID
-	// The local workspace exposes the in-process app and its session service.
-	appWS := ws.App()
+	ws, sid := m.com.Workspace, m.session.ID
 	return func() tea.Msg {
-		result, err := session.Fork(context.Background(), appWS.Sessions, sessionID, -1)
+		result, err := ws.ForkSession(context.Background(), sid)
 		if err != nil {
 			return builtinResultMsg{Err: fmt.Errorf("failed to fork session: %w", err)}
 		}
-		return builtinResultMsg{
-			Title: "Fork",
-			Body: fmt.Sprintf(
-				"Forked to session %s (%d messages).\nStill in the original session; open the fork from /sessions.",
-				result.NewSession.ID, result.CopiedCount,
-			),
-		}
+		return builtinResultMsg{Title: "Fork", Body: fmt.Sprintf("Forked to session %s (%d messages).\nStill in the original session; open the fork from /sessions.", result.NewSession.ID, result.CopiedCount)}
 	}
 }
 
@@ -1192,38 +1128,18 @@ func (m *UI) undoPrompts(args string) tea.Cmd {
 		}
 		count = n
 	}
-	ws, ok := m.com.Workspace.(ralphWorkspace)
-	if !ok {
-		return util.ReportWarn("Undo requires a local workspace; the server API does not expose message deletion yet.")
-	}
-	appWS := ws.App()
-	sessionID := m.session.ID
+	ws, sid := m.com.Workspace, m.session.ID
 	return func() tea.Msg {
 		ctx := context.Background()
-		msgs, err := appWS.Messages.List(ctx, sessionID)
+		result, err := ws.UndoPrompts(ctx, sid, count)
 		if err != nil {
 			return builtinResultMsg{Err: err}
 		}
-		var userIndices []int
-		for i, msg := range msgs {
-			if msg.Role == message.User {
-				userIndices = append(userIndices, i)
-			}
+		msgs, err := ws.ListMessages(ctx, sid)
+		if err != nil {
+			return builtinResultMsg{Err: fmt.Errorf("prompts withdrawn, but transcript refresh failed: %w", err)}
 		}
-		if len(userIndices) < count {
-			return builtinResultMsg{Err: fmt.Errorf("only %d prompt(s) available to undo", len(userIndices))}
-		}
-		cutoff := userIndices[len(userIndices)-count]
-		deleted := 0
-		for _, msg := range msgs[cutoff:] {
-			if err := appWS.Messages.Delete(ctx, msg.ID); err != nil {
-				return builtinResultMsg{Err: err}
-			}
-			deleted++
-		}
-		return builtinResultMsg{
-			Info: fmt.Sprintf("Withdrew %d prompt(s) (%d messages).", count, deleted),
-		}
+		return builtinResultMsg{SessionID: sid, Messages: msgs, RefreshMessages: true, Info: fmt.Sprintf("Withdrew %d prompt(s) (%d messages). Recovery record: %s", count, len(result.RemovedMessageIDs), result.RecordID)}
 	}
 }
 
@@ -1494,22 +1410,13 @@ func experimentIDs() string {
 }
 
 func (m *UI) reloadConfig() tea.Cmd {
-	storeWS, ok := m.com.Workspace.(storeWorkspace)
-	if !ok {
-		return util.ReportWarn("Reload requires a local workspace; the server API does not expose config reload yet.")
-	}
-	baseWS := m.com.Workspace
-	store := storeWS.Store()
-	return func() tea.Msg {
-		ctx := context.Background()
-		if err := store.ReloadFromDisk(ctx); err != nil {
+	ws := m.com.Workspace
+	return m.updateAgentModelCmd(func() tea.Msg {
+		if err := ws.ReloadConfig(context.Background()); err != nil {
 			return builtinResultMsg{Err: fmt.Errorf("failed to reload configuration: %w", err)}
 		}
-		if err := baseWS.UpdateAgentModel(ctx); err != nil {
-			return builtinResultMsg{Info: "Configuration reloaded, but model refresh failed: " + err.Error()}
-		}
 		return builtinResultMsg{Info: "Configuration reloaded.", ReloadTUI: true}
-	}
+	})
 }
 
 // reapplyTUI pushes the current configuration's UI preferences into the
@@ -1671,83 +1578,5 @@ func waitForSessionIdle(ctx context.Context, ws workspace.Workspace, sessionID s
 			return
 		case <-time.After(200 * time.Millisecond):
 		}
-	}
-}
-
-// runSwarm runs one task through every configured agent name in a
-// separate session and collects the outputs. The chassis dispatches all
-// names through the same coordinator (as the CLI swarm command notes).
-func (m *UI) runSwarm(task string) tea.Cmd {
-	task = strings.TrimSpace(task)
-	if task == "" {
-		return m.promptBuiltinInput("swarm")
-	}
-	cfg := m.com.Config()
-	if cfg == nil || len(cfg.Agents) == 0 {
-		return util.ReportWarn("No agents are configured.")
-	}
-	names := make([]string, 0, len(cfg.Agents))
-	for name := range cfg.Agents {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	ws := m.com.Workspace
-	return func() tea.Msg {
-		type outcome struct {
-			name      string
-			sessionID string
-			output    string
-			err       error
-		}
-		results := make([]outcome, len(names))
-		var wg sync.WaitGroup
-		for i, name := range names {
-			wg.Add(1)
-			go func(i int, name string) {
-				defer wg.Done()
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-				defer cancel()
-
-				result := outcome{name: name}
-				sess, err := ws.CreateSession(ctx, "swarm: "+name)
-				if err != nil {
-					result.err = err
-					results[i] = result
-					return
-				}
-				result.sessionID = sess.ID
-				if err := ws.AgentRun(ctx, sess.ID, task); err != nil {
-					result.err = err
-					results[i] = result
-					return
-				}
-				waitForSessionIdle(ctx, ws, sess.ID)
-				msgs, err := ws.ListMessages(ctx, sess.ID)
-				if err != nil {
-					result.err = err
-					results[i] = result
-					return
-				}
-				result.output = lastAssistantText(msgs)
-				results[i] = result
-			}(i, name)
-		}
-		wg.Wait()
-
-		var b strings.Builder
-		for _, result := range results {
-			fmt.Fprintf(&b, "== %s (session %s) ==\n", result.name, result.sessionID)
-			if result.err != nil {
-				fmt.Fprintf(&b, "error: %v\n\n", result.err)
-				continue
-			}
-			if result.output == "" {
-				result.output = "(no output)"
-			}
-			b.WriteString(result.output)
-			b.WriteString("\n\n")
-		}
-		return builtinResultMsg{Title: "Swarm", Body: b.String()}
 	}
 }

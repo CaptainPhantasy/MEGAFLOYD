@@ -14,6 +14,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/lsp"
 	"github.com/legacy-ai/floyd/internal/message"
+	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/pubsub"
 	"github.com/legacy-ai/floyd/internal/session"
 	"github.com/legacy-ai/floyd/internal/ui/attachments"
@@ -48,6 +49,19 @@ type countingWorkspace struct {
 	modelCalls      int
 	lspStateCalls   int
 	lspDiagCalls    int
+}
+
+func (w *countingWorkspace) Plan(context.Context, string, *proto.RuntimePlanRequest) (proto.RuntimePlan, error) {
+	return proto.RuntimePlan{}, nil
+}
+
+// Swarm reports a disabled swarm so session switches stay side-effect free.
+func (w *countingWorkspace) Swarm(context.Context, string) (proto.SwarmState, error) {
+	return proto.SwarmState{MaxParallel: 3}, nil
+}
+
+func (w *countingWorkspace) SetSwarm(context.Context, string, *bool, *int) (proto.SwarmState, error) {
+	return proto.SwarmState{MaxParallel: 3}, nil
 }
 
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }

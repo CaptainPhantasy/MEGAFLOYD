@@ -2,11 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
+
 	"github.com/legacy-ai/floyd/internal/agent"
 	"github.com/legacy-ai/floyd/internal/goal"
 	"github.com/legacy-ai/floyd/internal/pluginruntime"
 	"github.com/legacy-ai/floyd/internal/proto"
-	"net/http"
 )
 
 func runtimeBody(w http.ResponseWriter, r *http.Request, value any) bool {
@@ -17,7 +18,10 @@ func runtimeBody(w http.ResponseWriter, r *http.Request, value any) bool {
 	}
 	return true
 }
+
 func (c *controllerV1) registerRuntimeOperations(mux *http.ServeMux) {
+	c.registerFrontendRuntime(mux)
+	c.registerRuntimeOptions(mux)
 	base := "/v1/workspaces/{id}"
 	mux.HandleFunc("POST "+base+"/config/plugin-reload", func(w http.ResponseWriter, r *http.Request) {
 		var in pluginruntime.Input
@@ -176,6 +180,7 @@ func (c *controllerV1) registerRuntimeOperations(mux *http.ServeMux) {
 		jsonEncode(w, v)
 	})
 }
+
 func (c *controllerV1) handleRuntimeTask(w http.ResponseWriter, r *http.Request) {
 	action := r.PathValue("action")
 	if action != "" && action != "cancel" && action != "detach" {

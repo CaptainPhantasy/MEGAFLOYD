@@ -3,7 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/legacy-ai/floyd/internal/megafloyd"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 )
 
 // Checkpoint represents a saved workflow state for recovery
@@ -52,8 +53,11 @@ func NewCheckpointService(workingDir string, selected ...string) CheckpointServi
 	return &checkpointService{baseDir: filepath.Join(dataDir, "workflows"), pathErr: err}
 }
 
-func (s *checkpointService) checkpointPath(id string) string {
-	return filepath.Join(s.baseDir, id+".json")
+func (s *checkpointService) checkpointPath(id string) (string, error) {
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`) || strings.ContainsRune(id, 0) {
+		return "", fmt.Errorf("invalid checkpoint ID")
+	}
+	return filepath.Join(s.baseDir, id+".json"), nil
 }
 
 func (s *checkpointService) ensureDir() error {
@@ -65,6 +69,13 @@ func (s *checkpointService) ensureDir() error {
 
 // Save persists a checkpoint to disk
 func (s *checkpointService) Save(checkpoint *Checkpoint) error {
+	if checkpoint == nil {
+		return fmt.Errorf("checkpoint is required")
+	}
+	path, err := s.checkpointPath(checkpoint.ID)
+	if err != nil {
+		return err
+	}
 	if err := s.ensureDir(); err != nil {
 		return fmt.Errorf("failed to create checkpoint directory: %w", err)
 	}
@@ -76,9 +87,23 @@ func (s *checkpointService) Save(checkpoint *Checkpoint) error {
 		return fmt.Errorf("failed to marshal checkpoint: %w", err)
 	}
 
-	path := s.checkpointPath(checkpoint.ID)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	temp, err := os.CreateTemp(s.baseDir, ".checkpoint-*")
+	if err != nil {
+		return fmt.Errorf("create checkpoint temporary file: %w", err)
+	}
+	defer os.Remove(temp.Name())
+	defer temp.Close()
+	if _, err := temp.Write(data); err != nil {
 		return fmt.Errorf("failed to write checkpoint file: %w", err)
+	}
+	if err := temp.Sync(); err != nil {
+		return fmt.Errorf("sync checkpoint file: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temp.Name(), path); err != nil {
+		return fmt.Errorf("replace checkpoint file: %w", err)
 	}
 
 	return nil
@@ -89,7 +114,10 @@ func (s *checkpointService) Load(id string) (*Checkpoint, error) {
 	if s.pathErr != nil {
 		return nil, s.pathErr
 	}
-	path := s.checkpointPath(id)
+	path, err := s.checkpointPath(id)
+	if err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -146,11 +174,63 @@ func (s *checkpointService) Delete(id string) error {
 	if s.pathErr != nil {
 		return s.pathErr
 	}
-	path := s.checkpointPath(id)
+	path, err := s.checkpointPath(id)
+	if err != nil {
+		return err
+	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete checkpoint: %w", err)
 	}
 	return nil
+}
+
+// cloneCheckpoint isolates a worker's mutable state from callers and events.
+func cloneCheckpoint(checkpoint *Checkpoint) *Checkpoint {
+	if checkpoint == nil {
+		return nil
+	}
+	copy := *checkpoint
+	copy.Context = maps.Clone(checkpoint.Context)
+	copy.Steps = append([]Step(nil), checkpoint.Steps...)
+	cloneTime := func(value *time.Time) *time.Time {
+		if value == nil {
+			return nil
+		}
+		copy := *value
+		return &copy
+	}
+	copy.CompletedAt = cloneTime(checkpoint.CompletedAt)
+	for i := range copy.Steps {
+		step := &copy.Steps[i]
+		step.Requires = append([]string(nil), step.Requires...)
+		step.Config = cloneConfig(step.Config)
+		step.StartedAt = cloneTime(step.StartedAt)
+		step.CompletedAt = cloneTime(step.CompletedAt)
+	}
+	return &copy
+}
+
+func cloneConfig(config map[string]interface{}) map[string]interface{} {
+	copy := maps.Clone(config)
+	for key, value := range copy {
+		copy[key] = cloneConfigValue(value)
+	}
+	return copy
+}
+
+func cloneConfigValue(value any) any {
+	switch value := value.(type) {
+	case map[string]interface{}:
+		return cloneConfig(value)
+	case []interface{}:
+		copy := make([]interface{}, len(value))
+		for i, child := range value {
+			copy[i] = cloneConfigValue(child)
+		}
+		return copy
+	default:
+		return value
+	}
 }
 
 // GetLatest returns the most recent checkpoint for a workflow

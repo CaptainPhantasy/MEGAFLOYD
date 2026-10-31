@@ -53,17 +53,18 @@ import (
 var clientHost string
 
 func init() {
-	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
+	rootCmd.PersistentFlags().String("cwd", "", "Current working directory")
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom floyd data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.PersistentFlags().StringVarP(&clientHost, "host", "H", server.DefaultHost(), "Connect to a specific floyd server host (for advanced users)")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
-	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.PersistentFlags().BoolP("yolo", "y", false, "Automatically accept ordinary permissions (protected-operation confirmations still apply)")
 	rootCmd.PersistentFlags().StringSlice("channels", nil, "MCP servers to enable as channels (repeatable), e.g. --channels server:webhook")
 	_ = rootCmd.PersistentFlags().MarkHidden("channels")
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
-	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	rootCmd.Flags().BoolP("continue", "c", false, "Continue the most recent session")
 	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
+	addPromptFlags(rootCmd)
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -94,6 +95,7 @@ func init() {
 
 var rootCmd = &cobra.Command{
 	Use:   "floyd",
+	Args:  cobra.ArbitraryArgs,
 	Short: "MegaFloyd, a terminal-first AI assistant for software development",
 	Long:  "MegaFloyd is a terminal-first AI assistant for software development and adjacent tasks",
 	Example: `
@@ -122,14 +124,25 @@ floyd --session {session-id}
 floyd --continue
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sessionID, _ := cmd.Flags().GetString("session")
-		continueLast, _ := cmd.Flags().GetBool("continue")
+		printPrompt, _ := cmd.Flags().GetBool("print")
+		if printPrompt || len(args) > 0 {
+			return runPrompt(cmd, args)
+		}
+		sessionID, err := requestedSession(cmd)
+		if err != nil {
+			return err
+		}
+		continueLast := continueRequested(cmd)
 
 		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
 			return err
 		}
 		defer cleanup()
+		planMode, err := applyLaunchOptions(cmd, ws)
+		if err != nil {
+			return err
+		}
 
 		if sessionID != "" {
 			sess, err := resolveWorkspaceSessionID(cmd.Context(), ws, sessionID)
@@ -137,6 +150,30 @@ floyd --continue
 				return err
 			}
 			sessionID = sess.ID
+		}
+		if planMode {
+			if sessionID == "" {
+				if continueLast {
+					sessions, err := ws.ListSessions(cmd.Context())
+					if err != nil {
+						return err
+					}
+					if len(sessions) > 0 {
+						sessionID = sessions[0].ID
+					}
+				}
+				if sessionID == "" {
+					sess, err := ws.CreateSession(cmd.Context(), "New plan")
+					if err != nil {
+						return err
+					}
+					sessionID = sess.ID
+				}
+			}
+			if err := enterLaunchPlan(cmd.Context(), ws, sessionID); err != nil {
+				return err
+			}
+			continueLast = false
 		}
 
 		event.AppInitialized()
@@ -153,6 +190,9 @@ floyd --continue
 			tea.WithFilter(inputFilter.Filter),
 		)
 		go ws.Subscribe(program)
+		if resume, _ := cmd.Flags().GetString(resumeFlag); resume == resumePicker {
+			go program.Send(ui.OpenSessionsMsg{})
+		}
 
 		if _, err := program.Run(); err != nil {
 			event.Error(err)
@@ -207,6 +247,7 @@ func Execute() {
 	// fix is to remove slog calls from config.Load and have it return
 	// warnings/diagnostics instead of logging them as a side effect.
 	slog.SetDefault(slog.New(slog.DiscardHandler))
+	rootCmd.SetArgs(normalizeResumeArgs(os.Args[1:]))
 
 	// Present as megafloyd when the executable or MEGAFLOYD_BINARY_NAME says
 	// so; every other name keeps the floyd identity.

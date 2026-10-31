@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/legacy-ai/floyd/internal/event"
+
 	"charm.land/catwalk/pkg/catwalk"
 	hyperp "github.com/legacy-ai/floyd/internal/agent/hyper"
 	"github.com/legacy-ai/floyd/internal/env"
@@ -58,6 +60,8 @@ type fileSnapshot struct {
 // the lifetime of the process (or workspace).
 type RuntimeOverrides struct {
 	AdditionalDirs []string
+	PermissionMode *string
+	AllowedTools   []string
 
 	SkipPermissionRequests bool
 	// EnabledChannels lists the MCP servers opted in as channels for this
@@ -380,6 +384,9 @@ func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	if err := s.autoReload(context.Background()); err != nil {
 		// Log warning but don't fail the write - disk is already updated.
 		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
+	}
+	if value, ok := kv["options.disable_metrics"].(bool); ok {
+		event.SetPrivacyDisabled(value)
 	}
 	return nil
 }
@@ -1250,6 +1257,15 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// mid-session. An external edit to the config still takes effect for any
 	// model type this instance never chose.
 	maps.Copy(cfg.Models, overrides.Models)
+	if cfg.Permissions == nil {
+		cfg.Permissions = &Permissions{}
+	}
+	if overrides.PermissionMode != nil {
+		cfg.Permissions.Mode = *overrides.PermissionMode
+	}
+	if overrides.AllowedTools != nil {
+		cfg.Permissions.AllowedTools = slices.Clone(overrides.AllowedTools)
+	}
 	for _, dir := range overrides.AdditionalDirs {
 		if !slices.Contains(cfg.Options.AdditionalDirs, dir) {
 			cfg.Options.AdditionalDirs = append(cfg.Options.AdditionalDirs, dir)

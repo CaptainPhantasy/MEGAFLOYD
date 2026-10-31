@@ -117,6 +117,7 @@ type permissionService struct {
 	skip                  atomic.Bool
 	policyMode            atomic.Int32
 	allowedTools          []string
+	allowedToolsMu        sync.RWMutex
 
 	additionalDirsMu sync.RWMutex
 	additionalDirs   []string
@@ -216,7 +217,10 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action
-	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
+	s.allowedToolsMu.RLock()
+	allowed := slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName)
+	s.allowedToolsMu.RUnlock()
+	if allowed {
 		return true, nil
 	}
 
@@ -231,14 +235,6 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		})
 		return true, nil
 	}
-
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
-
-	// tell the UI that a permission was requested
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: opts.ToolCallID,
-	})
 
 	s.autoApproveSessionsMu.RLock()
 	autoApprove := s.autoApproveSessions[opts.SessionID]
@@ -288,6 +284,13 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		})
 		return true, nil
 	}
+
+	if IsNonInteractive(ctx) {
+		return false, ErrInteractionRequired
+	}
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{ToolCallID: opts.ToolCallID})
 
 	s.activeRequestMu.Lock()
 	s.activeRequest = &permission

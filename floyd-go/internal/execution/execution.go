@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ferrors "github.com/legacy-ai/floyd/internal/errors"
@@ -196,6 +197,7 @@ func (e *Environment) Execute(ctx context.Context, command string, options Optio
 	start := time.Now()
 
 	cmd := exec.CommandContext(ctx, shell, "-c", command) // #nosec G204
+	configureProcess(cmd)
 	cmd.Dir = cwd
 	cmd.Env = env
 
@@ -248,58 +250,28 @@ func (e *Environment) ExecuteBackground(ctx context.Context, command string, opt
 	}
 
 	cmd := exec.CommandContext(ctx, shell, "-c", command) // #nosec G204
+	configureProcess(cmd)
 	cmd.Dir = cwd
 	cmd.Env = e.mergeEnv(options.Env)
 
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, err
-	}
-
+	// Let os/exec own the copy goroutines so Wait does not finish until both
+	// streams have been delivered to their callbacks.
+	cmd.Stdout = outputCallback(options.OnOutput)
+	cmd.Stderr = outputCallback(options.OnError)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 
 	pid := cmd.Process.Pid
-	isRunning := true
-
+	var isRunning atomic.Bool
+	isRunning.Store(true)
 	e.mu.Lock()
 	e.background[pid] = cmd
 	e.mu.Unlock()
 
 	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := stdoutPipe.Read(buf)
-			if n > 0 && options.OnOutput != nil {
-				options.OnOutput(string(buf[:n]))
-			}
-			if readErr != nil {
-				break
-			}
-		}
-	}()
-
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := stderrPipe.Read(buf)
-			if n > 0 && options.OnError != nil {
-				options.OnError(string(buf[:n]))
-			}
-			if readErr != nil {
-				break
-			}
-		}
-	}()
-
-	go func() {
 		err := cmd.Wait()
-		isRunning = false
+		isRunning.Store(false)
 		code := exitCodeFromError(err)
 		e.mu.Lock()
 		delete(e.background, pid)
@@ -314,14 +286,12 @@ func (e *Environment) ExecuteBackground(ctx context.Context, command string, opt
 		Kill: func() error {
 			e.mu.Lock()
 			defer e.mu.Unlock()
-			if cmd.Process == nil {
-				return nil
+			if !isRunning.Load() {
+				return os.ErrProcessDone
 			}
-			isRunning = false
-			delete(e.background, pid)
-			return cmd.Process.Kill()
+			return cmd.Cancel()
 		},
-		IsRunning: func() bool { return isRunning },
+		IsRunning: isRunning.Load,
 	}, nil
 }
 
@@ -427,20 +397,30 @@ func (e *Environment) KillBackground(pid int) error {
 
 func (e *Environment) KillAll() {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	commands := make([]*exec.Cmd, 0, len(e.background))
 	for pid, cmd := range e.background {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+		commands = append(commands, cmd)
 		delete(e.background, pid)
-		_ = pid
 	}
-	for pid, job := range e.backgroundJobs {
-		if job != nil && job.Kill != nil {
-			_ = job.Kill()
+	clear(e.backgroundJobs)
+	e.mu.Unlock()
+
+	// A job's Kill callback also acquires e.mu. Stop the captured commands
+	// directly, outside that lock, once per process.
+	for _, cmd := range commands {
+		if cmd.Process != nil {
+			_ = cmd.Cancel()
 		}
-		delete(e.backgroundJobs, pid)
 	}
+}
+
+type outputCallback func(string)
+
+func (write outputCallback) Write(data []byte) (int, error) {
+	if write != nil {
+		write(string(data))
+	}
+	return len(data), nil
 }
 
 func (e *Environment) SetWorkingDirectory(directory string) {
