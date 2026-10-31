@@ -1,16 +1,20 @@
 package deletionguard
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/legacy-ai/floyd/internal/approvalauthority"
 )
 
 // RecordSchema identifies the durable session record layout. A record with any
@@ -56,12 +60,14 @@ type Execution struct {
 
 // Record is the durable per-session deletion record.
 type Record struct {
-	Schema        string         `json:"schema"`
-	SessionID     string         `json:"session_id"`
-	Confirmations []Confirmation `json:"confirmations"`
-	Executions    []Execution    `json:"executions"`
-	Approvals     []Approval     `json:"approvals,omitempty"`
-	Attempts      []Attempt      `json:"attempts,omitempty"`
+	Schema         string          `json:"schema"`
+	SessionID      string          `json:"session_id"`
+	Confirmations  []Confirmation  `json:"confirmations"`
+	Executions     []Execution     `json:"executions"`
+	Approvals      []Approval      `json:"approvals,omitempty"`
+	Attempts       []Attempt       `json:"attempts,omitempty"`
+	BackgroundJobs []BackgroundJob `json:"background_jobs,omitempty"`
+	revision       uint64
 }
 
 // ConfirmationsFor returns the first human confirmation for each stage of one
@@ -114,37 +120,76 @@ func (r Record) Executed(targetSet string) (Execution, bool) {
 	return Execution{}, false
 }
 
-// Ledger stores the per-session deletion record on disk so confirmations
-// survive a restart and stay separate from conversation text.
-type Ledger struct {
-	dataDir string
-	mu      *sync.Mutex
+// Authority is the protected, versioned approval store. Runtime construction
+// uses the separately privileged broker, never workspace-owned files.
+type Authority interface {
+	Read(context.Context, string, string) ([]byte, uint64, error)
+	CompareAndSwap(context.Context, string, string, uint64, []byte) error
 }
 
-// NewLedger returns a ledger rooted at dataDir.
-var ledgerLocks sync.Map
+// Ledger stores approval records through the protected authority. Its namespace
+// binds records to the canonical data directory without trusting that directory.
+type Ledger struct {
+	dataDir    string
+	mu         *sync.Mutex
+	authority  Authority
+	namespace  string
+	background *backgroundEvidence
+}
 
+var (
+	ledgerLocks              sync.Map
+	ledgerBackgroundEvidence sync.Map
+)
+
+// NewLedger connects to the administrator-owned approval authority. An absent
+// authority refuses permanent deletion; no local ledger is adopted as proof.
 func NewLedger(dataDir string) *Ledger {
+	return newLedger(dataDir, approvalauthority.NewClient(approvalauthority.DefaultSocketPath, 0), defaultAuthorityIdentity{})
+}
+
+type (
+	defaultAuthorityIdentity struct{}
+	ledgerEvidenceIdentity   struct {
+		store     string
+		authority any
+	}
+)
+
+func newLedgerWithAuthority(dataDir string, authority Authority) *Ledger {
+	var identity any = authority
+	if authority != nil && !reflect.TypeOf(authority).Comparable() {
+		identity = new(byte)
+	}
+	return newLedger(dataDir, authority, identity)
+}
+
+func newLedger(dataDir string, authority Authority, authorityIdentity any) *Ledger {
 	key, err := filepath.Abs(dataDir)
 	if err != nil {
 		key = dataDir
 	}
+	if canonical, err := filepath.EvalSymlinks(key); err == nil {
+		key = canonical
+	}
+	digest := sha256.Sum256([]byte(key))
 	lock, _ := ledgerLocks.LoadOrStore(key, &sync.Mutex{})
-	return &Ledger{dataDir: dataDir, mu: lock.(*sync.Mutex)}
+	evidence, _ := ledgerBackgroundEvidence.LoadOrStore(ledgerEvidenceIdentity{key, authorityIdentity}, &backgroundEvidence{results: make(map[string]BackgroundResult), bindings: make(map[string]BackgroundJob), slots: make(map[string]bool)})
+	return &Ledger{dataDir: dataDir, mu: lock.(*sync.Mutex), authority: authority, namespace: hex.EncodeToString(digest[:]), background: evidence.(*backgroundEvidence)}
 }
 
-// Dir returns the directory holding a session's deletion record.
+// Dir returns the legacy, untrusted history location for diagnostics only.
 func (l *Ledger) Dir(sessionID string) string {
 	return filepath.Join(l.dataDir, "deletions", safeComponent(sessionID))
 }
 
-// Path returns a session's deletion record path.
+// Path returns the legacy history path. Its contents never authorize deletion.
 func (l *Ledger) Path(sessionID string) string {
 	return filepath.Join(l.Dir(sessionID), "record.json")
 }
 
-// Read loads a session record. A missing file is an empty record; a malformed,
-// foreign or unreadable file is an error so permanent deletion fails closed.
+// Read loads a protected session record and its current broker revision. An
+// absent record is empty; malformed, foreign or unavailable evidence fails closed.
 func (l *Ledger) Read(sessionID string) (Record, error) {
 	if strings.TrimSpace(l.dataDir) == "" {
 		return Record{}, fmt.Errorf("%w: the data directory is not configured", ErrSessionRecordUnavailable)
@@ -152,13 +197,20 @@ func (l *Ledger) Read(sessionID string) (Record, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return Record{}, fmt.Errorf("%w: the session ID is empty", ErrSessionRecordUnavailable)
 	}
-	data, err := os.ReadFile(l.Path(sessionID))
-	switch {
-	case err == nil:
-	case errors.Is(err, os.ErrNotExist):
-		return Record{Schema: RecordSchema, SessionID: sessionID}, nil
-	default:
-		return Record{}, fmt.Errorf("%w: %v", ErrSessionRecordUnavailable, err)
+	if l.authority == nil {
+		return Record{}, fmt.Errorf("%w: protected approval authority is not configured", ErrSessionRecordUnavailable)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	data, revision, err := l.authority.Read(ctx, l.namespace, sessionID)
+	if err != nil {
+		return Record{}, fmt.Errorf("%w: protected approval authority unavailable; start the administrator-owned approval service (%v)", ErrSessionRecordUnavailable, err)
+	}
+	if len(data) == 0 {
+		if revision != 0 {
+			return Record{}, fmt.Errorf("%w: protected approval record has no content at revision %d", ErrSessionRecordUnavailable, revision)
+		}
+		return Record{Schema: RecordSchema, SessionID: sessionID, revision: revision}, nil
 	}
 	var record Record
 	if err := json.Unmarshal(data, &record); err != nil {
@@ -170,6 +222,7 @@ func (l *Ledger) Read(sessionID string) (Record, error) {
 	if record.SessionID != sessionID {
 		return Record{}, fmt.Errorf("%w: the record belongs to session %q", ErrSessionRecordUnavailable, record.SessionID)
 	}
+	record.revision = revision
 	return record, nil
 }
 
@@ -225,38 +278,19 @@ func (l *Ledger) AppendExecution(sessionID string, execution Execution) error {
 }
 
 func (l *Ledger) write(sessionID string, record Record) error {
-	dir := l.Dir(sessionID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create deletion record directory: %w", err)
+	if l.authority == nil {
+		return fmt.Errorf("%w: protected approval authority is not configured", ErrSessionRecordUnavailable)
 	}
 	record.Schema = RecordSchema
 	record.SessionID = sessionID
-	data, err := json.MarshalIndent(record, "", "  ")
+	data, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("encode deletion record: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, ".record-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temporary deletion record: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write deletion record: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("sync deletion record: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close deletion record: %w", err)
-	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		return fmt.Errorf("chmod deletion record: %w", err)
-	}
-	if err := os.Rename(tmpName, l.Path(sessionID)); err != nil {
-		return fmt.Errorf("replace deletion record: %w", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := l.authority.CompareAndSwap(ctx, l.namespace, sessionID, record.revision, data); err != nil {
+		return fmt.Errorf("write protected approval record: %w", err)
 	}
 	return nil
 }

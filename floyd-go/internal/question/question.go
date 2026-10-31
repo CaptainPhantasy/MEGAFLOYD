@@ -20,6 +20,9 @@ import (
 // ErrCancelled is returned by Ask when the user cancels the question.
 var ErrCancelled = errors.New("question cancelled by user")
 
+// ErrLocalInputRequired refuses protected confirmations over untrusted RPC input.
+var ErrLocalInputRequired = errors.New("permanent-deletion confirmation requires direct in-process human input; use quarantine or an in-process TUI")
+
 // Type identifies the kind of question to present.
 type Type string
 
@@ -63,6 +66,8 @@ func (a Answer) HasNotes() bool { return len(a.Notes) > 0 }
 // one or more Questions. A single question renders without tabs;
 // multiple questions render as a tabbed form with confirmation.
 type Request struct {
+	// RequireLocalInput is engine-owned and cannot be supplied through JSON.
+	RequireLocalInput  bool       `json:"-"`
 	ID                 string     `json:"id"`
 	SessionID          string     `json:"session_id"`
 	ToolCallID         string     `json:"tool_call_id"`
@@ -194,23 +199,37 @@ type Service interface {
 	CancelRequest(id string) bool
 }
 
+type answerResult struct {
+	answers []Answer
+	err     error
+}
+
 type questionService struct {
+	remoteOnly         bool
 	broker             *pubsub.Broker[Request]
 	notificationBroker *pubsub.Broker[Notification]
 	mu                 sync.Mutex
-	pending            chan []Answer
+	pending            chan answerResult
 	cancelled          chan struct{}
 	pendingID          string
 	pendingRequest     *Request
 	askMu              sync.Mutex
 }
 
-// NewService creates a new question service.
+// NewService creates a question service for direct in-process input.
 func NewService() *questionService {
 	return &questionService{
 		broker:             pubsub.NewBroker[Request](),
 		notificationBroker: pubsub.NewBroker[Notification](),
 	}
+}
+
+// NewRemoteService preserves ordinary questions but rejects protected human
+// confirmations because RPC clients do not provide an authenticated local input.
+func NewRemoteService() *questionService {
+	service := NewService()
+	service.remoteOnly = true
+	return service
 }
 
 // Subscribe returns a channel for question events.
@@ -226,6 +245,9 @@ func (s *questionService) SubscribeNotifications(ctx context.Context) <-chan pub
 
 // Ask publishes a request and blocks until the user answers.
 func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error) {
+	if req.RequireLocalInput && s.remoteOnly {
+		return nil, ErrLocalInputRequired
+	}
 	if req.ID == "" {
 		req.ID = uuid.New().String()
 	}
@@ -251,7 +273,7 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 
 	s.askMu.Lock()
 	defer s.askMu.Unlock()
-	responseCh := make(chan []Answer, 1)
+	responseCh := make(chan answerResult, 1)
 	cancelCh := make(chan struct{})
 	s.mu.Lock()
 	s.pending = responseCh
@@ -276,32 +298,41 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 		return nil, ctx.Err()
 	case <-cancelCh:
 		return nil, ErrCancelled
-	case answers := <-responseCh:
-		return answers, nil
+	case result := <-responseCh:
+		return result.answers, result.err
 	}
 }
 
-// Answer resolves the pending question. Returns false if no
-// question is pending (already answered or cancelled).
+// Answer resolves a question from the direct in-process UI. RPC adapters must
+// use AnswerRequest so protected confirmations cannot accept network input.
 func (s *questionService) Answer(answers []Answer) bool {
-	return s.AnswerRequest("", answers)
+	return s.answerRequest("", answers, true)
 }
 
-// AnswerRequest resolves only the named pending request. Empty preserves the
-// existing in-process API; network clients should always provide the ID.
+// AnswerRequest resolves ordinary questions submitted by remote adapters. A
+// protected request is atomically refused and released with an explicit error.
 func (s *questionService) AnswerRequest(id string, answers []Answer) bool {
+	return s.answerRequest(id, answers, false)
+}
+
+func (s *questionService) answerRequest(id string, answers []Answer, local bool) bool {
 	s.mu.Lock()
 	if s.pending == nil || (id != "" && id != s.pendingID) {
 		s.mu.Unlock()
 		return false
 	}
 	batchID, ch := s.pendingID, s.pending
+	accepted := local || (s.pendingRequest != nil && !s.pendingRequest.RequireLocalInput)
 	s.pending, s.cancelled, s.pendingRequest = nil, nil, nil
 	s.pendingID = ""
 	s.mu.Unlock()
-	ch <- answers
+	result := answerResult{answers: answers}
+	if !accepted {
+		result = answerResult{err: ErrLocalInputRequired}
+	}
+	ch <- result
 	s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{BatchID: batchID})
-	return true
+	return accepted
 }
 
 // Cancel cancels the pending question. Returns false if no

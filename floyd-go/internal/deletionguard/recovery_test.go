@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -22,11 +23,11 @@ func TestRecoveryExactRemainderAfterRestart(t *testing.T) {
 	require.NoError(t, os.WriteFile(a, []byte("a"), 0o600))
 	require.NoError(t, os.WriteFile(b, []byte("b"), 0o600))
 	confirmer := &recoveryConfirmer{}
-	guard := NewGuard(data, confirmer)
+	guard := testGuard(data, confirmer)
 	require.True(t, guard.Check(t.Context(), "s", "one", Classify("rm a b", dir)).Allowed)
 	require.Equal(t, 2, confirmer.calls)
 	require.NoError(t, guard.RecordExecution("s", Classify("rm a", dir), "one"))
-	require.True(t, NewGuard(data, nil).Check(t.Context(), "s", "two", Classify("rm b", dir)).Allowed, "unchanged remainder retains original answers")
+	require.True(t, testGuard(data, nil).Check(t.Context(), "s", "two", Classify("rm b", dir)).Allowed, "unchanged remainder retains original answers")
 }
 
 func recoveryFixture(t *testing.T) (*Guard, string, Classification, *recoveryConfirmer) {
@@ -36,7 +37,7 @@ func recoveryFixture(t *testing.T) (*Guard, string, Classification, *recoveryCon
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600))
 	}
 	confirmer := &recoveryConfirmer{}
-	guard := NewGuard(t.TempDir(), confirmer)
+	guard := testGuard(t.TempDir(), confirmer)
 	all := Classify("rm a b", dir)
 	require.True(t, guard.Check(t.Context(), "s", "one", all).Allowed)
 	return guard, dir, all, confirmer
@@ -64,7 +65,7 @@ func TestRecoveryReconcilesFailedRemovalByObservation(t *testing.T) {
 	// Quarantine simulates a removed pathname without destroying fixture bytes.
 	require.NoError(t, os.Rename(filepath.Join(dir, "a"), filepath.Join(dir, "quarantined-a")))
 	require.NoError(t, guard.RecordOutcome("s", all, "one", nil, false))
-	guard = NewGuard(guard.ledger.dataDir, nil)
+	guard = testGuard(guard.ledger.dataDir, nil)
 	remaining := Classify("rm b", dir)
 	require.True(t, guard.Check(t.Context(), "s", "two", remaining).Allowed)
 	require.NoError(t, guard.BeginExecution("s", remaining, "two"))
@@ -123,7 +124,7 @@ func TestRecoveryUncertainExecutionStaysBlockedAfterRestart(t *testing.T) {
 			if outcome == "uncertain" {
 				require.NoError(t, guard.RecordOutcome("s", all, "one", nil, true))
 			}
-			guard = NewGuard(guard.ledger.dataDir, nil)
+			guard = testGuard(guard.ledger.dataDir, nil)
 			require.False(t, guard.Check(t.Context(), "s", "two", Classify("rm b", dir)).Allowed)
 			require.False(t, guard.Check(t.Context(), "s", "two", all).Allowed)
 			record, err := guard.Ledger().Read("s")
@@ -182,20 +183,20 @@ func TestRecoveryTargetChangedBetweenConfirmations(t *testing.T) {
 	path := filepath.Join(dir, "a")
 	require.NoError(t, os.WriteFile(path, []byte("original"), 0o600))
 	confirmer := &changingRecoveryConfirmer{path: path}
-	guard := NewGuard(data, confirmer)
+	guard := testGuard(data, confirmer)
 	classification := Classify("rm a", dir)
 	require.False(t, guard.Check(t.Context(), "s", "one", classification).Allowed)
 	require.Equal(t, 1, confirmer.calls)
 	record, err := guard.Ledger().Read("s")
 	require.NoError(t, err)
 	require.Len(t, record.Confirmations, 1)
-	require.False(t, NewGuard(data, confirmer).Check(t.Context(), "s", "two", classification).Allowed)
+	require.False(t, testGuard(data, confirmer).Check(t.Context(), "s", "two", classification).Allowed)
 	require.Equal(t, 1, confirmer.calls)
 }
 
 func TestRecoverySeparateGuardsCannotLaunchSameApproval(t *testing.T) {
 	guard, _, all, _ := recoveryFixture(t)
-	second := NewGuard(guard.ledger.dataDir, nil)
+	second := testGuard(guard.ledger.dataDir, nil)
 	require.True(t, second.Check(t.Context(), "s", "two", all).Allowed)
 	require.NoError(t, guard.BeginExecution("s", all, "one"))
 	require.Error(t, second.BeginExecution("s", all, "two"))
@@ -223,14 +224,86 @@ func TestRecoveryBindsTruncateSizeAndMixedOperations(t *testing.T) {
 			require.True(t, guard.Check(t.Context(), "operations", "one", all).Allowed)
 			require.NoError(t, guard.BeginExecution("operations", all, "one"))
 			require.NoError(t, os.Rename(filepath.Join(dir, "a"), filepath.Join(dir, "quarantined-a")))
+			if command == "truncate -s 5 a b" {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "a"), []byte("12345"), 0o600))
+			}
 			require.NoError(t, guard.RecordOutcome("operations", all, "one", []string{filepath.Join(dir, "a")}, false))
-			guard = NewGuard(guard.ledger.dataDir, nil)
+			guard = testGuard(guard.ledger.dataDir, nil)
 			retry, changed := "truncate -s 5 b", "truncate -s 0 b"
 			if command == "rm a; shred b" {
 				retry, changed = "shred b", "rm b"
 			}
 			require.True(t, guard.Check(t.Context(), "operations", "two", Classify(retry, dir)).Allowed)
 			require.False(t, guard.Check(t.Context(), "operations", "two", Classify(changed, dir)).Allowed)
+		})
+	}
+}
+
+func TestRecoveryConfirmationOnlyHistoryCannotBindReplacement(t *testing.T) {
+	dir, data := t.TempDir(), t.TempDir()
+	target := filepath.Join(dir, "a")
+	require.NoError(t, os.WriteFile(target, []byte("original"), 0o600))
+	guard := testGuard(data, nil)
+	classification := Classify("rm a", dir)
+	for stage := 1; stage <= 2; stage++ {
+		require.NoError(t, guard.Ledger().AppendConfirmation("s", Confirmation{Stage: stage, TargetSet: classification.Digest(), Targets: classification.Targets, Source: humanSource}))
+	}
+	require.NoError(t, os.Rename(target, filepath.Join(dir, "quarantined-original")))
+	require.NoError(t, os.WriteFile(target, []byte("replacement"), 0o600))
+	require.False(t, guard.Check(t.Context(), "s", "call", classification).Allowed, "unbound answers cannot approve a newly observed inode")
+	require.Error(t, guard.BeginExecution("s", classification, "call"), "launch cannot synthesize approval for a replacement")
+}
+
+func TestRecoveryRevalidatesBoundApprovalBeforeLaunch(t *testing.T) {
+	guard, dir, all, _ := recoveryFixture(t)
+	require.True(t, guard.Check(t.Context(), "s", "checked", all).Allowed)
+	require.NoError(t, os.Rename(filepath.Join(dir, "b"), filepath.Join(dir, "quarantined-original-b")))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b"), []byte("replacement"), 0o600))
+	require.Error(t, guard.BeginExecution("s", all, "changed-between-check-and-launch"))
+	record, err := guard.Ledger().Read("s")
+	require.NoError(t, err)
+	require.Empty(t, record.Attempts)
+	require.Empty(t, record.Executions)
+	require.Len(t, record.Confirmations, 2)
+}
+
+func TestRecoveryLaunchRejectsReplacementDuringPreparation(t *testing.T) {
+	guard, dir, all, _ := recoveryFixture(t)
+	originalClock := guard.now
+	guard.now = func() time.Time {
+		require.NoError(t, os.Rename(filepath.Join(dir, "b"), filepath.Join(dir, "quarantined-before-launch")))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "b"), []byte("replacement before durable launch"), 0o600))
+		return originalClock()
+	}
+	require.Error(t, guard.BeginExecution("s", all, "replacement-during-launch-preparation"))
+	record, err := guard.Ledger().Read("s")
+	require.NoError(t, err)
+	require.Empty(t, record.Attempts)
+	require.Empty(t, record.Executions)
+}
+
+func TestRecoveryRequiresCompleteCurrentApprovalBinding(t *testing.T) {
+	for _, field := range []string{"snapshots", "operations", "target-set"} {
+		t.Run(field, func(t *testing.T) {
+			guard, _, all, _ := recoveryFixture(t)
+			record, err := guard.Ledger().Read("s")
+			require.NoError(t, err)
+			require.Len(t, record.Approvals, 1)
+			switch field {
+			case "snapshots":
+				record.Approvals[0].Snapshots = nil
+			case "operations":
+				record.Approvals[0].Operations = nil
+			case "target-set":
+				record.Approvals[0].TargetSet = "unbound-identity"
+			}
+			require.NoError(t, guard.Ledger().write("s", record))
+			require.False(t, guard.Check(t.Context(), "s", "check", all).Allowed)
+			require.Error(t, guard.BeginExecution("s", all, "launch"))
+			record, err = guard.Ledger().Read("s")
+			require.NoError(t, err)
+			require.Empty(t, record.Attempts)
+			require.Len(t, record.Confirmations, 2)
 		})
 	}
 }

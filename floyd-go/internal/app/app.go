@@ -102,6 +102,15 @@ type App struct {
 // caller is responsible for constructing it (typically via
 // skills.NewManager + skills.DiscoverFromConfig).
 func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
+	return NewWithQuestionService(ctx, conn, store, skillsMgr, question.NewService())
+}
+
+// NewWithQuestionService binds the input trust boundary before event wiring or
+// agent initialization. Server workspaces must use question.NewRemoteService.
+func NewWithQuestionService(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager, questions question.Service) (*App, error) {
+	if questions == nil {
+		return nil, errors.New("question input service is not configured")
+	}
 	// Record which standard this binary loads and how it compares with a
 	// standard shipped beside it. The check reports, never fails startup.
 	agentprompt.VerifyLoadedStandard(slog.Default())
@@ -135,7 +144,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Messages:    messages,
 		History:     files,
 		Permissions: permissions,
-		Questions:   question.NewService(),
+		Questions:   questions,
 		FileTracker: filetracker.NewService(q),
 		Hooks:       hookRuntime,
 		LSPManager:  lsp.NewManager(store),

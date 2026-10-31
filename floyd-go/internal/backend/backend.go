@@ -21,6 +21,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/csync"
 	"github.com/legacy-ai/floyd/internal/db"
 	"github.com/legacy-ai/floyd/internal/proto"
+	"github.com/legacy-ai/floyd/internal/question"
 	"github.com/legacy-ai/floyd/internal/skills"
 	"github.com/legacy-ai/floyd/internal/ui/util"
 	"github.com/legacy-ai/floyd/internal/version"
@@ -447,7 +448,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)
 
-	appWorkspace, err := app.New(b.ctx, conn, cfg, skillsMgr)
+	appWorkspace, err := app.NewWithQuestionService(b.ctx, conn, cfg, skillsMgr, question.NewRemoteService())
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create app workspace: %w", err)
 	}

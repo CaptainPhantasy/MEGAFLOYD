@@ -103,23 +103,7 @@ func CanonicalTargets(targets []string) []string {
 
 // ClassifyAll merges the effects of several commands from one tool call.
 func ClassifyAll(commands []string, workingDir string) Classification {
-	merged := Classification{Effect: EffectNone}
-	for _, command := range commands {
-		classification := Classify(command, workingDir)
-		merged.Targets = append(merged.Targets, classification.Targets...)
-		merged.Operations = mergeOperations(merged.Operations, classification.Operations)
-		merged.Recursive = merged.Recursive || classification.Recursive
-		if classification.Effect > merged.Effect {
-			merged.Effect = classification.Effect
-			merged.Command = classification.Command
-			merged.Reason = classification.Reason
-		}
-		if merged.Unresolved == "" {
-			merged.Unresolved = classification.Unresolved
-		}
-	}
-	merged.Targets = CanonicalTargets(merged.Targets)
-	return merged
+	return classifyCommands(commands, workingDir)
 }
 
 // ResolveTarget turns a shell operand into the absolute path a command acts
@@ -168,4 +152,25 @@ func (c Classification) RemovesTarget(target string) bool {
 		}
 	}
 	return true
+}
+
+// TerminalRemovesTarget reports whether the last ordered operation unlinks the
+// target. This proves a final absence, but does not authorize earlier writes
+// through a symlink: those must continue to use RemovesTarget's stricter rule.
+func (c Classification) TerminalRemovesTarget(target string) bool {
+	return terminalRemovalOperation(c.Operations[target])
+}
+
+func terminalRemovalOperation(signature string) bool {
+	var operations [][]string
+	if json.Unmarshal([]byte(signature), &operations) != nil || len(operations) == 0 {
+		return false
+	}
+	for _, operation := range operations {
+		if len(operation) == 0 || operation[0] == "" {
+			return false
+		}
+	}
+	last := operations[len(operations)-1]
+	return slices.Contains([]string{"rm", "unlink", "rmdir"}, filepath.Base(last[0]))
 }

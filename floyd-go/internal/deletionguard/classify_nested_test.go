@@ -47,9 +47,10 @@ EOF2`,
 		`builtin eval 'rm important.txt'`,
 	} {
 		t.Run(command, func(t *testing.T) {
+			t.Parallel()
 			classification := Classify(command, t.TempDir())
 			require.True(t, classification.IsDestructive(), "%q was classified harmless: %+v", command, classification)
-			guard := NewGuard(t.TempDir(), nil)
+			guard := testGuard(t.TempDir(), nil)
 			require.False(t, guard.Check(context.Background(), "session", "call", classification).Allowed)
 		})
 	}
@@ -73,6 +74,7 @@ func TestDeletionClassificationHarmlessNestedShell(t *testing.T) {
 		`eval 'echo safe'`,
 	} {
 		t.Run(command, func(t *testing.T) {
+			t.Parallel()
 			classification := Classify(command, t.TempDir())
 			require.False(t, classification.IsDestructive(), "%q: %+v", command, classification)
 		})
@@ -141,7 +143,7 @@ func TestDeletionAbsoluteRemovalMustActuallyRemoveTarget(t *testing.T) {
 	target := filepath.Join(dir, "a")
 	require.NoError(t, os.WriteFile(target, []byte("original"), 0o600))
 	confirmer := &recoveryConfirmer{}
-	guard := NewGuard(t.TempDir(), confirmer)
+	guard := testGuard(t.TempDir(), confirmer)
 	classification := Classify("/bin/rm a", dir)
 	require.True(t, classification.RemovesTarget(target))
 	require.True(t, guard.Check(t.Context(), "absolute-rm", "one", classification).Allowed)
@@ -168,7 +170,7 @@ func TestDeletionClassificationAsynchronousStatementsFailClosed(t *testing.T) {
 		classification := Classify(command, t.TempDir())
 		require.True(t, classification.IsDestructive())
 		require.NotEmpty(t, classification.Unresolved)
-		require.False(t, NewGuard(t.TempDir(), nil).Check(t.Context(), "s", "call", classification).Allowed)
+		require.False(t, testGuard(t.TempDir(), nil).Check(t.Context(), "s", "call", classification).Allowed)
 	}
 	require.False(t, Classify(`echo safe &`, t.TempDir()).IsDestructive())
 }

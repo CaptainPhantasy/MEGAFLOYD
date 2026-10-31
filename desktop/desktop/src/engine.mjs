@@ -16,9 +16,8 @@ import {
   megafloydBinaryCandidates,
   nodeWrapperCandidates,
 } from './config.mjs';
-import { fetchMeta, fetchRuntime, handoffUrlFromLine, tokenFromUrl } from './meta.mjs';
+import { fetchRuntime, fetchStartupMeta, handoffUrlFromLine, tokenFromUrl } from './meta.mjs';
 import { redactSecrets } from './redact.mjs';
-import { requestHandoff, sessionFromURL } from './navigation.mjs';
 
 const MAX_AUTO_RESTARTS = 3;
 const RESTART_WINDOW_MS = 5 * 60 * 1000;
@@ -219,19 +218,13 @@ export class Engine extends EventEmitter {
       this.handshakePending = true;
       let meta;
       try {
-        meta = await fetchMeta({
-          port,
-          token: tokenFromUrl(url),
+        meta = await fetchStartupMeta({
+          url,
           workspace: this.workspace,
           dataDir: this.dataDir || undefined,
+          host: this.goHost || undefined,
+          homeDir: this.homeDir,
         });
-        if (meta.ok) {
-          const target = await requestHandoff(url, sessionFromURL(url));
-          if (path.resolve(target.cwd) !== path.resolve(this.workspace)) throw new Error('Handoff selected a different workspace');
-          if (this.dataDir && path.resolve(target.data_dir || '') !== path.resolve(this.dataDir)) throw new Error('Handoff selected a different workspace store');
-          if (this.goHost && target.host !== this.goHost) throw new Error('Handoff selected a different Go host');
-          meta.handoff = target;
-        }
       } catch (error) {
         meta = { ok: false, error: `meta probe failed: ${error?.message ?? error}` };
       }

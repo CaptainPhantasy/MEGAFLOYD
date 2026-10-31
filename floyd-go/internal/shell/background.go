@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/legacy-ai/floyd/internal/csync"
 )
 
@@ -45,6 +46,8 @@ func (sb *syncBuffer) String() string {
 
 // BackgroundShell represents a shell running in the background.
 type BackgroundShell struct {
+	// ExecutionID distinguishes short job IDs reused after a process restart.
+	ExecutionID  string
 	ID           string
 	Command      string
 	Description  string
@@ -107,6 +110,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 
 	owner, _ := ctx.Value(runtimeTaskOwnerKey{}).(runtimeTaskOwner)
 	bgShell := &BackgroundShell{
+		ExecutionID:  uuid.NewString(),
 		SessionID:    owner.sessionID,
 		WorkspaceDir: owner.workspace,
 		StartedAt:    time.Now().UTC(),

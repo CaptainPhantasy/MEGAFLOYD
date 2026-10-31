@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -18,13 +20,16 @@ var removalCommands = []string{"rm", "rmdir", "unlink", "shred", "srm", "wipe"}
 // removal always reports EffectPermanentDeletion even when its targets cannot
 // be proven, because an unproven target set can never satisfy the gate.
 func Classify(command, workingDir string) Classification {
+	return classifyCommand(&classifier{workingDir: workingDir}, command)
+}
+
+func classifyCommand(c *classifier, command string) Classification {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
-		// The interpreter rejects an unparsable command before it has any effect.
-		return Classification{Effect: EffectNone, Reason: "the shell cannot parse the command"}
+		// A shell may execute complete earlier lines before a later parse error.
+		return Classification{Effect: EffectPermanentDeletion, Unresolved: "the shell script cannot be fully inspected because parsing failed", Reason: "An incompletely parsed script cannot establish a safe target set."}
 	}
-	c := &classifier{workingDir: workingDir}
-	dir := workingDir
+	dir := c.workingDir
 	for _, stmt := range file.Stmts {
 		c.statement(stmt, &dir)
 	}
@@ -33,16 +38,79 @@ func Classify(command, workingDir string) Classification {
 
 // classifier collects the effects of one parsed command line.
 type classifier struct {
-	workingDir string
-	changedDir bool
-	effects    []Classification
+	workingDir       string
+	changedDir       bool
+	effects          []Classification
+	movePaths        []string
+	destructivePaths []string
 }
 
 func (c *classifier) add(effect Classification) {
 	if effect.Effect == EffectNone {
 		return
 	}
+	if effect.IsDestructive() {
+		if overlappingPaths(effect.Targets, c.movePaths) {
+			effect.Unresolved = "an earlier move changes a destructive target, so its original data cannot be identified safely"
+		}
+		c.destructivePaths = append(c.destructivePaths, effect.Targets...)
+	}
 	c.effects = append(c.effects, effect)
+}
+
+func overlappingPaths(one, two []string) bool {
+	if overlaps(one, two) || overlaps(two, one) {
+		return true
+	}
+	resolvedOne, resolvedTwo := statePaths(one), statePaths(two)
+	if overlaps(resolvedOne, resolvedTwo) || overlaps(resolvedTwo, resolvedOne) {
+		return true
+	}
+	// Case and Unicode aliases cannot establish disjoint state on every
+	// supported filesystem. Keep literal target identities unchanged, but
+	// conservatively reject these potentially overlapping move sequences.
+	fold := cases.Fold()
+	for i := range resolvedOne {
+		resolvedOne[i] = fold.String(norm.NFC.String(resolvedOne[i]))
+	}
+	for i := range resolvedTwo {
+		resolvedTwo[i] = fold.String(norm.NFC.String(resolvedTwo[i]))
+	}
+	return overlaps(resolvedOne, resolvedTwo) || overlaps(resolvedTwo, resolvedOne)
+}
+
+// statePaths resolves existing directory aliases for comparisons without
+// changing the literal target names or following a final symlink to its data.
+func statePaths(paths []string) []string {
+	resolved := make([]string, 0, len(paths))
+	for _, path := range paths {
+		parent, suffix := filepath.Dir(path), filepath.Base(path)
+		for {
+			if canonical, err := filepath.EvalSymlinks(parent); err == nil {
+				resolved = append(resolved, filepath.Join(canonical, suffix))
+				break
+			}
+			next := filepath.Dir(parent)
+			if next == parent {
+				resolved = append(resolved, path)
+				break
+			}
+			suffix, parent = filepath.Join(filepath.Base(parent), suffix), next
+		}
+	}
+	return resolved
+}
+
+// classifyCommands keeps directory scope independent for separate tool commands
+// but shares observed move effects, since all commands address one filesystem.
+func classifyCommands(commands []string, workingDir string) Classification {
+	combined := &classifier{workingDir: workingDir}
+	for _, command := range commands {
+		current := &classifier{workingDir: workingDir, movePaths: combined.movePaths, destructivePaths: combined.destructivePaths}
+		combined.effects = append(combined.effects, classifyCommand(current, command))
+		combined.movePaths, combined.destructivePaths = current.movePaths, current.destructivePaths
+	}
+	return combined.result()
 }
 
 func (c *classifier) result() Classification {
@@ -50,6 +118,13 @@ func (c *classifier) result() Classification {
 	for _, effect := range c.effects {
 		if effect.Effect > out.Effect {
 			out.Effect = effect.Effect
+		}
+	}
+	for _, effect := range c.effects {
+		// Quarantine sources are not destructive targets and must never be
+		// folded into the human authorization for a separate deletion.
+		if effect.Effect != out.Effect {
+			continue
 		}
 		out.Recursive = out.Recursive || effect.Recursive
 		if out.Unresolved == "" {
@@ -118,10 +193,7 @@ func (c *classifier) statement(stmt *syntax.Stmt, dir *string) {
 			c.statement(child, dir)
 		}
 	case *syntax.Subshell:
-		nested := *dir
-		for _, child := range command.Stmts {
-			c.statement(child, &nested)
-		}
+		c.localDirectoryStatements(command.Stmts, *dir)
 	case *syntax.IfClause, *syntax.WhileClause, *syntax.ForClause,
 		*syntax.CaseClause, *syntax.FuncDecl, *syntax.ArithmCmd,
 		*syntax.TestClause, *syntax.DeclClause, *syntax.LetClause,
@@ -142,6 +214,14 @@ func (c *classifier) statement(stmt *syntax.Stmt, dir *string) {
 // Each child statement is owned by statement, avoiding duplicate traversal.
 func (c *classifier) nestedStatements(node syntax.Node, dir string) {
 	syntax.Walk(node, func(child syntax.Node) bool {
+		switch substitution := child.(type) {
+		case *syntax.CmdSubst:
+			c.localDirectoryStatements(substitution.Stmts, dir)
+			return false
+		case *syntax.ProcSubst:
+			c.localDirectoryStatements(substitution.Stmts, dir)
+			return false
+		}
 		if stmt, ok := child.(*syntax.Stmt); ok {
 			nested := dir
 			c.statement(stmt, &nested)
@@ -149,6 +229,23 @@ func (c *classifier) nestedStatements(node syntax.Node, dir string) {
 		}
 		return true
 	})
+}
+
+// localDirectoryStatements shares filesystem effects but restores the outer
+// directory proof: a subshell cannot change its caller's working directory.
+func (c *classifier) localDirectoryStatements(statements []*syntax.Stmt, dir string) {
+	outerChanged, start := c.changedDir, len(c.effects)
+	for _, statement := range statements {
+		c.statement(statement, &dir)
+	}
+	if c.changedDir {
+		for i := start; i < len(c.effects); i++ {
+			if c.effects[i].IsDestructive() && c.effects[i].Unresolved == "" {
+				c.effects[i].Unresolved = "a directory change makes the nested destructive target state unprovable"
+			}
+		}
+	}
+	c.changedDir = outerChanged
 }
 
 func (c *classifier) unresolved(reason string) {
@@ -159,11 +256,11 @@ func (c *classifier) unresolved(reason string) {
 	})
 }
 
-// redirect classifies a truncating redirect. Only ">" and ">|" replace existing
-// content; ">>" appends and keeps the prior bytes.
+// redirect classifies truncating redirects, including combined stdout/stderr.
+// Append forms keep the prior bytes.
 func (c *classifier) redirect(stmt *syntax.Stmt, dir string) {
 	for _, redir := range stmt.Redirs {
-		if redir.Op != syntax.RdrOut && redir.Op != syntax.ClbOut {
+		if redir.Op != syntax.RdrOut && redir.Op != syntax.RdrClob && redir.Op != syntax.RdrAll {
 			continue
 		}
 		name, ok := literalWord(redir.Word)
@@ -174,6 +271,10 @@ func (c *classifier) redirect(stmt *syntax.Stmt, dir string) {
 		if name == "/dev/null" {
 			continue
 		}
+		if c.changedDir && !filepath.IsAbs(name) {
+			c.unresolved("a directory change makes the redirect destination state unprovable")
+			continue
+		}
 		target, err := c.resolve(dir, name)
 		if err != nil || !destroysContent(target) {
 			// Creating a file or redirecting to a device keeps stored data.
@@ -182,7 +283,7 @@ func (c *classifier) redirect(stmt *syntax.Stmt, dir string) {
 		producer := *stmt
 		producer.Redirs = nil
 		for _, input := range stmt.Redirs {
-			if input.Op != syntax.RdrOut && input.Op != syntax.ClbOut {
+			if input.Op != syntax.RdrOut && input.Op != syntax.RdrClob && input.Op != syntax.RdrAll {
 				producer.Redirs = append(producer.Redirs, input)
 			}
 		}
@@ -218,11 +319,13 @@ func (c *classifier) call(command *syntax.CallExpr, dir *string) {
 		value, ok := literalWord(word)
 		if !ok {
 			complete = false
-			break
+			// Keep positional boundaries and later literal flags. The empty
+			// placeholder is never accepted as a proven operand or executable.
+			value = ""
 		}
 		args = append(args, value)
 	}
-	if len(args) == 0 {
+	if len(args) == 0 || args[0] == "" {
 		if !complete {
 			c.unresolved("the command name is not literal, so its effect cannot be proven")
 			*dir = ""
@@ -260,19 +363,34 @@ func (c *classifier) changeDirectory(args []string, dir string) string {
 }
 
 func (c *classifier) command(args []string, complete bool, dir string) {
+	if len(args) == 0 || args[0] == "" {
+		c.unresolved("the command name is not literal, so its effect cannot be proven")
+		return
+	}
 	name := filepath.Base(args[0])
+	if !complete && slices.Contains(args, "") && slices.Contains(
+		[]string{"sudo", "doas", "nohup", "time", "env", "nice", "timeout", "setsid", "stdbuf", "xargs", "command", "builtin", "exec", "eval", "sh", "bash", "dash", "zsh", "ksh"}, name) {
+		// An expansion can supply options, option values or the executable.
+		// Never let its placeholder be consumed as a proven dispatch token.
+		c.unresolved("the wrapper contains a nonliteral argument, so command dispatch cannot be proven")
+		return
+	}
+	if !complete && slices.Contains([]string{"cp", "truncate", "dd", "git", "mv", "rsync"}, name) {
+		c.unresolved("the command arguments are not literal, so its destructive effects cannot be proven")
+		return
+	}
 	// Wrapper arguments may belong to a nested script rather than the
 	// wrapper itself, so a later --help must not hide that script.
 	if hasInformationalFlag(args[1:]) && !slices.Contains(
-		[]string{"sudo", "doas", "nohup", "time", "command", "builtin", "exec", "eval", "sh", "bash", "dash", "zsh", "ksh"}, name) {
+		[]string{"sudo", "doas", "nohup", "time", "env", "nice", "timeout", "setsid", "stdbuf", "xargs", "command", "builtin", "exec", "eval", "sh", "bash", "dash", "zsh", "ksh"}, name) {
 		return
 	}
-	if slices.Contains(removalCommands, name) || slices.Contains([]string{"truncate", "dd", "find", "git", "mv", "rsync"}, name) {
+	if slices.Contains(removalCommands, name) || slices.Contains([]string{"cp", "truncate", "dd", "find", "git", "mv", "rsync"}, name) {
 		start := len(c.effects)
 		defer func() {
 			for i := start; i < len(c.effects); i++ {
 				effect := &c.effects[i]
-				if effect.Effect != EffectPermanentDeletion {
+				if effect.Effect != EffectPermanentDeletion || effect.Operations != nil {
 					continue
 				}
 				effect.Operations = make(map[string]string, len(effect.Targets))
@@ -291,9 +409,9 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 	}
 	switch name {
 	case "sudo", "doas", "nohup", "time":
-		if len(args) > 1 {
-			c.command(args[1:], complete, dir)
-		}
+		c.wrapper(args, complete, dir)
+	case "env", "nice", "timeout", "setsid", "stdbuf":
+		c.launchWrapper(args, complete, dir)
 	case "command", "builtin", "exec":
 		nested := args[1:]
 		if name == "command" && len(nested) > 0 && (nested[0] == "-v" || nested[0] == "-V") {
@@ -325,7 +443,7 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 			c.statement(stmt, &dir)
 		}
 	case "xargs":
-		c.xargs(args, dir)
+		c.xargs(args, complete, dir)
 	case "sh", "bash", "dash", "zsh", "ksh":
 		c.shellCommand(args, complete, dir)
 	case "truncate":
@@ -342,6 +460,8 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 		c.git(args, complete, dir)
 	case "mv":
 		c.move(args, complete, dir)
+	case "cp":
+		c.copy(args, dir)
 	case "rsync":
 		if hasDeleteFlag(args[1:]) {
 			_, paths := operands(args)
@@ -360,6 +480,9 @@ func (c *classifier) removal(command string, paths []string, recursive, complete
 		effect.Unresolved = "the command names no target"
 	}
 	for _, name := range paths {
+		if name == "" {
+			continue
+		}
 		target, err := c.resolve(dir, name)
 		if err != nil {
 			if effect.Unresolved == "" {
@@ -377,57 +500,527 @@ func (c *classifier) removal(command string, paths []string, recursive, complete
 	c.add(effect)
 }
 
-// move classifies a move as quarantine. A move onto an existing file destroys
-// that file's content, so only the overwritten destination is permanent.
+// move checks the effective destination for every source. Moving into a
+// directory can overwrite its existing child just as a direct rename can.
 func (c *classifier) move(args []string, complete bool, dir string) {
-	_, paths := operands(args)
-	if len(paths) < 2 {
+	if !complete {
+		c.unresolved("the move arguments are not literal, so overwritten targets cannot be proven")
 		return
 	}
-	destination := paths[len(paths)-1]
-	sources := paths[:len(paths)-1]
-	if !complete {
-		c.add(Classification{
-			Effect:     EffectQuarantine,
-			Command:    "mv",
-			Unresolved: "the move arguments are not literal",
-			Reason:     "The command moves data; a later move can restore it.",
-		})
+	var paths, options []string
+	destination := ""
+	targetDirectory, noTargetDirectory, noClobber := false, false, false
+	flags := true
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if flags && arg == "--" {
+			flags = false
+			options = append(options, arg)
+			continue
+		}
+		if !flags || !strings.HasPrefix(arg, "-") || arg == "-" {
+			paths = append(paths, arg)
+			continue
+		}
+		switch {
+		case arg == "-t" || arg == "--target-directory":
+			if i+1 >= len(args) {
+				c.unresolved("the move target directory is missing")
+				return
+			}
+			i++
+			destination = args[i]
+			targetDirectory = true
+		case strings.HasPrefix(arg, "--target-directory="):
+			destination = strings.TrimPrefix(arg, "--target-directory=")
+			targetDirectory = true
+		case strings.HasPrefix(arg, "-t") && len(arg) > 2:
+			destination = arg[2:]
+			targetDirectory = true
+		case arg == "-T" || arg == "--no-target-directory":
+			noTargetDirectory = true
+			options = append(options, arg)
+		case arg == "--no-clobber":
+			noClobber = true
+			options = append(options, arg)
+		case arg == "--force" || arg == "--interactive":
+			noClobber = false
+			options = append(options, arg)
+		case !strings.HasPrefix(arg, "--"):
+			for _, flag := range arg[1:] {
+				switch flag {
+				case 'n':
+					noClobber = true
+				case 'f', 'i':
+					noClobber = false
+				case 'v':
+				default:
+					c.unresolved("the move option cannot be inspected")
+					return
+				}
+			}
+			options = append(options, arg)
+		default:
+			c.unresolved("the move option cannot be inspected")
+			return
+		}
+	}
+	if targetDirectory && noTargetDirectory {
+		c.unresolved("the move has conflicting destination options")
 		return
+	}
+	var sources []string
+	if targetDirectory {
+		sources = paths
+	} else {
+		if len(paths) < 2 {
+			return
+		}
+		destination = paths[len(paths)-1]
+		sources = paths[:len(paths)-1]
+	}
+	if len(sources) == 0 || destination == "" {
+		c.unresolved("the move has no exact source or destination")
+		return
+	}
+	if c.changedDir {
+		for _, path := range append([]string{destination}, sources...) {
+			if !filepath.IsAbs(path) {
+				c.unresolved("a directory change makes the move source or destination state unprovable")
+				return
+			}
+		}
 	}
 	target, err := c.resolve(dir, destination)
 	if err != nil {
-		c.add(Classification{
-			Effect:     EffectQuarantine,
-			Command:    "mv",
-			Unresolved: "the move destination could not be resolved",
-			Reason:     "The command moves data; a later move can restore it.",
-		})
+		c.unresolved("the move destination cannot be resolved")
 		return
 	}
-	if info, statErr := os.Lstat(target); statErr == nil && !info.IsDir() {
-		c.add(Classification{
-			Effect:  EffectPermanentDeletion,
-			Command: "mv",
-			Targets: []string{target},
-			Reason:  "The move replaces the existing file " + target + ".",
-		})
+	info, statErr := os.Stat(target)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		c.unresolved("the move destination cannot be inspected")
 		return
 	}
-	var targets []string
+	intoDirectory := statErr == nil && info.IsDir() && !noTargetDirectory
+	if (targetDirectory && !intoDirectory) || (len(sources) > 1 && !intoDirectory) {
+		c.unresolved("the move needs a verified destination directory")
+		return
+	}
+	var overwritten, moved, affected []string
+	operations := make(map[string]string)
+	seen := make(map[string]bool)
 	for _, source := range sources {
-		resolved, err := c.resolve(dir, source)
+		sourcePath, err := c.resolve(dir, source)
 		if err != nil {
-			continue
+			c.unresolved("a move source cannot be resolved")
+			return
 		}
-		targets = append(targets, resolved)
+		moved = append(moved, sourcePath)
+		effective := target
+		if intoDirectory {
+			effective = filepath.Join(target, filepath.Base(filepath.Clean(source)))
+		}
+		paths := []string{sourcePath, effective}
+		if overlappingPaths(paths, c.movePaths) || overlappingPaths(paths, c.destructivePaths) {
+			c.unresolved("an earlier operation changes a move source or destination, so overwritten data cannot be identified safely")
+			return
+		}
+		affected = append(affected, paths...)
+		_, err = os.Lstat(effective)
+		if err != nil && !os.IsNotExist(err) {
+			c.unresolved("a move destination cannot be inspected")
+			return
+		}
+		if !noClobber && seen[effective] {
+			c.unresolved("multiple move sources address the same destination, so overwritten data cannot be identified safely")
+			return
+		}
+		if !noClobber && err == nil {
+			overwritten = append(overwritten, effective)
+			descriptor := append([]string{args[0]}, options...)
+			descriptor = append(descriptor, sourcePath, effective)
+			data, _ := json.Marshal([][]string{descriptor})
+			operations = mergeOperations(operations, map[string]string{effective: string(data)})
+		}
+		seen[effective] = true
 	}
-	c.add(Classification{
-		Effect:  EffectQuarantine,
-		Command: "mv",
-		Targets: targets,
-		Reason:  "The command moves data to " + target + "; a later move can restore it.",
-	})
+	if len(overwritten) > 0 {
+		c.add(Classification{Effect: EffectPermanentDeletion, Command: "mv", Targets: overwritten, Operations: operations, Reason: "The move replaces existing destination data."})
+		c.movePaths = append(c.movePaths, affected...)
+		return
+	}
+	c.add(Classification{Effect: EffectQuarantine, Command: "mv", Targets: moved, Reason: "The command moves data to " + target + "; a later move can restore it."})
+	c.movePaths = append(c.movePaths, affected...)
+}
+
+// copy checks effective destinations rather than treating a copy as harmless:
+// overwriting an existing file destroys its prior contents just like a redirect.
+func (c *classifier) copy(args []string, dir string) {
+	var paths []string
+	var retainedOptions []string
+	var destination string
+	options, noClobber, noTargetDirectory, targetDirectory := true, false, false, false
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if options && strings.HasPrefix(arg, "-") && arg != "-" {
+			retainedOptions = append(retainedOptions, arg)
+		}
+		switch {
+		case options && arg == "--":
+			options = false
+		case !options || !strings.HasPrefix(arg, "-") || arg == "-":
+			paths = append(paths, arg)
+		case arg == "-t" || arg == "--target-directory":
+			if i+1 >= len(args) {
+				c.unresolved("the copy destination is missing")
+				return
+			}
+			i++
+			destination, targetDirectory = args[i], true
+			retainedOptions = append(retainedOptions, args[i])
+		case strings.HasPrefix(arg, "--target-directory="):
+			destination, targetDirectory = strings.TrimPrefix(arg, "--target-directory="), true
+		case strings.HasPrefix(arg, "-t") && len(arg) > 2:
+			destination, targetDirectory = arg[2:], true
+		case arg == "-T" || arg == "--no-target-directory":
+			noTargetDirectory = true
+		case arg == "--no-clobber":
+			noClobber = true
+		case arg == "--force" || arg == "--interactive":
+			noClobber = false
+		case !strings.HasPrefix(arg, "--"):
+			for _, flag := range arg[1:] {
+				switch flag {
+				case 'n':
+					noClobber = true
+				case 'f', 'i':
+					noClobber = false
+				case 'R', 'r', 'a', 'p', 'v', 'P', 'L', 'H':
+				default:
+					c.unresolved("the copy option cannot be inspected")
+					return
+				}
+			}
+		default:
+			c.unresolved("the copy option cannot be inspected")
+			return
+		}
+	}
+	if noClobber {
+		return
+	}
+	if !targetDirectory {
+		if len(paths) < 2 {
+			return
+		}
+		destination, paths = paths[len(paths)-1], paths[:len(paths)-1]
+	}
+	if destination == "" || len(paths) == 0 || targetDirectory && noTargetDirectory {
+		c.unresolved("the copy has no verified source and destination")
+		return
+	}
+	target, err := c.resolve(dir, destination)
+	if err != nil || c.changedDir {
+		c.unresolved("the copy destination cannot be resolved safely")
+		return
+	}
+	info, err := os.Stat(target)
+	if err != nil && !os.IsNotExist(err) {
+		c.unresolved("the copy destination cannot be inspected")
+		return
+	}
+	intoDirectory := err == nil && info.IsDir() && !noTargetDirectory
+	if !intoDirectory && (targetDirectory || len(paths) > 1) {
+		c.unresolved("the copy needs a verified destination directory")
+		return
+	}
+	var changed []string
+	for _, source := range paths {
+		effective := target
+		if intoDirectory {
+			effective = filepath.Join(target, filepath.Base(filepath.Clean(source)))
+		}
+		if overlappingPaths([]string{effective}, c.movePaths) || overlappingPaths([]string{effective}, changed) {
+			c.unresolved("an earlier write changes the copy destination, so its original data cannot be identified safely")
+			return
+		}
+		changed = append(changed, effective)
+		if existing, err := os.Lstat(effective); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			c.unresolved("the effective copy destination cannot be inspected")
+			return
+		} else if existing.IsDir() {
+			// Recursive merges may follow existing nested links. A directory
+			// snapshot alone does not approve the referents those writes reach.
+			c.unresolved("a copy merges an existing directory whose exact overwritten entries cannot be proven")
+			return
+		}
+		sourcePath, err := c.resolve(dir, source)
+		if err != nil {
+			c.unresolved("the copy source cannot be resolved safely")
+			return
+		}
+		descriptor := append([]string{args[0]}, retainedOptions...)
+		descriptor = append(descriptor, sourcePath, effective)
+		data, _ := json.Marshal([][]string{descriptor})
+		c.add(Classification{
+			Effect:     EffectPermanentDeletion,
+			Command:    "cp",
+			Targets:    []string{effective},
+			Operations: map[string]string{effective: string(data)},
+			Reason:     "The copy replaces existing destination data.",
+		})
+	}
+	c.movePaths = append(c.movePaths, changed...)
+}
+
+// wrapper consumes only documented options whose effect is understood. Unknown
+// or directory-changing options cannot hide an uninspected command.
+func (c *classifier) wrapper(args []string, complete bool, dir string) {
+	name := filepath.Base(args[0])
+	i := 1
+	for i < len(args) {
+		arg := args[i]
+		if arg == "--" {
+			i++
+			break
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			if name == "sudo" && strings.Contains(arg, "=") {
+				c.unresolved("wrapper environment assignments can change command resolution")
+				return
+			}
+			break
+		}
+		if (arg == "--help" || arg == "--version") && i == 1 && len(args) == 2 {
+			return
+		}
+		switch name {
+		case "sudo":
+			if slices.Contains([]string{"--non-interactive", "--preserve-env", "--set-home", "--stdin", "--reset-timestamp"}, arg) {
+				i++
+				continue
+			}
+			if slices.Contains([]string{"--user", "--group", "--prompt", "--close-from", "--command-timeout", "--role", "--type"}, arg) {
+				if i+1 >= len(args) {
+					c.unresolved("a wrapper option value is missing")
+					return
+				}
+				i += 2
+				continue
+			}
+			if strings.HasPrefix(arg, "--") {
+				key, _, hasValue := strings.Cut(arg, "=")
+				if hasValue && slices.Contains([]string{"--user", "--group", "--prompt", "--close-from", "--command-timeout", "--role", "--type", "--preserve-env"}, key) {
+					i++
+					continue
+				}
+				c.unresolved("the wrapper option cannot be inspected")
+				return
+			}
+		case "doas":
+			// Short flags below include the documented user/style values.
+		case "nohup":
+			c.unresolved("the wrapper option cannot be inspected")
+			return
+		case "time":
+			if arg == "--" {
+				i++
+				continue
+			}
+			if slices.Contains([]string{"--portability", "--verbose", "--quiet"}, arg) {
+				i++
+				continue
+			}
+			if arg == "--format" {
+				if i+1 >= len(args) {
+					c.unresolved("a wrapper option value is missing")
+					return
+				}
+				i += 2
+				continue
+			}
+		}
+		accepted := true
+		for j := 1; j < len(arg); j++ {
+			flag := arg[j]
+			value := false
+			switch name {
+			case "sudo":
+				if strings.ContainsRune("nEHSk", rune(flag)) {
+					continue
+				}
+				value = strings.ContainsRune("ugpCTrt", rune(flag))
+			case "doas":
+				if strings.ContainsRune("nL", rune(flag)) {
+					continue
+				}
+				value = strings.ContainsRune("ua", rune(flag))
+			case "time":
+				if strings.ContainsRune("pvqa", rune(flag)) {
+					continue
+				}
+				value = flag == 'f'
+			}
+			if !value {
+				accepted = false
+				break
+			}
+			if j+1 == len(arg) {
+				if i+1 >= len(args) {
+					accepted = false
+					break
+				}
+				i++
+			}
+			break
+		}
+		if !accepted {
+			c.unresolved("the wrapper option cannot be inspected")
+			return
+		}
+		i++
+	}
+	if i >= len(args) {
+		if !complete {
+			c.unresolved("the wrapped command is not literal")
+		}
+		return
+	}
+	if name == "sudo" && strings.Contains(args[i], "=") {
+		c.unresolved("wrapper environment assignments can change command resolution")
+		return
+	}
+	c.command(args[i:], complete, dir)
+}
+
+// launchWrapper inspects common process launchers without allowing their
+// option arguments or timeout duration to masquerade as the executable.
+func (c *classifier) launchWrapper(args []string, complete bool, dir string) {
+	name := filepath.Base(args[0])
+	i := 1
+	for i < len(args) {
+		arg := args[i]
+		if arg == "--" {
+			i++
+			break
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			break
+		}
+		if (arg == "--help" || arg == "--version") && i == 1 && len(args) == 2 {
+			return
+		}
+		consumed := false
+		switch name {
+		case "env":
+			// Even an otherwise harmless executable may change with PATH, loader,
+			// split-string, chdir, or other environment-dispatch options.
+		case "nice":
+			if arg == "-n" || arg == "--adjustment" {
+				if i+1 < len(args) && decimalInteger(args[i+1]) {
+					i++
+					consumed = true
+				}
+			} else if value, ok := strings.CutPrefix(arg, "--adjustment="); ok {
+				consumed = decimalInteger(value)
+			} else if strings.HasPrefix(arg, "-n") && len(arg) > 2 {
+				consumed = decimalInteger(arg[2:])
+			} else {
+				consumed = decimalInteger(arg)
+			}
+		case "timeout":
+			if slices.Contains([]string{"--preserve-status", "--foreground", "--verbose", "-v"}, arg) {
+				consumed = true
+			} else if slices.Contains([]string{"-s", "--signal", "-k", "--kill-after"}, arg) {
+				if i+1 < len(args) {
+					i++
+					consumed = true
+				}
+			} else if strings.HasPrefix(arg, "--signal=") || strings.HasPrefix(arg, "--kill-after=") ||
+				(len(arg) > 2 && (strings.HasPrefix(arg, "-s") || strings.HasPrefix(arg, "-k"))) {
+				consumed = true
+			}
+		case "setsid":
+			if slices.Contains([]string{"--ctty", "--fork", "--wait"}, arg) {
+				consumed = true
+			} else if !strings.HasPrefix(arg, "--") {
+				consumed = len(arg) > 1
+				for _, flag := range arg[1:] {
+					if !strings.ContainsRune("cfw", flag) {
+						consumed = false
+					}
+				}
+			}
+		case "stdbuf":
+			if slices.Contains([]string{"-i", "-o", "-e", "--input", "--output", "--error"}, arg) {
+				if i+1 < len(args) {
+					i++
+					consumed = true
+				}
+			} else if strings.HasPrefix(arg, "--input=") || strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "--error=") ||
+				(len(arg) > 2 && (strings.HasPrefix(arg, "-i") || strings.HasPrefix(arg, "-o") || strings.HasPrefix(arg, "-e"))) {
+				consumed = true
+			}
+		}
+		if !consumed {
+			c.unresolved("the process-launcher option or value cannot be inspected")
+			return
+		}
+		i++
+	}
+	if name == "env" && i < len(args) && (args[i] == "-" || strings.Contains(args[i], "=")) {
+		c.unresolved("environment changes can alter command resolution or inject execution")
+		return
+	}
+	if name == "timeout" {
+		if i >= len(args) || !timeoutDuration(args[i]) {
+			c.unresolved("the timeout duration cannot be inspected")
+			return
+		}
+		i++
+	}
+	if i >= len(args) {
+		if !complete {
+			c.unresolved("the launched command is not literal")
+		}
+		return
+	}
+	c.command(args[i:], complete, dir)
+}
+
+func decimalInteger(value string) bool {
+	if len(value) > 0 && (value[0] == '+' || value[0] == '-') {
+		value = value[1:]
+	}
+	if value == "" {
+		return false
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func timeoutDuration(value string) bool {
+	value = strings.TrimPrefix(value, "+")
+	if len(value) > 0 && strings.ContainsRune("smhd", rune(value[len(value)-1])) {
+		value = value[:len(value)-1]
+	}
+	digits, dots := 0, 0
+	for _, character := range value {
+		if character == '.' {
+			dots++
+		} else if character >= '0' && character <= '9' {
+			digits++
+		} else {
+			return false
+		}
+	}
+	return digits > 0 && dots <= 1
 }
 
 // find classifies "find -delete" and "-exec" forms. The matched set cannot be
@@ -445,10 +1038,16 @@ func (c *classifier) find(args []string, complete bool, dir string) {
 		}
 	}
 	if !destructive {
+		if !complete {
+			c.unresolved("nonliteral find arguments may introduce an uninspected destructive action")
+		}
 		return
 	}
 	var roots []string
 	for _, arg := range args[1:] {
+		if arg == "" {
+			continue
+		}
 		if strings.HasPrefix(arg, "-") || arg == "(" || arg == "!" {
 			break
 		}
@@ -480,7 +1079,13 @@ func (c *classifier) git(args []string, complete bool, dir string) {
 	if len(args) < 2 {
 		return
 	}
+	if strings.HasPrefix(args[1], "-") {
+		c.unresolved("git global options can change the repository or command dispatch")
+		return
+	}
 	switch args[1] {
+	case "restore", "checkout":
+		c.unresolved("git " + args[1] + " can discard working-tree data whose exact affected set cannot be proven")
 	case "rm":
 		_, paths := operands(args[1:])
 		c.removal("git rm", paths, false, complete, dir)
@@ -532,30 +1137,67 @@ func (c *classifier) truncate(args []string, complete bool, dir string) {
 	c.removal("truncate", paths, false, complete, dir)
 }
 
-// xargs classifies a pipeline that runs a removal command over generated
-// arguments.
-func (c *classifier) xargs(args []string, dir string) {
-	for i := 1; i < len(args); i++ {
-		if strings.HasPrefix(args[i], "-") {
-			continue
+// xargs delegates its explicit child to the same command classifier. Input
+// arguments are generated, so destructive child effects cannot prove targets.
+func (c *classifier) xargs(args []string, complete bool, dir string) {
+	i := 1
+	for i < len(args) {
+		arg := args[i]
+		if arg == "--" {
+			i++
+			break
 		}
-		if !slices.Contains(removalCommands, filepath.Base(args[i])) {
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			break
+		}
+		if (arg == "--help" || arg == "--version") && i == 1 && len(args) == 2 {
 			return
 		}
-		_, paths := operands(args[i:])
-		effect := Classification{
-			Effect:     EffectPermanentDeletion,
-			Command:    "xargs " + args[i],
-			Unresolved: "xargs builds its target list from standard input, so the exact targets cannot be proven",
-			Reason:     "The pipeline permanently deletes data, and its exact targets cannot be proven.",
+		if slices.Contains([]string{"-0", "--null", "-r", "--no-run-if-empty", "-t", "--verbose", "-p", "--interactive", "-x", "--exit"}, arg) {
+			i++
+			continue
 		}
-		for _, name := range paths {
-			if target, err := c.resolve(dir, name); err == nil {
-				effect.Targets = append(effect.Targets, target)
+		// GNU optional values belong to this token (long =value or short
+		// attached value). A bare optional flag must leave the child intact.
+		if slices.Contains([]string{"--eof", "--replace", "--max-lines"}, arg) ||
+			(len(arg) >= 2 && !strings.HasPrefix(arg, "--") && strings.ContainsRune("eil", rune(arg[1]))) {
+			i++
+			continue
+		}
+		if slices.Contains([]string{"-a", "--arg-file", "-d", "--delimiter", "-E", "-I", "-L", "-n", "--max-args", "-P", "--max-procs", "-s", "--max-chars"}, arg) {
+			if i+1 >= len(args) {
+				c.unresolved("an xargs option value is missing")
+				return
 			}
+			i += 2
+			continue
 		}
-		c.add(effect)
+		key, _, hasValue := strings.Cut(arg, "=")
+		if hasValue && slices.Contains([]string{"--arg-file", "--delimiter", "--eof", "--replace", "--max-lines", "--max-args", "--max-procs", "--max-chars"}, key) {
+			i++
+			continue
+		}
+		if len(arg) > 2 && !strings.HasPrefix(arg, "--") && strings.ContainsRune("adEILnPs", rune(arg[1])) {
+			i++
+			continue
+		}
+		c.unresolved("the xargs option cannot be inspected")
 		return
+	}
+	if i >= len(args) {
+		if !complete {
+			c.unresolved("the xargs command is not literal")
+		}
+		return
+	}
+	start := len(c.effects)
+	c.command(args[i:], false, dir)
+	for index := start; index < len(c.effects); index++ {
+		effect := &c.effects[index]
+		if effect.IsDestructive() {
+			effect.Unresolved = "xargs builds its target arguments from input, so the exact targets cannot be proven"
+			effect.Reason = "The launched command may permanently delete data, and " + effect.Unresolved + "."
+		}
 	}
 }
 
@@ -574,10 +1216,12 @@ func (c *classifier) shellCommand(args []string, complete bool, dir string) {
 		if nestedDir == "" {
 			nestedDir = c.workingDir
 		}
-		nested := Classify(args[i+1], nestedDir)
-		if nested.IsDestructive() {
-			c.add(nested)
+		script, err := syntax.NewParser().Parse(strings.NewReader(args[i+1]), "")
+		if err != nil {
+			c.unresolved("the nested shell script cannot be parsed")
+			return
 		}
+		c.localDirectoryStatements(script.Stmts, nestedDir)
 		return
 	}
 }
@@ -623,20 +1267,20 @@ func recursiveFlag(flags []string) bool {
 	return false
 }
 
-// hasInformationalFlag reports a help or version request, which has no effect.
+// hasInformationalFlag recognizes only an unambiguous help/version invocation.
+// In a longer argument list the token may be an operand after --, a find
+// predicate value, or another option's value rather than an informational flag.
 func hasInformationalFlag(args []string) bool {
-	for _, arg := range args {
-		if arg == "--help" || arg == "--version" {
-			return true
-		}
-	}
-	return false
+	return len(args) == 1 && (args[0] == "--help" || args[0] == "--version")
 }
 
 // hasDryRunFlag reports a documented dry run for git clean. Short flags may be
 // clustered, as in "-nd".
 func hasDryRunFlag(args []string) bool {
 	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
 		if arg == "--dry-run" {
 			return true
 		}

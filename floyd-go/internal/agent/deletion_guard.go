@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/agent/tools"
 	"github.com/legacy-ai/floyd/internal/deletionguard"
 	"github.com/legacy-ai/floyd/internal/question"
+	"github.com/legacy-ai/floyd/internal/shell"
 )
 
 // deletionGuardTool enforces the two-confirmation rule for permanent deletion
@@ -56,9 +58,16 @@ func (g *deletionGuardTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 }
 
 func (g *deletionGuardTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	sessionID := tools.GetSessionFromContext(ctx)
 	commands, dir, err := shellCommands(call)
 	if err != nil || len(commands) == 0 {
-		return g.inner.Run(ctx, call)
+		response, runErr := g.inner.Run(ctx, call)
+		if sessionID != "" && (call.Name == tools.JobOutputToolName || call.Name == tools.JobKillToolName) {
+			if err := g.reconcileBackground(sessionID); err != nil {
+				return response, errors.Join(runErr, err)
+			}
+		}
+		return response, runErr
 	}
 	if strings.TrimSpace(dir) == "" {
 		dir = g.workingDir
@@ -72,7 +81,10 @@ func (g *deletionGuardTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 		return fantasy.NewTextErrorResponse("Permanent deletion is blocked because parallel commands have overlapping targets. Run each distinct target once."), nil
 	}
 
-	sessionID := tools.GetSessionFromContext(ctx)
+	// Missing manager evidence remains uncertain, including after a restart.
+	if err := g.reconcileBackground(sessionID); err != nil {
+		return fantasy.NewTextErrorResponse("Permanent deletion is blocked because its session record cannot be read during background reconciliation: " + err.Error()), nil
+	}
 	decision := g.guard.Check(ctx, sessionID, call.ID, classification)
 	if !decision.Allowed {
 		return fantasy.NewTextErrorResponse(deletionDeniedMessage(decision)), nil
@@ -91,6 +103,31 @@ func (g *deletionGuardTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 	}
 	response, runErr := g.inner.Run(ctx, call)
 	if decision.Record {
+		if call.Name == tools.BashToolName && runErr == nil && !response.IsError {
+			var metadata tools.BashResponseMetadata
+			if json.Unmarshal([]byte(response.Metadata), &metadata) == nil && metadata.Background && metadata.ShellID != "" {
+				job, ok := shell.GetBackgroundShellManager().Get(metadata.ShellID)
+				if ok && job.SessionID == sessionID && job.Command == commands[0] && job.WorkingDir == dir && job.WorkspaceDir == g.workingDir && job.ExecutionID != "" {
+					ref, err := g.guard.BindBackground(sessionID, classification, call.ID, deletionguard.BackgroundJob{
+						SessionID: sessionID, ToolCallID: call.ID, ShellID: job.ID, ExecutionID: job.ExecutionID,
+						Command: job.Command, WorkingDir: job.WorkingDir, WorkspaceDir: job.WorkspaceDir, Classification: classification,
+					})
+					if err != nil {
+						return response, fmt.Errorf("record deletion background launch: %w", err)
+					}
+					// Capture the actual job pointer before job_kill/cleanup removes
+					// its manager entry. Only its terminal channel proves it stopped.
+					go func() {
+						job.Wait()
+						if err := g.reconcileBackgroundJob(ref, job); err != nil {
+							slog.Warn("Deletion background outcome could not be recorded", "shell_id", ref.ShellID, "error", err)
+						}
+					}()
+					return response, nil
+				}
+			}
+		}
+
 		completed, finished := deletionCompletion(call.Name, commands, response, runErr)
 		var successfulTargets []string
 		unsuccessfulTargets := make(map[string]bool)
@@ -259,8 +296,9 @@ func (c questionConfirmer) Confirm(ctx context.Context, req deletionguard.Confir
 		return false, errors.New("no question service is available")
 	}
 	answers, err := c.questions.Ask(ctx, question.Request{
-		SessionID:  req.SessionID,
-		ToolCallID: req.ToolCallID,
+		RequireLocalInput: true,
+		SessionID:         req.SessionID,
+		ToolCallID:        req.ToolCallID,
 		Questions: []question.Question{{
 			ID:          "deletion-confirmation-" + strconv.Itoa(req.Stage),
 			Type:        question.TypeYesNo,
@@ -278,4 +316,41 @@ func (c questionConfirmer) Confirm(ctx context.Context, req deletionguard.Confir
 		}
 	}
 	return false, errors.New("the confirmation answer was not a yes or no")
+}
+
+// Background reconciliation uses manager identity and its synchronized terminal
+// output, never the tool response text or caller-supplied completion metadata.
+func (g *deletionGuardTool) reconcileBackground(sessionID string) error {
+	if err := g.guard.RetryBackgroundOutcomes(sessionID); err != nil {
+		return err
+	}
+	jobs, err := g.guard.PendingBackground(sessionID)
+	if err != nil {
+		return err
+	}
+	for _, ref := range jobs {
+		job, ok := shell.GetBackgroundShellManager().Get(ref.ShellID)
+		if !ok {
+			continue
+		}
+		if err := g.reconcileBackgroundJob(ref, job); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *deletionGuardTool) reconcileBackgroundJob(ref deletionguard.BackgroundJob, job *shell.BackgroundShell) error {
+	if ref.SessionID != job.SessionID || ref.ShellID != job.ID || ref.ExecutionID != job.ExecutionID || ref.Command != job.Command || ref.WorkingDir != job.WorkingDir || ref.WorkspaceDir != job.WorkspaceDir {
+		return nil
+	}
+	_, _, done, err := job.GetOutput()
+	if !done {
+		return nil
+	}
+	result := deletionguard.BackgroundResult{Job: ref, Done: true, ExitCode: shell.ExitCode(err)}
+	if err != nil {
+		result.Error = err.Error()
+	}
+	return g.guard.ReconcileBackground(ref.SessionID, result)
 }

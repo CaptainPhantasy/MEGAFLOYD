@@ -14,9 +14,11 @@ import (
 	"github.com/legacy-ai/floyd/internal/agent"
 	"github.com/legacy-ai/floyd/internal/agent/notify"
 	"github.com/legacy-ai/floyd/internal/config"
+	"github.com/legacy-ai/floyd/internal/deletionguard"
 	"github.com/legacy-ai/floyd/internal/hookruntime"
 	"github.com/legacy-ai/floyd/internal/proto"
 	"github.com/legacy-ai/floyd/internal/pubsub"
+	"github.com/legacy-ai/floyd/internal/question"
 	"github.com/legacy-ai/floyd/internal/shell"
 )
 
@@ -360,6 +362,12 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 	}
 
 	run := func(runCtx context.Context, command string) (shell.CaptureResult, error) {
+		// Inspect the final command here, including any configured hook rewrite.
+		// This RPC route has no trusted local deletion-confirmation channel.
+		if deletionguard.Classify(command, ws.Path).IsDestructive() {
+			hookruntime.RejectTool(runCtx)
+			return shell.CaptureResult{}, fmt.Errorf("%w: the remote shell command was not started", question.ErrLocalInputRequired)
+		}
 		return shell.RunAndPersist(runCtx, shell.RunOptions{Command: command, Cwd: ws.Path, Env: append(os.Environ(), ws.Env...), TermWidth: req.TermWidth}, persist)
 	}
 	var result shell.CaptureResult

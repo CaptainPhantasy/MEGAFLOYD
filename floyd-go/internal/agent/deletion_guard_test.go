@@ -3,9 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 
 	"charm.land/fantasy"
@@ -45,6 +48,7 @@ type deletionFixture struct {
 	workingDir string
 	dataDir    string
 	guard      *deletionguard.Guard
+	authority  *deletionFixtureAuthority
 	answers    []bool
 	asked      []deletionguard.ConfirmationRequest
 	calls      int
@@ -53,7 +57,8 @@ type deletionFixture struct {
 func newDeletionFixture(t *testing.T) *deletionFixture {
 	t.Helper()
 	f := &deletionFixture{t: t, workingDir: t.TempDir(), dataDir: t.TempDir()}
-	f.guard = deletionguard.NewGuard(f.dataDir, f)
+	f.authority = &deletionFixtureAuthority{data: map[string][]byte{}, revisions: map[string]uint64{}}
+	f.guard = deletionguard.NewGuardWithAuthority(f.dataDir, f, f.authority)
 	return f
 }
 
@@ -92,12 +97,14 @@ func (f *deletionFixture) run(sessionID, command string) (fantasy.ToolResponse, 
 // the gate would after asking.
 func (f *deletionFixture) confirmBoth(sessionID string, targets ...string) {
 	f.t.Helper()
-	targetSet := deletionguard.Digest(targets)
-	for stage := 1; stage <= 2; stage++ {
-		require.NoError(f.t, f.guard.Ledger().AppendConfirmation(sessionID, deletionguard.Confirmation{
-			Stage: stage, TargetSet: targetSet, Targets: targets, Source: "human",
-		}))
+	seed := deletionguard.NewGuardWithAuthority(f.dataDir, deletionSeedConfirmer{}, f.authority)
+	quoted := make([]string, len(targets))
+	for i, target := range targets {
+		quoted[i] = "'" + strings.ReplaceAll(target, "'", "'\"'\"'") + "'"
 	}
+	classification := deletionguard.Classify("rm -rf "+strings.Join(quoted, " "), f.workingDir)
+	decision := seed.Check(f.t.Context(), sessionID, "seed-confirmations", classification)
+	require.True(f.t, decision.Allowed, decision.Reason)
 }
 
 func (f *deletionFixture) record(sessionID string) deletionguard.Record {
@@ -212,7 +219,12 @@ func TestDeletionGuardFailsClosedOnMalformedRecord(t *testing.T) {
 	f := newDeletionFixture(t)
 	sessionID := "session-deletion"
 	require.NoError(t, os.MkdirAll(f.guard.Ledger().Dir(sessionID), 0o755))
-	require.NoError(t, os.WriteFile(f.guard.Ledger().Path(sessionID), []byte("{not json"), 0o644))
+	f.authority.mu.Lock()
+	for key := range f.authority.data {
+		f.authority.data[key] = []byte("{not json")
+	}
+	f.authority.malformed = true
+	f.authority.mu.Unlock()
 	f.answers = []bool{true, true}
 
 	response, ran := f.run(sessionID, "rm -rf widget")
@@ -264,4 +276,40 @@ func TestDeletionGuardWiredThroughCoordinatorTools(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, response.IsError, response.Content)
 	require.False(t, ran, "the coordinator chain must gate the command before the tool body")
+}
+
+// Test-only authority keeps shell metadata fixtures independent of a system service.
+type deletionFixtureAuthority struct {
+	mu        sync.Mutex
+	data      map[string][]byte
+	revisions map[string]uint64
+	malformed bool
+}
+
+func (a *deletionFixtureAuthority) Read(_ context.Context, namespace, session string) ([]byte, uint64, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := namespace + ":" + session
+	if a.malformed {
+		return []byte("{not json"), 1, nil
+	}
+	return append([]byte(nil), a.data[key]...), a.revisions[key], nil
+}
+
+func (a *deletionFixtureAuthority) CompareAndSwap(_ context.Context, namespace, session string, revision uint64, data []byte) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := namespace + ":" + session
+	if a.revisions[key] != revision {
+		return errors.New("protected approval revision conflict")
+	}
+	a.data[key] = append([]byte(nil), data...)
+	a.revisions[key]++
+	return nil
+}
+
+type deletionSeedConfirmer struct{}
+
+func (deletionSeedConfirmer) Confirm(context.Context, deletionguard.ConfirmationRequest) (bool, error) {
+	return true, nil
 }
