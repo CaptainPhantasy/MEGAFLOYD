@@ -61,11 +61,49 @@ jobs:
         working-directory: floyd-go
         run: go vet ./...
 
+      - name: Verify go.mod is tidy
+        working-directory: floyd-go
+        run: go mod tidy -diff
+
+      - name: Lint Go packages
+        uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
+        with:
+          working-directory: floyd-go
+          version: v2.6
+          # Enforce the curated linters on changed code first; the
+          # pre-existing repo-wide debt is retired separately.
+          args: --timeout=10m --new-from-rev=origin/main
+
       - name: Test the prompt and config packages
         working-directory: floyd-go
+        env:
+          GO_COVERAGE_FLOOR: "40"
         run: |
           set -euo pipefail
-          go test ./internal/agent/prompt/... ./internal/config/... ./internal/csync/... ./internal/cmd/... ./internal/agent/... ./internal/deletionguard/... ./internal/approvalauthority/... ./internal/question/... ./internal/backend/... ./internal/app/... ./internal/server/...
+          go test -count=1 -coverprofile="$RUNNER_TEMP/go-cover.out" ./internal/agent/prompt/... ./internal/config/... ./internal/csync/... ./internal/cmd/... ./internal/agent/... ./internal/deletionguard/... ./internal/approvalauthority/... ./internal/question/... ./internal/backend/... ./internal/app/... ./internal/server/...
+          python3 - <<'PY'
+          import os
+          import sys
+
+          floor = float(os.environ["GO_COVERAGE_FLOOR"])
+          covered = total = 0
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "go-cover.out")) as f:
+              for line in f:
+                  if line.startswith("mode:"):
+                      continue
+                  parts = line.split()
+                  if len(parts) != 3:
+                      continue
+                  num_statements = int(parts[1])
+                  count = int(parts[2])
+                  total += num_statements
+                  if count > 0:
+                      covered += num_statements
+          pct = (covered / total * 100.0) if total else 0.0
+          print(f"Go statement coverage: {pct:.1f}% (floor {floor:.0f}%)")
+          if pct < floor:
+              raise SystemExit(f"Go coverage {pct:.1f}% is below the {floor:.0f}% floor")
+          PY
 
       - name: Verify protected approval authority across OS identities
         run: bash scripts/verify-approval-authority-linux.sh
@@ -95,6 +133,12 @@ jobs:
           set -euo pipefail
           pnpm install --frozen-lockfile
           node scripts/check-no-comments.mjs
+
+      - name: Run the TypeScript test suite with coverage
+        working-directory: floyd-code
+        run: |
+          set -euo pipefail
+          pnpm exec vitest run --coverage --silent
 
       - name: Build linux/amd64
         working-directory: floyd-go

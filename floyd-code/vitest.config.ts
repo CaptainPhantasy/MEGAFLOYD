@@ -20,6 +20,12 @@ export default defineConfig({
       ],
       exclude: ['**/*.test.ts', '**/*.spec.ts', '**/dist/**'],
       reporter: ['text', 'html'],
+      thresholds: {
+        statements: 50,
+        branches: 30,
+        functions: 40,
+        lines: 50,
+      },
     },
   },
 });
