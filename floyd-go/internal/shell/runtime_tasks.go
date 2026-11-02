@@ -6,14 +6,17 @@ import (
 	"time"
 )
 
-type runtimeTaskOwnerKey struct{}
-type runtimeTaskOwner struct{ sessionID, workspace string }
+type (
+	runtimeTaskOwnerKey struct{}
+	runtimeTaskOwner    struct{ sessionID, workspace string }
+)
 
 // StartForSession preserves the workspace that owns the command, even when the
 // tool explicitly executes in a different working directory.
 func (m *BackgroundShellManager) StartForSession(ctx context.Context, workingDir string, blocks []BlockFunc, command, description, sessionID, workspace string) (*BackgroundShell, error) {
 	return m.Start(context.WithValue(ctx, runtimeTaskOwnerKey{}, runtimeTaskOwner{sessionID, workspace}), workingDir, blocks, command, description)
 }
+
 func (b *BackgroundShell) CompletedAt() time.Time {
 	n := b.completedAt.Load()
 	if n == 0 {

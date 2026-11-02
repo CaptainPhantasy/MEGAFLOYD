@@ -43,7 +43,7 @@ func TestCompleteUsesValidHeadersAndVersionedEndpoint(t *testing.T) {
 func TestCompleteStreamDeliversEventsAndReportsHTTPFailure(t *testing.T) {
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Api-Key") == "denied" {
-			http.Error(w, "access denied", 403)
+			http.Error(w, "access denied", http.StatusForbidden)
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -84,6 +84,9 @@ func TestBuildURLPreservesVersionPrefixAndQuery(t *testing.T) {
 		{"https://example.test/tenant%2Fname/v1", "https://example.test/tenant%2Fname/v1/messages"},
 		{"https://example.test/v1?route=fixture/", "https://example.test/v1/messages?route=fixture/"},
 	} {
-		t.Run(tc.base, func(t *testing.T) { require.Equal(t, tc.want, buildURL(tc.base, "/v1/messages")) })
+		t.Run(tc.base, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, buildURL(tc.base, "/v1/messages"))
+		})
 	}
 }

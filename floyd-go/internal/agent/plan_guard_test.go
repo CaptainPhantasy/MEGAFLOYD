@@ -339,6 +339,7 @@ func TestPlanGuardAllowsRegisteredInspectionTools(t *testing.T) {
 	for _, registered := range inspectionTools {
 		name := registered.Info().Name
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			ran := false
 			inner := planGuardRecordingTool{name: name, ran: &ran}
 			wrapped := wrapToolsWithPlanGuard([]fantasy.AgentTool{inner}, plans, nil, t.TempDir())[0]

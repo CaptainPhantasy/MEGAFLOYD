@@ -143,7 +143,6 @@ func launchOptions(cmd *cobra.Command, cfg *config.Config) (config.RuntimeOption
 			}
 			opts.Models[entry.kind] = selected
 		}
-
 	}
 	return opts, planMode, nil
 }

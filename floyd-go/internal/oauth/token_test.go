@@ -22,7 +22,10 @@ func TestTokenExpiryRefreshWindowAndMissingExpiry(t *testing.T) {
 		{"percentage buffer", Token{ExpiresIn: 3600, ExpiresAt: now + 300}, true},
 		{"usable", Token{ExpiresIn: 3600, ExpiresAt: now + 1800}, false},
 	} {
-		t.Run(tc.name, func(t *testing.T) { require.Equal(t, tc.expired, tc.token.IsExpired()) })
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.expired, tc.token.IsExpired())
+		})
 	}
 	token := Token{ExpiresIn: 3600}
 	token.SetExpiresAt()

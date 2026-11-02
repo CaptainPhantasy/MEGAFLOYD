@@ -58,13 +58,15 @@ type TurnRecorder interface {
 	TurnContent(context.Context, string, int64, string, string, string) (*TurnContent, error)
 }
 
-type turnContextKey struct{}
-type turnContext struct {
-	sessionID  string
-	messageID  string
-	ordinal    int64
-	workingDir string
-}
+type (
+	turnContextKey struct{}
+	turnContext    struct {
+		sessionID  string
+		messageID  string
+		ordinal    int64
+		workingDir string
+	}
+)
 
 type fileSnapshot struct {
 	FileID   string `json:"file_id,omitempty"`

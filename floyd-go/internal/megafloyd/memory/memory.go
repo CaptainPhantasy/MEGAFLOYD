@@ -17,9 +17,10 @@
 package memory
 
 import (
-	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"path/filepath"
 	"time"
+
+	"github.com/legacy-ai/floyd/internal/megafloyd"
 )
 
 const (

@@ -2,6 +2,7 @@ package usage
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -281,7 +282,12 @@ func Ship(endpoint string, events []Event, allowRemote bool) (int, error) {
 		}
 		return nil
 	}}
-	response, err := client.Post(endpoint, "application/json", bytes.NewReader(body))
+	httpRequest, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return 0, fmt.Errorf("build traces request: %w", err)
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(httpRequest)
 	if err != nil {
 		return 0, fmt.Errorf("post traces: %w", err)
 	}

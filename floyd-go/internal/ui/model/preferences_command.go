@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -73,7 +74,7 @@ func (m *UI) preferenceCommand(name, args string) tea.Cmd {
 	ws := m.com.Workspace
 	if name == "context" || name == "cost" {
 		if m.session == nil {
-			return m.showInfo(strings.Title(name), "No active session yet.")
+			return m.showInfo(preferenceTitle(name), "No active session yet.")
 		}
 		id := m.session.ID
 		return func() tea.Msg {
@@ -96,7 +97,7 @@ func (m *UI) preferenceCommand(name, args string) tea.Cmd {
 				body += fmt.Sprintf("\nSelected model: %s/%s\nConfigured context window: %d tokens\nMessages recorded: %d\nInstruction files: %s\nAdditional directories: %s\n", selected.Provider, selected.Model, window, s.MessageCount, strings.Join(cfg.Options.ContextPaths, ", "), strings.Join(ws.AdditionalDirs(), ", "))
 				body += "Recorded token totals are cumulative usage, not the remaining context window.\n"
 			}
-			return preferenceResultMsg{title: strings.Title(name), body: body}
+			return preferenceResultMsg{title: preferenceTitle(name), body: body}
 		}
 	}
 	scope := config.ScopeWorkspace
@@ -175,7 +176,7 @@ func (m *UI) preferenceCommand(name, args string) tea.Cmd {
 				}
 			}
 		}
-		return preferenceResultMsg{title: strings.Title(name), body: body, changed: name, err: err}
+		return preferenceResultMsg{title: preferenceTitle(name), body: body, changed: name, err: err}
 	}
 }
 
@@ -278,4 +279,16 @@ func (m *UI) handleVimKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	}
 	m.updateLayoutAndSize()
 	return true, nil
+}
+
+// preferenceTitle capitalizes the first letter of every word in the
+// preference name for display.
+func preferenceTitle(s string) string {
+	words := strings.Fields(s)
+	for i, word := range words {
+		runes := []rune(word)
+		runes[0] = unicode.ToUpper(runes[0])
+		words[i] = string(runes)
+	}
+	return strings.Join(words, " ")
 }

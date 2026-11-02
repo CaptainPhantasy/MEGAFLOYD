@@ -26,6 +26,7 @@ func TestNativeToolLifecycleRecordsProvenSuccessFailureAndSchemaRejection(t *tes
 		{"invalid input", `{"command":7}`, fantasy.ToolResponse{}, hooks.EventActionRejected, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			conn, err := db.Connect(t.Context(), dir)
 			require.NoError(t, err)

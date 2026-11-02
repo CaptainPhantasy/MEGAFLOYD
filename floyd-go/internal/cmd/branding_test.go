@@ -2,9 +2,10 @@ package cmd
 
 import (
 	"bytes"
-	"github.com/spf13/cobra"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestCanonicalNestedHelpUsesOwnCommand(t *testing.T) {

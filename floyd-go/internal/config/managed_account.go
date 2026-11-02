@@ -50,6 +50,7 @@ func normalizeAccountProvider(id string) (string, error) {
 	}
 	return id, nil
 }
+
 func accountURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -57,6 +58,7 @@ func accountURL(raw string) (*url.URL, error) {
 	}
 	return u, nil
 }
+
 func (s *ConfigStore) accountMetadata(provider string) (ManagedAccount, error) {
 	id, err := normalizeAccountProvider(provider)
 	if err != nil {
@@ -96,6 +98,7 @@ func (s *ConfigStore) accountMetadata(provider string) (ManagedAccount, error) {
 	}
 	return a, nil
 }
+
 func accountManager(a ManagedAccount) (*megafloydauth.Manager, error) {
 	cfg := megafloydauth.FromEnv(nil)
 	cfg.OAuthHost = a.OAuthHost
@@ -112,6 +115,7 @@ func accountManager(a ManagedAccount) (*megafloydauth.Manager, error) {
 	}
 	return megafloydauth.NewManager(cfg)
 }
+
 func (s *ConfigStore) ManagedAccount(provider string) (ManagedAccount, error) {
 	a, err := s.accountMetadata(provider)
 	if err != nil {
@@ -141,6 +145,7 @@ func (s *ConfigStore) ManagedAccount(provider string) (ManagedAccount, error) {
 	}
 	return a, nil
 }
+
 func (s *ConfigStore) ManagedAccountToken(provider string) (*oauth.Token, error) {
 	a, err := s.accountMetadata(provider)
 	if err != nil {
@@ -162,6 +167,7 @@ func (s *ConfigStore) ManagedAccountToken(provider string) (*oauth.Token, error)
 	}
 	return token.OAuthToken(), nil
 }
+
 func (s *ConfigStore) RefreshManagedAccount(ctx context.Context, provider string) error {
 	a, err := s.accountMetadata(provider)
 	if err != nil {
@@ -177,6 +183,7 @@ func (s *ConfigStore) RefreshManagedAccount(ctx context.Context, provider string
 	}
 	return err
 }
+
 func (s *ConfigStore) SaveManagedAccount(req ManagedAccountLogin) error {
 	id, err := normalizeAccountProvider(req.Provider)
 	if err != nil {
@@ -273,6 +280,7 @@ func (s *ConfigStore) SaveManagedAccount(req ManagedAccountLogin) error {
 	}
 	return err
 }
+
 func (s *ConfigStore) LogoutManagedAccount(provider string) error {
 	a, err := s.accountMetadata(provider)
 	if err != nil {
@@ -316,6 +324,7 @@ func (s *ConfigStore) LogoutManagedAccount(provider string) error {
 		return nil
 	})
 }
+
 func (s *ConfigStore) updateManagedAccount(mutate func(*Config) map[string]any) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()

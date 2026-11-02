@@ -28,6 +28,7 @@ func (c *controllerV1) handleRegisterHandoffWeb(w http.ResponseWriter, r *http.R
 	}
 	jsonEncode(w, map[string]bool{"registered": true})
 }
+
 func (c *controllerV1) handleHandoff(w http.ResponseWriter, r *http.Request) {
 	ws, err := c.backend.GetWorkspace(r.PathValue("id"))
 	if err != nil {

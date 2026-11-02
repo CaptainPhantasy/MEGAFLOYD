@@ -2,10 +2,11 @@ package config
 
 import (
 	"encoding/json"
-	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestCanonicalPluginSnapshotPersistence(t *testing.T) {
@@ -23,7 +24,7 @@ func TestCanonicalPluginSnapshotPersistence(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &restored))
 	require.Equal(t, s.Config().Options.PluginRuntime, restored.Options.PluginRuntime)
 	block := filepath.Join(dir, "file")
-	require.NoError(t, os.WriteFile(block, []byte("occupied"), 0600))
+	require.NoError(t, os.WriteFile(block, []byte("occupied"), 0o600))
 	s.workspacePath = filepath.Join(block, "config.json")
 	err = s.UpdatePluginRuntime(func(cfg *Config) (map[string]any, error) {
 		cfg.Options.PluginRuntime = map[string]any{"changed": true}

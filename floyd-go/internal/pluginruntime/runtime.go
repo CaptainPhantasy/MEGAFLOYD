@@ -172,6 +172,7 @@ func Merge(cfg *config.Config, in Input, workingDir string, resolver func(string
 	cfg.Options.PluginRuntime = snapshot
 	return result, nil
 }
+
 func mergePaths(current, owned, next []string) ([]string, []string) {
 	out := slices.DeleteFunc(slices.Clone(current), func(p string) bool { return slices.Contains(owned, p) })
 	added := []string{}
@@ -186,6 +187,7 @@ func mergePaths(current, owned, next []string) ([]string, []string) {
 	}
 	return out, added
 }
+
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
 
 func Unchanged(cfg *config.Config, in Input) (bool, error) {
@@ -199,6 +201,7 @@ func Unchanged(cfg *config.Config, in Input) (bool, error) {
 	digest, err := fingerprint(in)
 	return err == nil && digest == prior.Digest, err
 }
+
 func fingerprint(in Input) (string, error) {
 	// Normalize absent and empty collections from JSON clients.
 	if len(in.SkillPaths) == 0 {

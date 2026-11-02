@@ -3,8 +3,6 @@ package model
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/legacy-ai/floyd/internal/config"
@@ -38,21 +36,4 @@ func (m *UI) selectNamedModel(name string, typ config.SelectedModelType) tea.Cmd
 		}
 		return result
 	}
-}
-
-func configuredProviderReport(cfg *config.Config) string {
-	if cfg == nil || cfg.Providers == nil {
-		return "No providers are configured. Use /model to configure a provider."
-	}
-	var sections []string
-	for id, provider := range cfg.Providers.Seq2() {
-		var body strings.Builder
-		fmt.Fprintf(&body, "%s (%s)\n", provider.Name, id)
-		for _, model := range provider.Models {
-			fmt.Fprintf(&body, "  %s/%s — %s\n", id, model.ID, model.Name)
-		}
-		sections = append(sections, body.String())
-	}
-	sort.Strings(sections)
-	return strings.Join(sections, "\n") + "\nSelect with /model provider/model or browse /model."
 }

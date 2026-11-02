@@ -1077,9 +1077,10 @@ func (m *UI) goalCommand(args string) tea.Cmd {
 	ws, sid := m.com.Workspace, m.session.ID
 	return func() tea.Msg {
 		operation := "status"
-		if action == goalStart {
+		switch action {
+		case goalStart:
 			operation = "start"
-		} else if action == goalCancelGoal {
+		case goalCancelGoal:
 			operation = "cancel"
 		}
 		state, err := ws.RalphGoal(context.Background(), sid, operation, objective)

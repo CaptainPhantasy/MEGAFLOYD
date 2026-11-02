@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/oauth"
 )
@@ -13,6 +14,7 @@ func (b *Backend) GetManagedAccount(wid, provider string) (config.ManagedAccount
 	}
 	return ws.Cfg.ManagedAccount(provider)
 }
+
 func (b *Backend) SaveManagedAccount(wid string, req config.ManagedAccountLogin) error {
 	ws, err := b.GetWorkspace(wid)
 	if err != nil {
@@ -24,6 +26,7 @@ func (b *Backend) SaveManagedAccount(wid string, req config.ManagedAccountLogin)
 	publishConfigChanged(ws)
 	return nil
 }
+
 func (b *Backend) LogoutManagedAccount(wid, provider string) error {
 	ws, err := b.GetWorkspace(wid)
 	if err != nil {
@@ -35,6 +38,7 @@ func (b *Backend) LogoutManagedAccount(wid, provider string) error {
 	publishConfigChanged(ws)
 	return nil
 }
+
 func (b *Backend) GetManagedAccountToken(wid, provider string) (*oauth.Token, error) {
 	ws, err := b.GetWorkspace(wid)
 	if err != nil {
@@ -42,6 +46,7 @@ func (b *Backend) GetManagedAccountToken(wid, provider string) (*oauth.Token, er
 	}
 	return ws.Cfg.ManagedAccountToken(provider)
 }
+
 func (b *Backend) RefreshManagedAccount(ctx context.Context, wid, provider string) error {
 	ws, err := b.GetWorkspace(wid)
 	if err != nil {

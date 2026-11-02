@@ -248,6 +248,7 @@ func TestWorkflowOwnsWorkerUntilRollbackFinishes(t *testing.T) {
 			name = "cancel rollback"
 		}
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			e := NewEngine(root, filepath.Join(root, "personal"))
 			defer e.broker.Shutdown()

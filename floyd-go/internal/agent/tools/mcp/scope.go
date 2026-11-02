@@ -44,9 +44,11 @@ func publicName(name string) string {
 	}
 	return name
 }
+
 func registryName(scope WorkspaceScope, name string) string {
 	return scopePrefix(scope) + publicName(name)
 }
+
 func inScope(name string, scope ...WorkspaceScope) bool {
 	prefix := scopePrefix(scope...)
 	if prefix == "" {
@@ -68,6 +70,7 @@ func scopedEntries[T any](entries iter.Seq2[string, T], scope ...WorkspaceScope)
 func GetStatesForWorkspace(directory string) map[string]ClientInfo {
 	return GetStates(directoryScope(directory))
 }
+
 func ResourcesForWorkspace(directory string) iter.Seq2[string, []*Resource] {
 	return Resources(directoryScope(directory))
 }
@@ -98,8 +101,10 @@ type initializationGate struct {
 	once    sync.Once
 }
 
-var gatesMu sync.Mutex
-var gates = map[string]*initializationGate{}
+var (
+	gatesMu sync.Mutex
+	gates   = map[string]*initializationGate{}
+)
 
 func initGate(scope ...WorkspaceScope) *initializationGate {
 	key := scopePrefix(scope...)
@@ -119,8 +124,10 @@ type reconcileGate struct {
 	dirty   bool
 }
 
-var reconcileGatesMu sync.Mutex
-var reconcileGates = map[string]*reconcileGate{}
+var (
+	reconcileGatesMu sync.Mutex
+	reconcileGates   = map[string]*reconcileGate{}
+)
 
 func scopeReconcileGate(cfg *config.ConfigStore) *reconcileGate {
 	key := scopePrefix(cfg)

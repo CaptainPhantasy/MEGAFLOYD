@@ -44,9 +44,11 @@ type Descriptor struct {
 
 type installation struct{ app, launcher, platform string }
 
-var webOrigins sync.Map
-var webStartMu sync.Mutex
-var ErrInvalidTarget = errors.New("handoff target must be web, tui, or desktop")
+var (
+	webOrigins       sync.Map
+	webStartMu       sync.Mutex
+	ErrInvalidTarget = errors.New("handoff target must be web, tui, or desktop")
+)
 
 func installed(executable string) (installation, error) {
 	if executable == "" {
@@ -86,10 +88,12 @@ func installed(executable string) (installation, error) {
 	}
 	return installation{}, errors.New("canonical MegaFloyd installation was not found beside this executable")
 }
+
 func isFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
 }
+
 func normalize(opts Options) (Options, error) {
 	if opts.CWD == "" || !filepath.IsAbs(opts.CWD) {
 		return opts, errors.New("handoff requires the absolute workspace directory")
@@ -124,6 +128,7 @@ func terminalCommand(opts Options, inst installation) string {
 	}
 	return "env MEGAFLOYD_HOME=" + quote(opts.Home) + " " + strings.Join(quoted, " ")
 }
+
 func descriptor(opts Options, inst installation) Descriptor {
 	link := url.URL{Scheme: "megafloyd", Host: "workspace"}
 	if opts.SessionID != "" {
@@ -164,6 +169,7 @@ func RegisterWeb(ctx context.Context, host, origin string) error {
 	webOrigins.Store(host, origin)
 	return nil
 }
+
 func localOrigin(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "http" || u.User != nil || u.Port() == "" || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
@@ -175,6 +181,7 @@ func localOrigin(raw string) (string, error) {
 	}
 	return u.Scheme + "://" + u.Host, nil
 }
+
 func readJSON(ctx context.Context, endpoint string, target any) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -193,6 +200,7 @@ func readJSON(ctx context.Context, endpoint string, target any) error {
 	}
 	return json.NewDecoder(io.LimitReader(rsp.Body, 64<<10)).Decode(target)
 }
+
 func probeWeb(ctx context.Context, origin string, opts Options, sessionCheck bool) error {
 	var identity struct {
 		Code int `json:"code"`
@@ -233,6 +241,7 @@ func probeWeb(ctx context.Context, origin string, opts Options, sessionCheck boo
 	}
 	return nil
 }
+
 func samePath(a, b string) bool {
 	if a == "" || b == "" {
 		return a == b
@@ -245,6 +254,7 @@ func samePath(a, b string) bool {
 	}
 	return filepath.Clean(a) == filepath.Clean(b)
 }
+
 func findWeb(ctx context.Context, opts Options) string {
 	candidates := []string{fmt.Sprintf("http://127.0.0.1:%d", preferredPort(opts))}
 	if origin, ok := webOrigins.Load(opts.Host); ok {
@@ -257,6 +267,7 @@ func findWeb(ctx context.Context, opts Options) string {
 	}
 	return ""
 }
+
 func ensureWeb(ctx context.Context, opts Options, inst installation) (string, error) {
 	webStartMu.Lock()
 	defer webStartMu.Unlock()
@@ -364,6 +375,7 @@ func Open(ctx context.Context, opts Options, target string) (Descriptor, error) 
 	result.Opened = true
 	return result, nil
 }
+
 func openURL(ctx context.Context, raw string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
@@ -379,6 +391,7 @@ func openURL(ctx context.Context, raw string) error {
 	}
 	return nil
 }
+
 func openTerminal(ctx context.Context, opts Options, command string) error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("open a terminal and run: %s", command)

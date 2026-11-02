@@ -9,8 +9,10 @@ import (
 	"charm.land/fantasy"
 )
 
-const deferredMCPSearchName = "mcp_tool_search"
-const deferredMCPCallName = "mcp_tool_call"
+const (
+	deferredMCPSearchName = "mcp_tool_search"
+	deferredMCPCallName   = "mcp_tool_call"
+)
 
 // deferredMCPTool keeps target schemas out of the initial model palette. Each
 // per-call copy contains only targets allowed by that call's captured settings.

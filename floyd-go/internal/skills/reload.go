@@ -1,8 +1,9 @@
 package skills
 
 import (
-	"github.com/legacy-ai/floyd/internal/pubsub"
 	"slices"
+
+	"github.com/legacy-ai/floyd/internal/pubsub"
 )
 
 // Reload retains the workspace broker so existing TUI/browser subscribers see
@@ -23,6 +24,7 @@ func (m *Manager) Reload(cfg DiscoveryConfig) {
 		PublishStates(states)
 	}
 }
+
 func (t *Tracker) Reload(active []*Skill) {
 	if t == nil {
 		return

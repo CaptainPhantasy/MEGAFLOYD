@@ -17,9 +17,13 @@ import (
 
 func TestCanonicalNonReasoningProviderOptions(t *testing.T) {
 	for _, provider := range []config.ProviderConfig{
-		{ID: "hyper", Type: openaicompat.Name}, {ID: "deepseek", Type: openaicompat.Name},
-		{ID: "anthropic", Type: anthropic.Name}, {ID: "openai", Type: openai.Name},
-		{ID: "google", Type: google.Name}, {ID: "openrouter", Type: openrouter.Name}, {ID: "vercel", Type: vercel.Name},
+		{ID: "hyper", Type: openaicompat.Name},
+		{ID: "deepseek", Type: openaicompat.Name},
+		{ID: "anthropic", Type: anthropic.Name},
+		{ID: "openai", Type: openai.Name},
+		{ID: "google", Type: google.Name},
+		{ID: "openrouter", Type: openrouter.Name},
+		{ID: "vercel", Type: vercel.Name},
 	} {
 		t.Run(provider.ID, func(t *testing.T) {
 			model := Model{CatwalkCfg: catwalk.Model{ID: "plain", CanReason: false}, ModelCfg: config.SelectedModel{

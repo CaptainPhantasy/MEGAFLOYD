@@ -49,7 +49,8 @@ func canonicalLateMCPRefresh(t *testing.T) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "gateway_probe", Description: "Inspect canonical gateway state"},
 		func(context.Context, *mcpsdk.CallToolRequest, struct {
 			Query string `json:"query"`
-		}) (*mcpsdk.CallToolResult, any, error) {
+		},
+		) (*mcpsdk.CallToolResult, any, error) {
 			executions.Add(1)
 			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{
 				&mcpsdk.TextContent{Text: "canonical gateway reached"},

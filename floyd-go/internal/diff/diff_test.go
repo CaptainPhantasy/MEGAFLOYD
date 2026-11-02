@@ -18,6 +18,7 @@ func TestGenerateDiffReportsActualLineChanges(t *testing.T) {
 		{"missing final newline", "old", "new", 1, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			output, added, removed := GenerateDiff(tc.before, tc.after, "/src/file.go")
 			require.Equal(t, tc.added, added, output)
 			require.Equal(t, tc.removed, removed, output)

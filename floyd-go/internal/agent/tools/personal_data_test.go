@@ -1,21 +1,22 @@
 package tools
 
 import (
+	"os"
+	"path/filepath"
+	"testing"
+
 	"charm.land/fantasy"
 	"github.com/legacy-ai/floyd/internal/megafloyd"
 	"github.com/legacy-ai/floyd/internal/workflow"
 	"github.com/stretchr/testify/require"
-	"os"
-	"path/filepath"
-	"testing"
 )
 
 func TestCanonicalPersonalToolsUsePrivateData(t *testing.T) {
 	t.Setenv(megafloyd.ActiveEnv, "1")
 	cwd := t.TempDir()
 	shared := filepath.Join(cwd, ".megafloyd")
-	require.NoError(t, os.MkdirAll(shared, 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(shared, "scratchpad.md"), []byte("OTHER_ACCOUNT"), 0600))
+	require.NoError(t, os.MkdirAll(shared, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(shared, "scratchpad.md"), []byte("OTHER_ACCOUNT"), 0o600))
 	var first string
 	for _, label := range []string{"ALICE_PRIVATE", "BOB_PRIVATE"} {
 		t.Setenv("MEGAFLOYD_HOME", t.TempDir())

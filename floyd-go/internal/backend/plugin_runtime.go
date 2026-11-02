@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+
 	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/pluginruntime"
 	"github.com/legacy-ai/floyd/internal/skills"
@@ -62,6 +63,7 @@ func (b *Backend) ReloadPlugins(ctx context.Context, wid string, in pluginruntim
 	}
 	return pluginRuntimeResult(ws, in, false), nil
 }
+
 func pluginRuntimeResult(ws *Workspace, in pluginruntime.Input, unchanged bool) PluginRuntimeResult {
 	result := PluginRuntimeResult{Reloaded: true, Unchanged: unchanged, MCP: map[string]string{}}
 	if ws.Skills != nil {

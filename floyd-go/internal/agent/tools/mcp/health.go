@@ -233,8 +233,10 @@ func (hm *HealthMonitor) GetRestartState(name string) (attempts int, lastError e
 	return 0, nil
 }
 
-var healthMonitorsMu sync.Mutex
-var healthMonitors = map[string]*HealthMonitor{}
+var (
+	healthMonitorsMu sync.Mutex
+	healthMonitors   = map[string]*HealthMonitor{}
+)
 
 func GetHealthMonitor(store *config.ConfigStore) *HealthMonitor {
 	key := scopePrefix(store)

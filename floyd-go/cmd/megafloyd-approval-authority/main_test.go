@@ -39,6 +39,7 @@ func TestAuthorityCLIRejectsInvalidIdentityBeforeStartup(t *testing.T) {
 		{"negative uid", []string{"--allow-uid", "-1"}, "invalid syntax", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			child := exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=^TestAuthorityEntryHelper$", "--"}, tc.args...)...)

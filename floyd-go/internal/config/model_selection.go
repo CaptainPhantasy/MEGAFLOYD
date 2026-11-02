@@ -1,11 +1,12 @@
 package config
 
 import (
-	"charm.land/catwalk/pkg/catwalk"
 	"encoding/json"
-	"github.com/qjebbs/go-jsons"
 	"slices"
 	"strings"
+
+	"charm.land/catwalk/pkg/catwalk"
+	"github.com/qjebbs/go-jsons"
 )
 
 // persistedModelSelection keeps explicit resets when workspace configuration

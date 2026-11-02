@@ -10,13 +10,10 @@ import (
 	"time"
 
 	"github.com/legacy-ai/floyd/internal/agent"
-	"github.com/legacy-ai/floyd/internal/app"
 	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/permission"
 	"github.com/spf13/cobra"
 )
-
-type appWorkspace interface{ App() *app.App }
 
 var (
 	swarmCmd    = &cobra.Command{Use: "swarm", Short: "Dispatch tasks through named agent profiles", Long: "Run configured agent profiles in independent sessions, with their selected models and tool restrictions. Progress and cancellation work in both local and server mode."}
