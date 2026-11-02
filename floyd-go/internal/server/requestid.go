@@ -109,10 +109,20 @@ func (w *metricsResponseWriter) statusCodeLabel() string {
 }
 
 // Flush forwards to the underlying writer so streaming handlers (SSE
-// event endpoints) keep working through the wrapper.
+// event endpoints) keep working through the wrapper. The underlying
+// chain can nest several non-flushing wrappers, so the search walks
+// Unwrap until it finds a [http.Flusher].
 func (w *metricsResponseWriter) Flush() {
-	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
-		flusher.Flush()
+	for writer := w.ResponseWriter; writer != nil; {
+		if flusher, ok := writer.(http.Flusher); ok {
+			flusher.Flush()
+			return
+		}
+		unwrapper, ok := writer.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return
+		}
+		writer = unwrapper.Unwrap()
 	}
 }
 
