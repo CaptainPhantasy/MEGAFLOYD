@@ -1,0 +1,26 @@
+name: Feature Request
+description: Propose a new feature for MegaFloyd
+labels:
+  - enhancement
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting a feature:
+        1. Search existing issues for similar proposals; upvote instead of opening a new one.
+        2. Features are discussed and decided in issues; do not open a feature PR unless a maintainer explicitly invites one.
+
+  - type: textarea
+    id: feature
+    attributes:
+      label: What feature would you like to see?
+      description: Describe the problem you are trying to solve, not only the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional information
+      description: Anything else the maintainers should know (workarounds, prior art, constraints).
