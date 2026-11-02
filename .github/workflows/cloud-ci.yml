@@ -69,7 +69,11 @@ jobs:
         uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
         with:
           working-directory: floyd-go
-          version: v2.6
+          version: v2.6.2
+          # Build from source so the linter binary matches the module's
+          # Go 1.26 toolchain; the prebuilt release binary targets an
+          # older Go and refuses the config.
+          install-mode: goinstall
           # Enforce the curated linters on changed code first; the
           # pre-existing repo-wide debt is retired separately.
           args: --timeout=10m --new-from-rev=origin/main
