@@ -15,6 +15,11 @@ export function extractEnvelopeCode(payload: unknown): number | undefined {
 export function registerRequestLogging(app: FastifyInstance): void {
   const codes = new WeakMap<FastifyReply, number>();
 
+  app.addHook('onRequest', (req, reply, done) => {
+    reply.header('x-request-id', req.id);
+    done();
+  });
+
   app.addHook('onSend', (req, reply, payload, done) => {
     const code = extractEnvelopeCode(payload);
     if (code !== undefined) {
