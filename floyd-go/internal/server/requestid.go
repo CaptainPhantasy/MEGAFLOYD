@@ -107,3 +107,17 @@ func (w *metricsResponseWriter) WriteHeader(code int) {
 func (w *metricsResponseWriter) statusCodeLabel() string {
 	return strconv.Itoa(w.statusCode)
 }
+
+// Flush forwards to the underlying writer so streaming handlers (SSE
+// event endpoints) keep working through the wrapper.
+func (w *metricsResponseWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach Flush, Hijack, and other
+// extended interfaces on the underlying writer.
+func (w *metricsResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
