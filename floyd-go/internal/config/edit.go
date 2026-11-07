@@ -36,6 +36,13 @@ func EditField(ctx context.Context, cwd, dataDir string, scope Scope, key string
 		if err := decoder.Decode(&validated); err != nil {
 			return nil, fmt.Errorf("invalid configuration: %w", err)
 		}
+		if validated.Permissions != nil {
+			switch validated.Permissions.Mode {
+			case "", "manual", "yolo", "auto":
+			default:
+				return nil, fmt.Errorf("invalid permission mode %q", validated.Permissions.Mode)
+			}
+		}
 		if err := validated.ValidateHooks(); err != nil {
 			return nil, err
 		}
