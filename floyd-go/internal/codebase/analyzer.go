@@ -241,7 +241,7 @@ func AnalyzeProjectDependencies(directory string) (map[string]string, error) {
 	if fsops.FileExists(gemfile) {
 		content, err := fsops.ReadTextFile(gemfile)
 		if err == nil {
-			gemRegex := regexp.MustCompile(`^\s*gem\s+['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]+)['"]\s*)?`)
+			gemRegex := regexp.MustCompile(`(?m)^\s*gem\s+['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]+)['"]\s*)?`)
 			matches := gemRegex.FindAllStringSubmatch(content, -1)
 			for _, match := range matches {
 				name := match[1]

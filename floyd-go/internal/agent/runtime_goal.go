@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+
 	"github.com/legacy-ai/floyd/internal/goal"
 )
 
@@ -17,5 +18,5 @@ func (a *sessionAgent) goalContinuation(ctx context.Context, run *goal.Run, call
 	if prompt == "" {
 		return nil
 	}
-	return &SessionAgentCall{SessionID: call.SessionID, Prompt: prompt, RunSettings: call.RunSettings.clone(), MaxOutputTokens: call.MaxOutputTokens, ProviderOptions: call.ProviderOptions, Temperature: call.Temperature, TopP: call.TopP, TopK: call.TopK, FrequencyPenalty: call.FrequencyPenalty, PresencePenalty: call.PresencePenalty, NonInteractive: call.NonInteractive, OnAuthRefresh: call.OnAuthRefresh}
+	return &SessionAgentCall{SessionID: call.SessionID, Prompt: prompt, RunSettings: call.RunSettings.clone(), MaxOutputTokens: call.MaxOutputTokens, ProviderOptions: call.ProviderOptions, Temperature: call.Temperature, TopP: call.TopP, TopK: call.TopK, FrequencyPenalty: call.FrequencyPenalty, PresencePenalty: call.PresencePenalty, NonInteractive: call.NonInteractive, NoHumanInteraction: call.NoHumanInteraction, OnAuthRefresh: call.OnAuthRefresh}
 }

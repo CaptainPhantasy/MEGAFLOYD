@@ -13,10 +13,9 @@ import (
 )
 
 var schemaCmd = &cobra.Command{
-	Use:    "schema",
-	Short:  "Generate JSON schema for configuration",
-	Long:   "Generate JSON schema for the MegaFloyd configuration file",
-	Hidden: true,
+	Use:   "schema",
+	Short: "Generate JSON schema for configuration",
+	Long:  "Generate JSON schema for the MegaFloyd configuration file",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reflector := new(jsonschema.Reflector)
 		schema := reflector.Reflect(&config.Config{})

@@ -44,15 +44,18 @@ if [[ ! -x $bin ]]; then
 	exit 1
 fi
 
-# The identity check requires the executable to be named megafloyd, so test
-# a symlink with the canonical name even when the artifact was built
-# elsewhere.
-tmpdir=$(mktemp -d)
-trap 'rm -rf "$tmpdir"' EXIT
+# Keep canonical launchers in place: shell launchers locate their installed
+# release relative to $0. Only differently named native build artifacts need
+# an alias for the executable identity check.
 bin_dir=$(cd -- "$(dirname "$bin")" && pwd -P)
 bin_name=$(basename "$bin")
-ln -s "$bin_dir/$bin_name" "$tmpdir/megafloyd"
-bin=$tmpdir/megafloyd
+bin=$bin_dir/$bin_name
+if [[ $bin_name != megafloyd ]]; then
+	tmpdir=$(mktemp -d)
+	trap 'rm -rf "$tmpdir"' EXIT
+	ln -s "$bin" "$tmpdir/megafloyd"
+	bin=$tmpdir/megafloyd
+fi
 
 run_check() {
 	local output status
@@ -79,7 +82,7 @@ run_check() {
 printf '==> %s --version\n' "$bin"
 version_output=$(run_check --version)
 printf '%s\n' "$version_output"
-if [[ $version_output != megafloyd* ]]; then
+if [[ $version_output != 'MegaFloyd version '* && $version_output != 'megafloyd version '* ]]; then
 	printf 'FAIL: version does not name megafloyd: %s\n' "$version_output" >&2
 	exit 1
 fi

@@ -249,7 +249,7 @@ func (s *Server) installHandler() {
 	mux.Handle("/v1/docs/", httpswagger.WrapHandler)
 	s.h = &http.Server{
 		Protocols: &p,
-		Handler:   s.recoverHandler(s.loggingHandler(mux)),
+		Handler:   s.recoverHandler(s.requestIDHandler(s.loggingHandler(s.metricsHandler(mux)))),
 	}
 }
 
@@ -303,6 +303,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) logDebug(r *http.Request, msg string, args ...any) {
 	if s.logger != nil {
 		s.logger.With(
+			slog.String("request_id", requestID(r)),
 			slog.String("method", r.Method),
 			slog.String("url", r.URL.String()),
 			slog.String("remote_addr", r.RemoteAddr),
@@ -313,6 +314,7 @@ func (s *Server) logDebug(r *http.Request, msg string, args ...any) {
 func (s *Server) logError(r *http.Request, msg string, args ...any) {
 	if s.logger != nil {
 		s.logger.With(
+			slog.String("request_id", requestID(r)),
 			slog.String("method", r.Method),
 			slog.String("url", r.URL.String()),
 			slog.String("remote_addr", r.RemoteAddr),

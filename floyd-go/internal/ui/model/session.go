@@ -18,14 +18,18 @@ import (
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/styles"
 	"github.com/legacy-ai/floyd/internal/ui/util"
+	"github.com/legacy-ai/floyd/internal/workspace"
 )
 
 // loadSessionMsg is a message indicating that a session and its files have
 // been loaded.
 type loadSessionMsg struct {
-	session   *session.Session
-	files     []SessionFile
-	readFiles []string
+	session    *session.Session
+	files      []SessionFile
+	readFiles  []string
+	workspace  workspace.Workspace
+	generation uint64
+	err        error
 }
 
 // lspFilePaths returns deduplicated file paths from both modified and read
@@ -65,34 +69,36 @@ type SessionFile struct {
 // It returns a tea.Cmd that, when executed, fetches the session data and
 // returns a sessionFilesLoadedMsg containing the processed session files.
 //
-// The returned batch also reports the new current-session selection to
-// the workspace so the server can update its per-client presence map.
-// That report is fire-and-forget: errors are logged at debug and the
-// UI never blocks on the call.
+// The accepted result reports the current-session selection. Older responses
+// cannot replace a later selection, and each read uses its original workspace.
 func (m *UI) loadSession(sessionID string) tea.Cmd {
-	load := func() tea.Msg {
-		session, err := m.com.Workspace.GetSession(context.Background(), sessionID)
+	ws := m.com.Workspace
+	m.sessionLoadGeneration++
+	generation := m.sessionLoadGeneration
+	return func() tea.Msg {
+		result := loadSessionMsg{workspace: ws, generation: generation}
+		session, err := ws.GetSession(context.Background(), sessionID)
 		if err != nil {
-			return util.ReportError(err)
+			result.err = err
+			return result
 		}
 
-		sessionFiles, err := m.loadSessionFiles(sessionID)
+		sessionFiles, err := loadWorkspaceSessionFiles(ws, sessionID)
 		if err != nil {
-			return util.ReportError(err)
+			result.err = err
+			return result
 		}
 
-		readFiles, err := m.com.Workspace.FileTrackerListReadFiles(context.Background(), sessionID)
+		readFiles, err := ws.FileTrackerListReadFiles(context.Background(), sessionID)
 		if err != nil {
 			slog.Error("Failed to load read files for session", "error", err)
 		}
 
-		return loadSessionMsg{
-			session:   &session,
-			files:     sessionFiles,
-			readFiles: readFiles,
-		}
+		result.session = &session
+		result.files = sessionFiles
+		result.readFiles = readFiles
+		return result
 	}
-	return tea.Batch(load, m.reportCurrentSession(sessionID))
 }
 
 // reportCurrentSession returns a fire-and-forget tea.Cmd that
@@ -101,8 +107,9 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 // for server-side presence tracking, not correctness-critical
 // state.
 func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
+	ws := m.com.Workspace
 	return func() tea.Msg {
-		if err := m.com.Workspace.SetCurrentSession(context.Background(), sessionID); err != nil {
+		if err := ws.SetCurrentSession(context.Background(), sessionID); err != nil {
 			slog.Debug("Failed to report current session", "session_id", sessionID, "error", err)
 		}
 		return nil
@@ -110,7 +117,11 @@ func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
 }
 
 func (m *UI) loadSessionFiles(sessionID string) ([]SessionFile, error) {
-	files, err := m.com.Workspace.ListSessionHistory(context.Background(), sessionID)
+	return loadWorkspaceSessionFiles(m.com.Workspace, sessionID)
+}
+
+func loadWorkspaceSessionFiles(ws workspace.Workspace, sessionID string) ([]SessionFile, error) {
+	files, err := ws.ListSessionHistory(context.Background(), sessionID)
 	if err != nil {
 		return nil, err
 	}

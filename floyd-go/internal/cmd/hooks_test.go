@@ -130,6 +130,9 @@ func hooksTestCommand(cwd, host string) (*cobra.Command, *bytes.Buffer) {
 	command.PersistentFlags().String("cwd", cwd, "")
 	command.PersistentFlags().String("data-dir", "", "")
 	command.PersistentFlags().String("host", host, "")
+	if host != "" {
+		_ = command.PersistentFlags().Set("host", host)
+	}
 	command.AddCommand(newHooksCommand())
 	output := new(bytes.Buffer)
 	command.SetOut(output)

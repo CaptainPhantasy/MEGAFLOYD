@@ -20,6 +20,12 @@ type PriorityQueue[T any] struct {
 	mu    sync.RWMutex
 }
 
+// lockedHeap is used only while the queue's write lock is held. The heap
+// package calls Len internally, so it must not acquire that lock again.
+type lockedHeap[T any] struct{ *PriorityQueue[T] }
+
+func (h lockedHeap[T]) Len() int { return len(h.items) }
+
 // New creates a new empty priority queue.
 func New[T any]() *PriorityQueue[T] {
 	pq := &PriorityQueue[T]{
@@ -80,7 +86,7 @@ func (pq *PriorityQueue[T]) PushValue(value T, priority int) {
 		Value:    value,
 		Priority: priority,
 	}
-	heap.Push(pq, item)
+	heap.Push(lockedHeap[T]{pq}, item)
 }
 
 // PopValue removes and returns the highest priority item (lowest priority number).
@@ -95,7 +101,7 @@ func (pq *PriorityQueue[T]) PopValue() (T, bool) {
 		return zero, false
 	}
 
-	item := heap.Pop(pq).(*Item[T])
+	item := heap.Pop(lockedHeap[T]{pq}).(*Item[T])
 	return item.Value.(T), true
 }
 

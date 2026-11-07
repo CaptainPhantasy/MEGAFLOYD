@@ -42,10 +42,10 @@ func TestCanonicalSettingsStayWithAcceptedQueuedRun(t *testing.T) {
 	cfg := config.NewTestStoreWithWorkingDir(&config.Config{Options: &config.Options{DataDirectory: filepath.Join(env.workingDir, ".megafloyd")}}, env.workingDir)
 	c := &coordinator{cfg: cfg, sessions: env.sessions, currentAgent: sa}
 	profileDir := filepath.Join(env.workingDir, ".megafloyd", "agents")
-	require.NoError(t, os.MkdirAll(profileDir, 0700))
+	require.NoError(t, os.MkdirAll(profileDir, 0o700))
 	profilePath := filepath.Join(profileDir, "canonical-profile.md")
 	profile := func(prompt string) {
-		require.NoError(t, os.WriteFile(profilePath, []byte("---\nname: canonical-profile\ndescription: Canonical settings test\nallowed_tools: [alpha, mcp_native, mcp_gateway_read, mcp_other_read]\n---\n\n"+prompt+"\n"), 0600))
+		require.NoError(t, os.WriteFile(profilePath, []byte("---\nname: canonical-profile\ndescription: Canonical settings test\nallowed_tools: [alpha, mcp_native, mcp_gateway_read, mcp_other_read]\n---\n\n"+prompt+"\n"), 0o600))
 	}
 	profile("PROFILE_BEFORE")
 	mutator := env.sessions.(session.MetadataMutator)

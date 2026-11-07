@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -161,10 +162,8 @@ func TestRunStream_ErrorRunComplete(t *testing.T) {
 	require.Contains(t, err.Error(), "model temporarily unavailable")
 }
 
-// TestRunStream_CancelledRunCompleteIsClean ensures a cancelled
-// run (e.g. Ctrl+C while `floyd run` waits) exits cleanly rather
-// than reporting the cancellation as a failure.
-func TestRunStream_CancelledRunCompleteIsClean(t *testing.T) {
+// Cancellation must not be reported as successful completion to scripts.
+func TestRunStream_CancelledRunCompleteReturnsCancellation(t *testing.T) {
 	t.Parallel()
 
 	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
@@ -174,7 +173,7 @@ func TestRunStream_CancelledRunCompleteIsClean(t *testing.T) {
 		Cancelled: true,
 	}}, nil)
 	require.True(t, done)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 // TestRunStream_LeadingWhitespaceTrimmedOnce mirrors the

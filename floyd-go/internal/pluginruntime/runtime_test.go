@@ -20,13 +20,13 @@ func TestCanonicalPluginReloadOwnsOnlyItsContributions(t *testing.T) {
 	dir := t.TempDir()
 	skillRoot := filepath.Join(dir, "skills")
 	skillDir := filepath.Join(skillRoot, "fixture")
-	require.NoError(t, os.MkdirAll(skillDir, 0755))
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 	instruction := "Use this fixture's exact guidance: $(false) and 'quoted text'."
-	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: fixture\ndescription: Canonical plugin fixture\n---\n\n"+instruction+"\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: fixture\ndescription: Canonical plugin fixture\n---\n\n"+instruction+"\n"), 0o600))
 	pluginRoot := filepath.Join(dir, "plugins")
-	require.NoError(t, os.MkdirAll(pluginRoot, 0755))
+	require.NoError(t, os.MkdirAll(pluginRoot, 0o755))
 	ownRoot := filepath.Join(dir, "own-skills")
-	require.NoError(t, os.MkdirAll(ownRoot, 0755))
+	require.NoError(t, os.MkdirAll(ownRoot, 0o755))
 	cfg := &config.Config{Options: &config.Options{SkillsPaths: []string{ownRoot}}, Hooks: map[string][]config.HookConfig{"Stop": {{Name: "owner-hook", Command: "printf owner"}}}, MCP: config.MCPs{"owner-server": {Command: "owner-command", Disabled: true}}}
 	input := Input{SkillPaths: []string{skillRoot, ownRoot}, PluginPaths: []string{pluginRoot}, SystemPrompts: []SystemPrompt{{PluginID: "fixture", Content: "Enabled plugin guidance"}}, SessionStarts: []SessionStart{{PluginID: "fixture", SkillName: "fixture"}}, MCP: config.MCPs{"plugin-server": {Command: "plugin-command", Disabled: true}}}
 	same, err := Unchanged(cfg, Input{})
@@ -44,7 +44,7 @@ func TestCanonicalPluginReloadOwnsOnlyItsContributions(t *testing.T) {
 	_, err = Merge(cfg, input, dir, nil)
 	require.NoError(t, err)
 	require.Same(t, nativeToken, cfg.MCP["plugin-server"].OAuthToken, "refreshing plugin guidance must retain native MCP login")
-	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "extra.md"), []byte("new plugin content"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "extra.md"), []byte("new plugin content"), 0o600))
 	same, err = Unchanged(cfg, input)
 	require.NoError(t, err)
 	require.False(t, same)
@@ -99,7 +99,7 @@ func TestApplyCompletesInsideConfigTransaction(t *testing.T) {
 	store, err := config.Load(t.TempDir(), t.TempDir(), false)
 	require.NoError(t, err)
 	pluginRoot := filepath.Join(t.TempDir(), "plugins")
-	require.NoError(t, os.MkdirAll(pluginRoot, 0755))
+	require.NoError(t, os.MkdirAll(pluginRoot, 0o755))
 
 	done := make(chan error, 1)
 	go func() {

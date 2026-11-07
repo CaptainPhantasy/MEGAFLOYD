@@ -1,11 +1,11 @@
 package model
 
 import (
+	"context"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/legacy-ai/floyd/internal/message"
-	"github.com/legacy-ai/floyd/internal/plan"
 )
 
 // planRefreshDelay collapses bursts of agent tool-message events into one
@@ -67,13 +67,9 @@ func (m *UI) refreshPlanState(sessionID string) tea.Cmd {
 	if sessionID == "" || m.com == nil {
 		return nil
 	}
-	cfg := m.com.Config()
-	if cfg == nil || cfg.Options == nil || cfg.Options.DataDirectory == "" {
-		return nil
-	}
-	dataDir := cfg.Options.DataDirectory
+	ws := m.com.Workspace
 	return func() tea.Msg {
-		status, err := plan.NewService(dataDir).Status(sessionID)
+		status, err := ws.Plan(context.Background(), sessionID, nil)
 		if err != nil {
 			return planStatusMsg{SessionID: sessionID, Err: err}
 		}

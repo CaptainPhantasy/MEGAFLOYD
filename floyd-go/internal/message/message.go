@@ -174,6 +174,7 @@ func (s *service) Delete(ctx context.Context, id string) error {
 		delete(s.pending, id)
 	}
 	s.mu.Unlock()
+	message.RunID = RunIDFromContext(ctx)
 	// Clone the message before publishing to avoid race conditions with
 	// concurrent modifications to the Parts slice.
 	s.Publish(pubsub.DeletedEvent, message.Clone())
@@ -243,6 +244,9 @@ func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) e
 // synchronously (terminal updates, debounce <= 0) or buffers it until
 // the next debounce tick. See [Service] for the contract.
 func (s *service) Update(ctx context.Context, msg Message) error {
+	if id := RunIDFromContext(ctx); id != "" {
+		msg.RunID = id
+	}
 	cloned := msg.Clone()
 
 	// Zero or negative debounce: flush every update synchronously. This

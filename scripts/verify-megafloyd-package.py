@@ -43,7 +43,8 @@ def main():
         assert os.readlink(prefix / "current") == expected_link
         assert sentinel.read_text() == "preserve this unrelated file\n"
         version = subprocess.check_output([str(prefix / "bin/megafloyd"), "--version"], text=True).strip()
-        assert version == "megafloyd version " + release["version"]
+        assert version in ("MegaFloyd version " + release["version"],
+                           "megafloyd version " + release["version"])
         assert os.readlink(prefix / "MEGAFLOYD.app") == "current/MEGAFLOYD.app"
         results.append("actual package installs all components and launcher reports the release version")
         receipt_before = (prefix / "install-receipt.json").read_bytes()

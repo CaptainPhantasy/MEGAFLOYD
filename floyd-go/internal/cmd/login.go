@@ -87,8 +87,11 @@ func loginHyper(ws workspace.Workspace, force bool) error {
 		return err
 	}
 
-	clipboard.WriteText(resp.UserCode)
-	fmt.Println("The following code should be on clipboard already:")
+	if err := clipboard.WriteText(resp.UserCode); err != nil {
+		fmt.Println("Copy the following authorization code:")
+	} else {
+		fmt.Println("Authorization code copied to clipboard:")
+	}
 
 	fmt.Println()
 	lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(resp.UserCode))
@@ -165,9 +168,12 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 			return err
 		}
 
-		clipboard.WriteText(dc.UserCode)
 		fmt.Println()
-		fmt.Println("The following code should be on clipboard already:")
+		if err := clipboard.WriteText(dc.UserCode); err != nil {
+			fmt.Println("Copy the following authorization code:")
+		} else {
+			fmt.Println("Authorization code copied to clipboard:")
+		}
 		fmt.Println()
 		lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
 		fmt.Println()

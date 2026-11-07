@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/legacy-ai/floyd/internal/agent/tools"
 	"github.com/legacy-ai/floyd/internal/deletionguard"
+	"github.com/legacy-ai/floyd/internal/permission"
 	"github.com/legacy-ai/floyd/internal/question"
 	"github.com/legacy-ai/floyd/internal/shell"
 )
@@ -292,6 +293,9 @@ type questionConfirmer struct {
 }
 
 func (c questionConfirmer) Confirm(ctx context.Context, req deletionguard.ConfirmationRequest) (bool, error) {
+	if permission.IsNonInteractive(ctx) {
+		return false, permission.ErrInteractionRequired
+	}
 	if c.questions == nil {
 		return false, errors.New("no question service is available")
 	}

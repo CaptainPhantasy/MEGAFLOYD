@@ -3,9 +3,6 @@ package config
 import (
 	"context"
 	"encoding/json"
-	"github.com/legacy-ai/floyd/internal/csync"
-	"github.com/legacy-ai/floyd/internal/megafloydauth"
-	"github.com/legacy-ai/floyd/internal/oauth"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +11,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/legacy-ai/floyd/internal/csync"
+	"github.com/legacy-ai/floyd/internal/megafloydauth"
+	"github.com/legacy-ai/floyd/internal/oauth"
 )
 
 func canonicalAccountStore(t *testing.T, base string) (*ConfigStore, SelectedModel) {
@@ -34,6 +35,7 @@ func canonicalAccountStore(t *testing.T, base string) (*ConfigStore, SelectedMod
 	s.workspacePath = filepath.Join(dir, ".megafloyd", "floyd.json")
 	return s, selected
 }
+
 func TestCanonicalManagedAccountUsesNativeCredentialSlot(t *testing.T) {
 	s, selected := canonicalAccountStore(t, "https://company.example")
 	token := &oauth.Token{AccessToken: "account-access-fixture", RefreshToken: "account-refresh-fixture", ExpiresAt: time.Now().Add(time.Hour).Unix(), ExpiresIn: 3600, Client: &oauth.OAuthClient{ClientID: megafloydauth.DefaultClientID, TokenURL: "https://company.example/api/oauth/token"}}
@@ -100,6 +102,7 @@ func TestCanonicalManagedAccountUsesNativeCredentialSlot(t *testing.T) {
 		t.Fatal("logout changed model selection")
 	}
 }
+
 func TestCanonicalManagedAccountRefreshesNativeSlot(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +137,7 @@ func TestCanonicalManagedAccountRefreshesNativeSlot(t *testing.T) {
 		t.Fatal("refresh duplicated token in config")
 	}
 }
+
 func TestCanonicalManagedAccountFailedConfigWriteRollsBackSlot(t *testing.T) {
 	s, selected := canonicalAccountStore(t, "https://company.example")
 	s.globalDataPath = t.TempDir()
@@ -152,6 +156,7 @@ func TestCanonicalManagedAccountFailedConfigWriteRollsBackSlot(t *testing.T) {
 		t.Fatal("failed login changed model selection")
 	}
 }
+
 func TestCanonicalAdditionalDirectoryPersistence(t *testing.T) {
 	dir := t.TempDir()
 	ephemeral := t.TempDir()

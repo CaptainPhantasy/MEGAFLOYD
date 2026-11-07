@@ -191,9 +191,10 @@ type (
 
 // UI represents the main user interface model.
 type UI struct {
-	com          *common.Common
-	session      *session.Session
-	sessionFiles []SessionFile
+	com                   *common.Common
+	session               *session.Session
+	sessionLoadGeneration uint64
+	sessionFiles          []SessionFile
 
 	// keeps track of read files while we don't have a session id
 	sessionFileReads []string
@@ -226,8 +227,9 @@ type UI struct {
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
 
-	dialog *dialog.Overlay
-	status *Status
+	dialog            *dialog.Overlay
+	status            *Status
+	editorPreferences editorPreferencesState
 
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
@@ -267,7 +269,8 @@ type UI struct {
 	textareaMouseSelecting bool
 
 	// Active inline editor replaces the textarea when non-nil.
-	activeInline dialog.InlineEditor
+	activeInline  dialog.InlineEditor
+	questionQueue []question.Request
 	// inlineCursor stores the cursor from the last inline editor
 	// Draw call, used by the cursor positioning logic below.
 	inlineCursor *tea.Cursor
@@ -569,6 +572,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// enable transparent mode
 	ui.isTransparent = opts.TUI.IsTransparent()
 
+	ui.applyTerminalPreferences()
 	return ui
 }
 
@@ -765,6 +769,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update terminal capabilities
 	m.caps.Update(msg)
 	switch msg := msg.(type) {
+	case OpenSessionsMsg:
+		cmds = append(cmds, m.openSessionsDialog())
+	case questionSubmissionResultMsg:
+		cmds = append(cmds, m.handleQuestionSubmissionResult(msg))
 	case planRefreshTickMsg:
 		if cmd := m.handlePlanRefreshTick(msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -772,6 +780,19 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case planStatusMsg:
 		if m.session != nil && msg.SessionID == m.session.ID && msg.Err == nil {
 			m.status.SetPlanActive(msg.Active)
+		}
+	case swarmStatusMsg:
+		if m.session != nil && msg.SessionID == m.session.ID && msg.Err == nil {
+			m.status.SetSwarmActive(msg.State.Active)
+		}
+		if msg.Err != nil {
+			cmds = append(cmds, util.ReportError(msg.Err))
+		}
+		if msg.Report != "" {
+			cmds = append(cmds, util.ReportInfo(msg.Report))
+		}
+		if msg.Body != "" {
+			cmds = append(cmds, m.showInfo("Swarm", msg.Body))
 		}
 	case terminalReadyMsg:
 		if msg.Err != nil {
@@ -792,8 +813,44 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-	case builtinResultMsg:
+	case paletteCommandResultMsg:
+		m.restorePaletteParent(msg)
+		return m.Update(msg.Result)
+	case preferenceResultMsg:
+		cmds = append(cmds, m.applyPreferenceResult(msg))
+	case projectInitializationPromptMsg:
+		cmds = append(cmds, m.startProjectInitialization(msg))
+	case namedSwarmUpdateMsg:
+		cmds = append(cmds, m.updateNamedSwarm(msg))
+	case namedModelAppliedMsg:
 		if msg.Err != nil {
+			cmds = append(cmds, util.ReportError(msg.Err))
+		} else {
+			if msg.Type == config.SelectedModelTypeLarge {
+				m.applyThemeForProvider(msg.Provider)
+			}
+			cmds = append(cmds, util.ReportInfo(string(msg.Type)+" model changed to "+msg.Name))
+		}
+		m.invalidateBusyCaches()
+		if cmd := m.dispatchBusyRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case builtinResultMsg:
+		if m.session != nil && msg.SessionID == m.session.ID {
+			if msg.SessionTitle != nil {
+				m.session.Title = *msg.SessionTitle
+			}
+			if msg.PlanActive != nil {
+				m.status.SetPlanActive(*msg.PlanActive)
+			}
+			if msg.RefreshMessages {
+				cmds = append(cmds, m.setSessionMessages(msg.Messages))
+			}
+		}
+		if msg.Err != nil {
+			if info, ok := m.dialog.DialogLast().(*dialog.Info); ok && info.Title() == "Loading" {
+				m.dialog.CloseFrontDialog()
+			}
 			cmds = append(cmds, util.ReportError(msg.Err))
 		}
 		if msg.Info != "" {
@@ -805,10 +862,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.ReloadTUI {
 			m.reapplyTUI()
 		}
-		if msg.Title != "" {
+		if msg.Title != "" && msg.Err == nil {
 			cmds = append(cmds, m.showInfo(msg.Title, msg.Body))
 		}
-		if msg.Send != "" {
+		if msg.Send != "" && (msg.SessionID == "" || m.session != nil && msg.SessionID == m.session.ID) {
 			cmds = append(cmds, m.sendMessage(msg.Send))
 		}
 	case tea.EnvMsg:
@@ -871,6 +928,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case loadSessionMsg:
+		if msg.workspace != nil && (msg.workspace != m.com.Workspace || msg.generation != m.sessionLoadGeneration) {
+			break
+		}
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		if msg.workspace != nil {
+			cmds = append(cmds, m.reportCurrentSession(msg.session.ID))
+		}
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
@@ -882,6 +949,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// instead of carrying the previous session's pill.
 		m.status.SetPlanActive(false)
 		cmds = append(cmds, m.refreshPlanState(msg.session.ID))
+		// Swarm mode is per session too.
+		m.status.SetSwarmActive(false)
+		cmds = append(cmds, m.refreshSwarmState(msg.session.ID))
 		// Session switch: the memoized busy state and queued prompts
 		// belong to the previous session. Drop them and re-fetch
 		// off-thread so the queue pill and esc behavior track the new
@@ -1201,11 +1271,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeInline != nil {
 			if clickable, ok := m.activeInline.(dialog.MouseClickableEditor); ok {
 				if done, handled := clickable.HandleMouseClick(msg.X, msg.Y); handled {
+					if qf, ok := m.activeInline.(*dialog.QuestionForm); ok {
+						cmds = append(cmds, qf.TakeCommand())
+					}
 					if done {
 						m.activeInline = nil
 						m.textarea.Focus()
-						m.updateLayoutAndSize()
+						m.openNextQuestion()
 					}
+					m.updateLayoutAndSize()
 					return m, tea.Batch(cmds...)
 				}
 			}
@@ -1631,15 +1705,15 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		switch msg.Role {
 		case message.User:
 			m.lastUserMessageTime = msg.CreatedAt
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir(), m.outputStyle())...)
 		case message.Assistant:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir(), m.outputStyle())...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir(), m.outputStyle())...)
 		}
 	}
 
@@ -1740,7 +1814,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		// Extract nested tool items.
 		var nestedTools []chat.ToolMessageItem
 		for _, nestedMsg := range nestedMsgPtrs {
-			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap, m.com.Workspace.WorkingDir())
+			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap, m.com.Workspace.WorkingDir(), m.outputStyle())
 			for _, nestedItem := range nestedItems {
 				if nestedToolItem, ok := nestedItem.(chat.ToolMessageItem); ok {
 					// Mark nested tools as simple (compact) rendering.
@@ -1790,7 +1864,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			return nil
 		}
 		m.lastUserMessageTime = msg.CreatedAt
-		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir(), m.outputStyle())
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {
@@ -1803,7 +1877,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case message.Assistant:
-		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir(), m.outputStyle())
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {
@@ -2066,7 +2140,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		m.dialog.CloseFrontDialog()
 
-		if isOnboarding {
+		if isOnboarding && !m.dialog.HasDialogs() {
 			if cmd := m.openModelsDialog(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -2080,16 +2154,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, msg.Cmd)
 		}
 
+	case dialog.ActionChoose:
+		cmds = append(cmds, m.handleChoice(msg))
 	case dialog.ActionRunBuiltin:
-		m.dialog.CloseDialog(dialog.CommandsID)
-		if cmd := m.runBuiltin(msg.Name, msg.Args, msg.FromPalette); cmd != nil {
+		cmd := m.runBuiltin(msg.Name, msg.Args, msg.FromPalette)
+		if cmd = m.finishPaletteDispatch(cmd); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-
 	case dialog.ActionSlashInput:
-		m.dialog.CloseDialog(dialog.CommandsID)
 		if cmd, handled := m.dispatchSlashInput(msg.Input); handled {
-			if cmd != nil {
+			if cmd = m.finishPaletteDispatch(cmd); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		} else {
@@ -2117,23 +2191,24 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	// Agent library dialog messages.
 	case dialog.ActionSelectAgent:
 		m.dialog.CloseDialog(dialog.AgentLibraryID)
+		m.dialog.CloseDialog(dialog.CommandsID)
 		// Insert agent prompt into editor.
 		prompt := fmt.Sprintf("# %s\n\n%s", msg.AgentName, msg.SystemPrompt)
-		m.textarea.SetValue(prompt)
+		m.insertLibraryDraft(prompt)
 		m.textarea.Focus()
 		m.setState(m.state, uiFocusEditor)
 
 	// Skills library dialog messages.
 	case dialog.ActionSelectSkill:
 		m.dialog.CloseDialog(dialog.SkillsLibraryID)
+		m.dialog.CloseDialog(dialog.CommandsID)
 		// Insert skill content into editor.
 		content := fmt.Sprintf("# %s\n\n%s\n\n%s", msg.SkillName, msg.SkillDescription, msg.SkillContent)
-		m.textarea.SetValue(content)
+		m.insertLibraryDraft(content)
 		m.textarea.Focus()
 		m.setState(m.state, uiFocusEditor)
 
 	case dialog.ActionRenameSession:
-		m.dialog.CloseDialog(dialog.CommandsID)
 		if m.session != nil {
 			if cmd := m.openRenameSessionDialog(); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -2151,7 +2226,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	// Open dialog message.
 	case dialog.ActionOpenDialog:
-		m.dialog.CloseDialog(dialog.CommandsID)
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -2345,7 +2419,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	case dialog.ActionRunCustomCommand:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
-			m.dialog.CloseFrontDialog()
 			argsDialog := dialog.NewArguments(
 				m.com,
 				"Custom Command Arguments",
@@ -2366,12 +2439,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.sendMessage(content))
 		m.dialog.CloseFrontDialog()
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionAttachSkill:
 		m.dialog.CloseFrontDialog()
 		cmds = append(cmds, m.attachSkill(msg.ID, msg.Name))
 	case dialog.ActionRunMCPPrompt:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
-			m.dialog.CloseFrontDialog()
 			title := cmp.Or(msg.Title, "MCP Prompt Arguments")
 			argsDialog := dialog.NewArguments(
 				m.com,
@@ -2384,6 +2457,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
+		m.dialog.CloseDialog(dialog.CommandsID)
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
 	}
@@ -2562,7 +2636,6 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	}
 
 	if !isConfigured() || msg.ReAuthenticate {
-		m.dialog.CloseDialog(dialog.ModelsID)
 		if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -2804,6 +2877,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		if done, cmd := m.activeInline.HandleKey(msg); done {
 			m.activeInline = nil
 			m.textarea.Focus()
+			m.openNextQuestion()
 			m.updateLayoutAndSize()
 		} else {
 			if cmd != nil {
@@ -2816,6 +2890,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
+	if m.state == uiChat || m.state == uiLanding {
+		if handled, cmd := m.handleVimKey(msg); handled {
+			return cmd
+		}
+	}
 	// Handle cancel key when agent is busy.
 	if key.Matches(msg, m.keyMap.Chat.Cancel) {
 		if m.isAgentBusy() {
@@ -4416,7 +4495,7 @@ func (m *UI) renderEditorView(width int) string {
 	return strings.Join([]string{
 		attachmentsView,
 		m.renderEditorSuggestion(m.textarea.View()),
-		"", // margin at bottom of editor
+		m.vimModeLabel(), // mode label uses the editor margin
 	}, "\n")
 }
 
@@ -4511,7 +4590,8 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
-	if err := m.com.Workspace.AgentReadyErr(); err != nil {
+	ws := m.com.Workspace
+	if err := ws.AgentReadyErr(); err != nil {
 		return util.ReportError(err)
 	}
 
@@ -4520,7 +4600,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 
 	var cmds []tea.Cmd
 	if !m.hasSession() {
-		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
+		newSession, err := ws.CreateSession(context.Background(), "New Session")
 		if err != nil {
 			return util.ReportError(err)
 		}
@@ -4535,16 +4615,18 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	}
 
 	ctx := context.Background()
+	// Keep the accepted prompt tied to the workspace, session, and file reads
+	// visible at submission even if navigation precedes command execution.
+	sessionID := m.session.ID
+	fileReads := append([]string(nil), m.sessionFileReads...)
 	cmds = append(cmds, func() tea.Msg {
-		for _, path := range m.sessionFileReads {
-			m.com.Workspace.FileTrackerRecordRead(ctx, m.session.ID, path)
-			m.com.Workspace.LSPStart(ctx, path)
+		for _, path := range fileReads {
+			ws.FileTrackerRecordRead(ctx, sessionID, path)
+			ws.LSPStart(ctx, path)
 		}
 		return nil
 	})
 
-	// Capture session ID to avoid race with main goroutine updating m.session.
-	sessionID := m.session.ID
 	// Optimistically mark the agent busy: the prompt we are about to submit
 	// either starts a run or is enqueued behind one. This keeps esc pressed
 	// right after enter routing to cancelAgent instead of reading a stale
@@ -4559,7 +4641,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		// been accepted (HTTP 202) or synchronously with a validation
 		// or transport error. Run failures and cancellation surface
 		// through SSE-derived events, not this return value.
-		err := m.com.Workspace.AgentRun(context.Background(), sessionID, content, attachments...)
+		err := ws.AgentRun(context.Background(), sessionID, content, attachments...)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
@@ -5081,18 +5163,12 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 // openBatchFormDialog activates a tabbed multi-question form in
 // the editor area. Single questions render without tabs or confirm.
 func (m *UI) openBatchFormDialog(batch question.Request) {
-	// Close any existing question form first to prevent stacking.
-	if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && qf != nil {
-		m.activeInline = nil
+	if !m.acceptQuestionRequest(batch) {
+		return
 	}
 
 	form := dialog.NewQuestionForm(m.com.Styles, batch)
-	form.OnAnswer = func(responses []question.Answer) {
-		m.com.Workspace.QuestionAnswer(responses)
-	}
-	form.OnCancel = func() {
-		m.com.Workspace.QuestionCancel()
-	}
+	m.configureQuestionSubmission(form)
 	m.activeInline = form
 	m.textarea.Blur()
 	m.focus = uiFocusEditor
@@ -5100,16 +5176,9 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 	m.updateLayoutAndSize()
 }
 
-// handleQuestionNotification dismisses an open question form when
-// any client resolved the pending batch. Only one question can be
-// pending at a time, so any notification means the current form
-// is stale regardless of BatchID.
-func (m *UI) handleQuestionNotification(_ question.Notification) {
-	if _, ok := m.activeInline.(*dialog.QuestionForm); ok {
-		m.activeInline = nil
-		m.textarea.Focus()
-		m.updateLayoutAndSize()
-	}
+// handleQuestionNotification reconciles only the matching question.
+func (m *UI) handleQuestionNotification(notice question.Notification) {
+	m.resolveQuestionNotification(notice)
 }
 
 // editorContentWidth returns the content width available to the
@@ -5262,6 +5331,7 @@ func (m *UI) handleAWSSSOAuthResult(errMsg string) tea.Cmd {
 // The actual session creation happens when the user sends their first message.
 // Returns a command to reload prompt history.
 func (m *UI) newSession() tea.Cmd {
+	m.sessionLoadGeneration++
 	if !m.hasSession() {
 		return nil
 	}

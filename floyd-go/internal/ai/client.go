@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -297,7 +299,7 @@ func (c *Client) applyHeaders(req *http.Request) {
 		req.Header.Set("X-Api-Key", c.authToken)
 	}
 	if c.config.APIVersion != "" {
-		req.Header.Set("Legacy AI-version", c.config.APIVersion)
+		req.Header.Set("Legacy-AI-Version", c.config.APIVersion)
 	}
 	req.Header.Set("User-Agent", "floyd-code-cli")
 }
@@ -323,31 +325,25 @@ func (c *Client) defaultModel(model string) string {
 	return c.config.DefaultModel
 }
 
-// buildURL constructs a full URL from base and path, avoiding duplicate version segments.
-// If baseURL already ends with /v1, /v4, etc., and path starts with /v1, it avoids duplication.
-func buildURL(baseURL, path string) string {
-	// Remove trailing slash from base
-	baseURL = strings.TrimSuffix(baseURL, "/")
-	// Remove leading slash from path
-	path = strings.TrimPrefix(path, "/")
-
-	// Check if base already contains a version path (like /v1, /v4, /paas/v4)
-	hasVersionInPath := false
-	versionPatterns := []string{"/v1/", "/v4/", "/v1/", "/paas/v", "/api/v"}
-	for _, pattern := range versionPatterns {
-		if strings.Contains(baseURL, pattern) || strings.HasSuffix(baseURL, strings.TrimSuffix(pattern, "/")) {
-			hasVersionInPath = true
-			break
+// buildURL appends an API resource without duplicating a version segment.
+func buildURL(baseURL, resource string) string {
+	resource = strings.TrimLeft(resource, "/")
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return strings.TrimRight(baseURL, "/") + "/" + resource
+	}
+	basePath := strings.TrimRight(parsed.Path, "/")
+	segment := basePath[strings.LastIndex(basePath, "/")+1:]
+	if strings.HasPrefix(segment, "v") {
+		if _, err := strconv.ParseUint(strings.TrimPrefix(segment, "v"), 10, 32); err == nil {
+			resource = strings.TrimPrefix(resource, "v1/")
 		}
 	}
-
-	// If base has version path and path starts with v1/messages or v1/chat, use path as-is
-	if hasVersionInPath && (strings.HasPrefix(path, "v1/") || strings.HasPrefix(path, "chat/")) {
-		return baseURL + "/" + path
+	if parsed.RawPath != "" {
+		parsed.RawPath = strings.TrimRight(parsed.RawPath, "/") + "/" + resource
 	}
-
-	// Default: append path directly
-	return baseURL + "/" + path
+	parsed.Path = basePath + "/" + resource
+	return parsed.String()
 }
 
 func intPtr(value int) *int {

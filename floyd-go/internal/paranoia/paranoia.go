@@ -27,7 +27,8 @@ func From(v bool) Bool {
 // Select returns x if b is True, y if b is False.
 // This is a branchless operation to prevent timing side-channels and ensure determinism.
 func Select(b Bool, x, y int) int {
-	return (int(b) & x) | (^int(b) & y)
+	mask := int(int32(b))
+	return (mask & x) | (^mask & y)
 }
 
 // ConstantTimeAdd adds two uint32 numbers with explicit wrapping behavior.

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -80,5 +80,60 @@ describe('API surface snapshot', () => {
     meta.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]) || a[2] - b[2]);
 
     expect({ routes, meta }).toMatchSnapshot();
+  });
+
+  it('serves the documented bulk plugin install route with authentication and validation', async () => {
+    const base = `http://${server!.host}:${server!.port}`;
+    const endpoint = `${base}/api/v1/plugins/install-all`;
+    const unauthorized = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source: 'fixture' }),
+    });
+    expect(unauthorized.status).toBe(401);
+
+    const invalid = await fetch(endpoint, {
+      method: 'POST',
+      headers: authHeaders(server!, { 'content-type': 'application/json' }),
+      body: JSON.stringify({ source: '' }),
+    });
+    expect(await invalid.json()).toMatchObject({ code: 40001 });
+
+    const source = join(home!, 'fixture-source');
+    const ids = ['first-fixture', 'second-fixture'];
+    mkdirSync(join(source, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(source, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({
+        name: 'fixture-pack',
+        plugins: ids.map((name) => ({ name, source: `./plugins/${name}` })),
+      }),
+    );
+    for (const name of ids) {
+      const directory = join(source, 'plugins', name, '.claude-plugin');
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, 'plugin.json'), JSON.stringify({ name, version: '1.0.0' }));
+    }
+
+    const installed = await fetch(endpoint, {
+      method: 'POST',
+      headers: authHeaders(server!, { 'content-type': 'application/json' }),
+      body: JSON.stringify({ source }),
+    });
+    expect(installed.status).toBe(200);
+    const result = await installed.json() as {
+      code: number;
+      data: { installed: Array<{ id: string; enabled: boolean }>; skipped: unknown[] };
+    };
+    expect(result.code).toBe(0);
+    expect(result.data.installed.map(({ id, enabled }) => [id, enabled])).toEqual([
+      ['first-fixture', true],
+      ['second-fixture', true],
+    ]);
+    expect(result.data.skipped).toEqual([]);
+
+    const listed = await fetch(`${base}/api/v1/plugins`, { headers: authHeaders(server!) });
+    const plugins = await listed.json() as { data: { plugins: Array<{ id: string }> } };
+    expect(plugins.data.plugins.map(({ id }) => id).sort()).toEqual(ids);
   });
 });

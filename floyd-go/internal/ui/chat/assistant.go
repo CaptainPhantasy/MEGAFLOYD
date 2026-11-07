@@ -173,6 +173,7 @@ func fnvFields(fields ...[]byte) uint64 {
 //
 // This item includes thinking, and the content but does not include the tool calls.
 type AssistantMessageItem struct {
+	outputStyle string
 	*list.Versioned
 	*highlightableMessageItem
 	*cachedMessageItem
@@ -219,7 +220,7 @@ type AssistantMessageItem struct {
 var _ Expandable = (*AssistantMessageItem)(nil)
 
 // NewAssistantMessageItem creates a new AssistantMessageItem.
-func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
+func NewAssistantMessageItem(sty *styles.Styles, message *message.Message, outputStyle ...string) MessageItem {
 	v := list.NewVersioned()
 	a := &AssistantMessageItem{
 		Versioned:                v,
@@ -230,6 +231,9 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		sty:                      sty,
 	}
 
+	if len(outputStyle) > 0 {
+		a.outputStyle = outputStyle[0]
+	}
 	a.anim = anim.New(anim.Settings{
 		ID:          a.ID(),
 		Size:        15,
@@ -624,6 +628,10 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 // detection has the slightest doubt — see
 // findSafeMarkdownBoundary.
 func (a *AssistantMessageItem) renderMarkdown(content string, width int) string {
+	if a.outputStyle == "plain" {
+		return ansi.Wrap(content, width, "")
+	}
+
 	renderer := common.MarkdownRenderer(a.sty, width)
 	return a.streamingContent.Render(content, width, renderer)
 }

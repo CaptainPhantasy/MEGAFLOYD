@@ -83,15 +83,15 @@ func (b *Broker[T]) SetMustDeliverTimeout(d time.Duration) {
 }
 
 func (b *Broker[T]) Shutdown() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	select {
 	case <-b.done: // Already closed
 		return
 	default:
 		close(b.done)
 	}
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
 
 	for ch := range b.subs {
 		delete(b.subs, ch)
@@ -118,7 +118,11 @@ func (b *Broker[T]) Subscribe(ctx context.Context) <-chan Event[T] {
 	b.subCount++
 
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-b.done:
+			return
+		}
 
 		b.mu.Lock()
 		defer b.mu.Unlock()

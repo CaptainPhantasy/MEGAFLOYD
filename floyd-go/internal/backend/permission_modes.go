@@ -2,6 +2,7 @@ package backend
 
 import (
 	"fmt"
+
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/permission"
 )

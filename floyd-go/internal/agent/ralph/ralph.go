@@ -41,13 +41,20 @@ type State struct {
 
 // Loop manages a ralph loop lifecycle.
 type Loop struct {
-	mu       sync.Mutex
+	mu       *sync.Mutex
 	stateDir string // .floyd directory path
 }
 
+var loopLocks sync.Map
+
 // New creates a new Loop bound to the given .floyd directory.
 func New(floydDir string) *Loop {
-	return &Loop{stateDir: floydDir}
+	path, err := filepath.Abs(floydDir)
+	if err != nil {
+		path = filepath.Clean(floydDir)
+	}
+	lock, _ := loopLocks.LoadOrStore(path, &sync.Mutex{})
+	return &Loop{stateDir: floydDir, mu: lock.(*sync.Mutex)}
 }
 
 func (l *Loop) statePath() string {
@@ -61,6 +68,13 @@ func (l *Loop) Start(sessionID, prompt string, maxIterations int, completionProm
 
 	if prompt == "" {
 		return nil, fmt.Errorf("ralph loop requires a prompt")
+	}
+	previous, err := l.readState()
+	if err != nil {
+		return nil, err
+	}
+	if previous != nil && previous.Active {
+		return nil, fmt.Errorf("a goal is already active in session %s; cancel it before starting another", previous.SessionID)
 	}
 
 	state := &State{
@@ -152,7 +166,10 @@ func (l *Loop) Check(sessionID, lastAssistantOutput string) (bool, string, strin
 }
 
 // Cancel stops an active ralph loop. Returns the iteration it was at, or error.
-func (l *Loop) Cancel() (int, error) {
+func (l *Loop) Cancel() (int, error) { return l.CancelSession("") }
+
+// CancelSession checks ownership in the same critical section as cancellation.
+func (l *Loop) CancelSession(sessionID string) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -164,8 +181,13 @@ func (l *Loop) Cancel() (int, error) {
 		return 0, fmt.Errorf("no active ralph loop found")
 	}
 
+	if sessionID != "" && state.SessionID != sessionID {
+		return 0, fmt.Errorf("the active goal belongs to another session")
+	}
 	iteration := state.Iteration
-	l.cleanup()
+	if err := l.cleanup(); err != nil {
+		return 0, err
+	}
 
 	slog.Info("Ralph loop cancelled", "iteration", iteration)
 	return iteration, nil
@@ -185,14 +207,23 @@ func (l *Loop) IsActive() bool {
 
 // Status returns the current loop state, or nil if inactive.
 func (l *Loop) Status() *State {
+	state, _ := l.StatusChecked()
+	return state
+}
+
+// StatusChecked preserves file and decoding errors for interactive callers.
+func (l *Loop) StatusChecked() (*State, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	state, _ := l.readState()
-	if state == nil || !state.Active {
-		return nil
+	state, err := l.readState()
+	if err != nil {
+		return nil, err
 	}
-	return state
+	if state == nil || !state.Active {
+		return nil, nil
+	}
+	return state, nil
 }
 
 func (l *Loop) readState() (*State, error) {
@@ -224,8 +255,17 @@ func (l *Loop) writeState(state *State) error {
 	return os.WriteFile(l.statePath(), data, 0o644)
 }
 
-func (l *Loop) cleanup() {
-	os.Remove(l.statePath())
+func (l *Loop) cleanup() error {
+	state, err := l.readState()
+	if err != nil || state == nil {
+		return err
+	}
+	state.Active = false
+	if err := l.writeState(state); err != nil {
+		slog.Error("Failed to preserve completed Ralph state", "error", err)
+		return err
+	}
+	return nil
 }
 
 var promiseRegex = regexp.MustCompile(`<promise>(.*?)</promise>`)

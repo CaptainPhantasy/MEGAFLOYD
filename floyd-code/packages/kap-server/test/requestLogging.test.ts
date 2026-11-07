@@ -74,6 +74,22 @@ describe('requestLogging', () => {
     expect(entry['req']).toMatchObject({ method: 'GET', url: '/api/v1/healthz' });
     expect(typeof entry['responseTime']).toBe('number');
   });
+
+  it('echoes a valid client-supplied request id on responses', async () => {
+    const supplied = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+    const res = await fetch(`http://127.0.0.1:${String(server!.port)}/api/v1/healthz`, {
+      headers: { 'x-request-id': supplied },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-request-id')).toBe(supplied);
+  });
+
+  it('generates a ULID request id when the client supplies none', async () => {
+    const res = await fetch(`http://127.0.0.1:${String(server!.port)}/api/v1/healthz`);
+    expect(res.status).toBe(200);
+    const echoed = res.headers.get('x-request-id')!;
+    expect(echoed).toMatch(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
+  });
 });
 
 describe('extractEnvelopeCode', () => {

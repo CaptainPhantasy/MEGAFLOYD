@@ -153,7 +153,7 @@ func (sc *SwarmCoordinator) executeTask(task *SwarmTask, attachments []message.A
 	}
 }
 
-// resolveAgent returns the coordinator for the named agent, falling back to inner.
+// resolveAgent returns only the explicitly named agent.
 func (sc *SwarmCoordinator) resolveAgent(name string) Coordinator {
 	if name == "" || name == "primary" || name == "default" {
 		return sc.inner
@@ -163,9 +163,7 @@ func (sc *SwarmCoordinator) resolveAgent(name string) Coordinator {
 	if agent, ok := sc.agents[name]; ok {
 		return agent
 	}
-	// Fall back to primary if named agent not found
-	slog.Warn("Named agent not found, falling back to primary", "agent", name)
-	return sc.inner
+	return nil
 }
 
 func generateSessionID() string {

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -12,7 +13,15 @@ import (
 	"github.com/legacy-ai/floyd/internal/home"
 	"github.com/legacy-ai/floyd/internal/ui/common"
 	"github.com/legacy-ai/floyd/internal/ui/util"
+	"github.com/legacy-ai/floyd/internal/workspace"
 )
+
+type projectInitializationPromptMsg struct {
+	Workspace workspace.Workspace
+	SessionID string
+	Prompt    string
+	Err       error
+}
 
 // markProjectInitializedCmd marks the current project as initialized in the config.
 func (m *UI) markProjectInitializedCmd() tea.Cmd {
@@ -49,32 +58,46 @@ func (m *UI) updateInitializeView(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 
 // initializeProject starts project initialization and transitions to the landing view.
 func (m *UI) initializeProject() tea.Cmd {
-	// clear the session
-	var cmds []tea.Cmd
-	if cmd := m.newSession(); cmd != nil {
-		cmds = append(cmds, cmd)
+	ws := m.com.Workspace
+	sid := ""
+	if m.session != nil {
+		sid = m.session.ID
 	}
-	initialize := func() tea.Msg {
-		initPrompt, err := m.com.Workspace.InitializePrompt()
-		if err != nil {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("Failed to initialize project: %v", err),
-			}
-		}
-		return sendMessageMsg{Content: initPrompt}
+	return func() tea.Msg {
+		initPrompt, err := ws.InitializePrompt()
+		return projectInitializationPromptMsg{Workspace: ws, SessionID: sid, Prompt: initPrompt, Err: err}
 	}
-	// Mark the project as initialized
-	cmds = append(cmds, initialize, m.markProjectInitializedCmd())
+}
 
-	return tea.Sequence(cmds...)
+func (m *UI) startProjectInitialization(msg projectInitializationPromptMsg) tea.Cmd {
+	if msg.Err != nil {
+		return util.ReportError(fmt.Errorf("build project initialization: %w", msg.Err))
+	}
+	if msg.Workspace == m.com.Workspace && (m.session == nil && msg.SessionID == "" || m.session != nil && m.session.ID == msg.SessionID) {
+		return m.sendMessage(msg.Prompt)
+	}
+	// A session switch during prompt construction must not retarget the task.
+	return func() tea.Msg {
+		sid := msg.SessionID
+		if sid == "" {
+			created, err := msg.Workspace.CreateSession(context.Background(), "Project initialization")
+			if err != nil {
+				return builtinResultMsg{Err: err}
+			}
+			sid = created.ID
+		}
+		if err := msg.Workspace.AgentRun(context.Background(), sid, msg.Prompt); err != nil {
+			return builtinResultMsg{Err: err}
+		}
+		return builtinResultMsg{Info: "Project initialization submitted in session " + sid}
+	}
 }
 
 // skipInitializeProject skips project initialization and transitions to the landing view.
 func (m *UI) skipInitializeProject() tea.Cmd {
-	// TODO: initialize the project
 	m.setState(uiLanding, uiFocusEditor)
-	// mark the project as initialized
+	// Remember the user's explicit dismissal. Starting initialization does not
+	// write this flag: normal discovery checks the resulting policy file.
 	return m.markProjectInitializedCmd()
 }
 
@@ -86,7 +109,7 @@ func (m *UI) initializeView() string {
 
 	header := s.Header.Render("Would you like to initialize this project?")
 	path := s.Accent.PaddingLeft(2).Render(cwd)
-	desc := s.Content.Render(fmt.Sprintf("When I initialize your codebase I examine the project and put the result into an %s file which serves as general context.", initFile))
+	desc := s.Content.Render(fmt.Sprintf("I examine this project, create %s from the bundled standard if it is missing, and record project facts in its SSOT. Existing policy and conversation are preserved.", initFile))
 	hint := s.Content.Render("You can also initialize anytime via ") + s.Accent.Render("ctrl+p") + s.Content.Render(".")
 	prompt := s.Content.Render("Would you like to initialize now?")
 

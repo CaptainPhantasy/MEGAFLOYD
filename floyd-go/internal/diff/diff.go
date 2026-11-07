@@ -16,11 +16,19 @@ func GenerateDiff(beforeContent, afterContent, fileName string) (string, int, in
 		removals  = 0
 	)
 
+	inHunk := false
 	lines := strings.SplitSeq(unified, "\n")
 	for line := range lines {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+		if strings.HasPrefix(line, "@@ ") {
+			inHunk = true
+			continue
+		}
+		if !inHunk {
+			continue
+		}
+		if strings.HasPrefix(line, "+") {
 			additions++
-		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+		} else if strings.HasPrefix(line, "-") {
 			removals++
 		}
 	}

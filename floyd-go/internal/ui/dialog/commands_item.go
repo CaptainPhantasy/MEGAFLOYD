@@ -13,17 +13,18 @@ import (
 // CommandItem wraps a uicmd.Command to implement the ListItem interface.
 type CommandItem struct {
 	*list.Versioned
-	id          string
-	title       string
-	shortcut    string
-	description string
-	action      Action
-	aliases     []string
-	t           *styles.Styles
-	m           fuzzy.Match
-	cache       map[int]string
-	focused     bool
-	hideInfo    bool
+	id           string
+	title        string
+	shortcut     string
+	description  string
+	argumentHint string
+	action       Action
+	aliases      []string
+	t            *styles.Styles
+	m            fuzzy.Match
+	cache        map[int]string
+	focused      bool
+	hideInfo     bool
 }
 
 var _ ListItem = &CommandItem{Versioned: list.NewVersioned()}
@@ -56,6 +57,12 @@ func (c *CommandItem) WithAliases(aliases ...string) *CommandItem {
 // the title.
 func (c *CommandItem) WithDescription(desc string) *CommandItem {
 	c.description = desc
+	return c
+}
+
+// WithArgumentHint displays the accepted arguments beside the command name.
+func (c *CommandItem) WithArgumentHint(hint string) *CommandItem {
+	c.argumentHint = hint
 	return c
 }
 
@@ -140,7 +147,11 @@ func (c *CommandItem) Render(width int) string {
 	if c.hideInfo {
 		shortcut = ""
 	}
-	rendered := renderItem(styles, c.title, shortcut, c.focused, width, c.cache, &c.m)
+	title := c.title
+	if c.argumentHint != "" {
+		title += " " + c.argumentHint
+	}
+	rendered := renderItem(styles, title, shortcut, c.focused, width, c.cache, &c.m)
 	if c.description != "" {
 		descStyle := c.t.Dialog.SecondaryText
 		if c.focused {

@@ -17,6 +17,7 @@ func (s *Server) loggingHandler(next http.Handler) http.Handler {
 		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		s.logger.Debug(
 			"HTTP request",
+			slog.String("request_id", requestID(r)),
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.String("remote_addr", r.RemoteAddr),
@@ -28,6 +29,7 @@ func (s *Server) loggingHandler(next http.Handler) http.Handler {
 
 		s.logger.Debug(
 			"HTTP response",
+			slog.String("request_id", requestID(r)),
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", lrw.statusCode),

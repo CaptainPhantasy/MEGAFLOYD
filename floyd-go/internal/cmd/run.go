@@ -11,7 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
+
+	"github.com/legacy-ai/floyd/internal/permission"
 
 	"charm.land/log/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -64,86 +67,71 @@ floyd run --session {session-id} "Follow up on your last response"
 floyd run --continue "Follow up on your last response"
 
   `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		var (
-			quiet, _      = cmd.Flags().GetBool("quiet")
-			verbose, _    = cmd.Flags().GetBool("verbose")
-			largeModel, _ = cmd.Flags().GetString("model")
-			smallModel, _ = cmd.Flags().GetString("small-model")
-			sessionID, _  = cmd.Flags().GetString("session")
-			useLast, _    = cmd.Flags().GetBool("continue")
-		)
+	RunE: runPrompt,
+}
 
-		// Cancel on SIGINT or SIGTERM.
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
-		defer cancel()
+func runPrompt(cmd *cobra.Command, args []string) (runErr error) {
+	var (
+		quiet, _      = cmd.Flags().GetBool("quiet")
+		verbose, _    = cmd.Flags().GetBool("verbose")
+		largeModel, _ = cmd.Flags().GetString("model")
+		smallModel, _ = cmd.Flags().GetString("small-model")
+		useLast       = continueRequested(cmd)
+	)
 
-		prompt := strings.Join(args, " ")
+	// Cancel on SIGINT or SIGTERM.
+	ctx, cancel := signal.NotifyContext(permission.WithNonInteractive(cmd.Context()), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	cmd.SetContext(ctx)
+	sessionID, err := requestedSession(cmd)
+	if err != nil {
+		return err
+	}
+	resume, _ := cmd.Flags().GetString(resumeFlag)
+	if resume == resumePicker {
+		return fmt.Errorf("--resume without an ID opens the interactive picker; omit --print and the prompt, or provide --resume=ID")
+	}
+	format, _ := cmd.Flags().GetString("output-format")
+	output, err := newRunOutput(cmd.OutOrStdout(), format)
+	if err != nil {
+		return err
+	}
+	defer func() { runErr = errors.Join(runErr, output.Finish(runErr)) }()
 
-		prompt, err := MaybePrependStdin(prompt)
-		if err != nil {
-			slog.Error("Failed to read from stdin", "error", err)
-			return err
+	prompt := strings.Join(args, " ")
+
+	prompt, err = MaybePrependStdin(prompt)
+	if err != nil {
+		slog.Error("Failed to read from stdin", "error", err)
+		return err
+	}
+
+	// Legacy SuperFloyd startup controls remain lane-specific. Persistent
+	// MEGAFLOYD run health is enforced in shared agent execution,
+	// using the resolved workspace directory for every client.
+	SetupSuperFloydMode(filepath.Base(os.Args[0]))
+	prompt = applyAutoStabilizeIfNeeded(ctx, nil, prompt)
+	if isSuperFloydBinary() {
+		if gate := applyRunQualityGates(prompt); gate.Enabled && len(gate.Violations) > 0 {
+			return fmt.Errorf("run quality gates blocked execution: %s", strings.Join(gate.Violations, "; "))
 		}
+	}
 
-		// Legacy SuperFloyd startup controls remain lane-specific. Persistent
-		// MEGAFLOYD run health is enforced in shared agent execution,
-		// using the resolved workspace directory for every client.
-		SetupSuperFloydMode(filepath.Base(os.Args[0]))
-		prompt = applyAutoStabilizeIfNeeded(ctx, nil, prompt)
-		if isSuperFloydBinary() {
-			if gate := applyRunQualityGates(prompt); gate.Enabled && len(gate.Violations) > 0 {
-				return fmt.Errorf("run quality gates blocked execution: %s", strings.Join(gate.Violations, "; "))
-			}
-		}
+	if prompt == "" {
+		return fmt.Errorf("no prompt provided")
+	}
 
-		if prompt == "" {
-			return fmt.Errorf("no prompt provided")
-		}
+	event.SetNonInteractive(true)
 
-		event.SetNonInteractive(true)
+	switch {
+	case sessionID != "":
+		event.SetContinueBySessionID(true)
+	case useLast:
+		event.SetContinueLastSession(true)
+	}
 
-		switch {
-		case sessionID != "":
-			event.SetContinueBySessionID(true)
-		case useLast:
-			event.SetContinueLastSession(true)
-		}
-
-		if useClientServer() {
-			c, ws, cleanup, err := connectToServer(cmd)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-
-			event.AppInitialized()
-
-			if !ws.Config.IsConfigured() {
-				return fmt.Errorf("no providers configured - please run 'megafloyd' to set up a provider interactively")
-			}
-
-			clientWs := workspace.NewClientWorkspace(c, *ws)
-			if err := clientWs.InitCoderAgentNonInteractive(ctx); err != nil {
-				return fmt.Errorf("failed to initialize agent: %w", err)
-			}
-
-			if sessionID != "" {
-				sess, err := resolveSessionByID(ctx, c, ws.ID, sessionID)
-				if err != nil {
-					return err
-				}
-				sessionID = sess.ID
-			}
-
-			if verbose {
-				slog.SetDefault(slog.New(log.New(os.Stderr)))
-			}
-
-			return runNonInteractive(ctx, c, ws, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
-		}
-
-		ws, cleanup, err := setupLocalWorkspace(cmd)
+	if useClientServer() {
+		c, ws, cleanup, err := connectToServer(cmd)
 		if err != nil {
 			return err
 		}
@@ -151,26 +139,117 @@ floyd run --continue "Follow up on your last response"
 
 		event.AppInitialized()
 
-		if !ws.Config().IsConfigured() {
+		if !ws.Config.IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'megafloyd' to set up a provider interactively")
+		}
+
+		clientWs := workspace.NewClientWorkspace(c, *ws)
+		if err := clientWs.InitCoderAgentNonInteractive(ctx); err != nil {
+			return fmt.Errorf("failed to initialize agent: %w", err)
+		}
+
+		planMode, err := applyLaunchOptions(cmd, clientWs)
+		if err != nil {
+			return err
+		}
+		if sessionID != "" {
+			sess, err := resolveSessionByID(ctx, c, ws.ID, sessionID)
+			if err != nil {
+				return err
+			}
+			sessionID = sess.ID
+		}
+		if planMode {
+			sess, err := resolveSession(ctx, c, ws.ID, sessionID, useLast)
+			if err != nil {
+				return err
+			}
+			sessionID = sess.ID
+			useLast = false
+			if err := enterLaunchPlan(ctx, clientWs, sessionID); err != nil {
+				return err
+			}
 		}
 
 		if verbose {
 			slog.SetDefault(slog.New(log.New(os.Stderr)))
 		}
 
-		appWs := ws.(*workspace.AppWorkspace)
+		return runNonInteractive(ctx, c, ws, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast, output)
+	}
 
+	ws, cleanup, err := setupLocalWorkspace(cmd)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	event.AppInitialized()
+
+	if !ws.Config().IsConfigured() {
+		return fmt.Errorf("no providers configured - please run 'megafloyd' to set up a provider interactively")
+	}
+
+	if verbose {
+		slog.SetDefault(slog.New(log.New(os.Stderr)))
+	}
+
+	planMode, err := applyLaunchOptions(cmd, ws)
+	if err != nil {
+		return err
+	}
+	if largeModel != "" {
+		selected := ws.Config().Models[config.SelectedModelTypeLarge]
+		largeModel = selected.Provider + "/" + selected.Model
+	}
+	if smallModel != "" {
+		selected := ws.Config().Models[config.SelectedModelTypeSmall]
+		smallModel = selected.Provider + "/" + selected.Model
+	}
+	appWs := ws.(*workspace.AppWorkspace)
+	if planMode {
 		if sessionID != "" {
-			sess, err := resolveSessionID(ctx, appWs.App().Sessions, sessionID)
+			sess, err := resolveWorkspaceSessionID(ctx, ws, sessionID)
+			if err != nil {
+				return err
+			}
+			sessionID = sess.ID
+		} else if useLast {
+			sessions, err := ws.ListSessions(ctx)
+			if err != nil {
+				return err
+			}
+			for _, s := range sessions {
+				if s.ParentSessionID == "" {
+					sessionID = s.ID
+					break
+				}
+			}
+			if sessionID == "" {
+				return fmt.Errorf("no sessions found to continue")
+			}
+		} else {
+			sess, err := ws.CreateSession(ctx, "New plan")
 			if err != nil {
 				return err
 			}
 			sessionID = sess.ID
 		}
+		if err := enterLaunchPlan(ctx, ws, sessionID); err != nil {
+			return err
+		}
+		useLast = false
+	}
 
-		return appWs.App().RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
-	},
+	if sessionID != "" {
+		sess, err := resolveSessionID(ctx, appWs.App().Sessions, sessionID)
+		if err != nil {
+			return err
+		}
+		sessionID = sess.ID
+	}
+
+	return appWs.App().RunNonInteractive(ctx, output, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
 }
 
 func init() {
@@ -179,8 +258,9 @@ func init() {
 	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers")
 	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")
 	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
-	runCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	runCmd.Flags().BoolP("continue", "c", false, "Continue the most recent session")
 	runCmd.MarkFlagsMutuallyExclusive("session", "continue")
+	addPromptFlags(runCmd)
 
 	installWebHandoff(runCmd)
 	installWebHandoff(rootCmd)
@@ -203,7 +283,8 @@ func addWebFlags(cmd *cobra.Command) {
 		cmd.Flags().Bool(webFlag, false, "Hand off to the web UI instead of running here")
 	}
 	if cmd.Flags().Lookup(resumeFlag) == nil {
-		cmd.Flags().StringP(resumeFlag, "r", "", "Session ID to open in the web UI (requires --web)")
+		cmd.Flags().StringP(resumeFlag, "r", "", "Resume a session by ID, or open the session picker without an ID")
+		cmd.Flags().Lookup(resumeFlag).NoOptDefVal = resumePicker
 	}
 }
 
@@ -240,10 +321,10 @@ func runWebHandoffIfRequested(cmd *cobra.Command) (bool, error) {
 	web, _ := cmd.Flags().GetBool(webFlag)
 	resume, _ := cmd.Flags().GetString(resumeFlag)
 	if !web {
-		if resume != "" {
-			return true, errors.New("the --resume flag requires --web; use -s/--session to resume in the terminal")
-		}
 		return false, nil
+	}
+	if resume == resumePicker {
+		resume = ""
 	}
 
 	sessionID := resume
@@ -309,17 +390,17 @@ func runNonInteractive(
 	hideSpinner bool,
 	continueSessionID string,
 	useLast bool,
+	outputs ...io.Writer,
 ) error {
 	slog.Info("Running in non-interactive mode")
+	var output io.Writer = os.Stdout
+	if len(outputs) > 0 {
+		output = outputs[0]
+	}
+	ctx = permission.WithNonInteractive(ctx)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	if largeModel != "" || smallModel != "" {
-		if err := overrideModels(ctx, c, ws, largeModel, smallModel); err != nil {
-			return fmt.Errorf("failed to override models: %w", err)
-		}
-	}
 
 	var (
 		spinner   *format.Spinner
@@ -381,6 +462,9 @@ func runNonInteractive(
 		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 	}
 
+	if sink, ok := output.(interface{ SetSession(string) }); ok {
+		sink.SetSession(sess.ID)
+	}
 	events, err := c.SubscribeEvents(ctx, ws.ID)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to events: %w", err)
@@ -399,7 +483,7 @@ func runNonInteractive(
 	stream := &runStream{
 		sessionID: sess.ID,
 		runID:     runID,
-		out:       os.Stdout,
+		out:       output,
 		read:      make(map[string]int),
 	}
 
@@ -412,7 +496,7 @@ func runNonInteractive(
 		if progress && stderrTTY {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
 		}
-		_, _ = fmt.Fprintln(os.Stdout)
+		_, _ = fmt.Fprintln(output)
 	}()
 
 	for {
@@ -424,7 +508,7 @@ func runNonInteractive(
 		case ev, ok := <-events:
 			if !ok {
 				stopSpinner()
-				return nil
+				return fmt.Errorf("event stream closed before run completion")
 			}
 
 			// Forward events to herdr if running inside a herdr pane.
@@ -454,8 +538,8 @@ func runNonInteractive(
 // without spinning up the full server/client harness.
 //
 // runID, when non-empty, is the authoritative correlator for the
-// terminal RunComplete event: the stream suppresses live message
-// events and only exits on a RunComplete whose RunID matches, so a
+// live message and terminal RunComplete events: only matching events
+// contribute output or finish the stream, so a
 // turn that finishes first on the same session (e.g. when our prompt
 // was queued behind a busy session) cannot contaminate stdout or
 // terminate us prematurely. When empty (older servers, tests that
@@ -488,7 +572,7 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		if msg.SessionID != s.sessionID || msg.Role != proto.Assistant || len(msg.Parts) == 0 {
 			return false, nil
 		}
-		if s.runID != "" {
+		if s.runID != "" && msg.RunID != s.runID {
 			return false, nil
 		}
 		stop()
@@ -507,7 +591,9 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		}
 		if s.printed || strings.TrimSpace(part) != "" {
 			s.printed = true
-			fmt.Fprint(s.out, part)
+			if _, err := fmt.Fprint(s.out, part); err != nil {
+				return false, err
+			}
 		}
 		s.read[msg.ID] = len(content)
 		return false, nil
@@ -527,14 +613,17 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		//   - if we have no RunID (older server, tests), fall back
 		//     to SessionID matching.
 		if s.runID != "" {
-			if e.Payload.RunID != s.runID {
+			if e.Payload.RunID != s.runID || e.Payload.SessionID != s.sessionID {
 				return false, nil
 			}
 		} else if e.Payload.SessionID != s.sessionID {
 			return false, nil
 		}
 		stop()
-		if e.Payload.Error != "" && !e.Payload.Cancelled {
+		if e.Payload.Cancelled {
+			return true, context.Canceled
+		}
+		if e.Payload.Error != "" {
 			return true, fmt.Errorf("agent run failed: %s", e.Payload.Error)
 		}
 		// Reconcile stdout against the authoritative final
@@ -553,7 +642,9 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 				}
 				if s.printed || strings.TrimSpace(tail) != "" {
 					s.printed = true
-					fmt.Fprint(s.out, tail)
+					if _, err := fmt.Fprint(s.out, tail); err != nil {
+						return true, err
+					}
 				}
 			}
 		}
@@ -817,13 +908,17 @@ func resolveSession(ctx context.Context, c *client.Client, wsID, continueSession
 		if err != nil || len(sessions) == 0 {
 			return nil, fmt.Errorf("no sessions found to continue")
 		}
-		last := sessions[0]
-		for _, s := range sessions[1:] {
-			if s.UpdatedAt > last.UpdatedAt && s.ParentSessionID == "" {
-				last = s
+		var last *proto.Session
+		for _, s := range sessions {
+			if s.ParentSessionID == "" && (last == nil || s.UpdatedAt > last.UpdatedAt) {
+				copy := s
+				last = &copy
 			}
 		}
-		return &last, nil
+		if last == nil {
+			return nil, fmt.Errorf("no top-level sessions found to continue")
+		}
+		return last, nil
 
 	default:
 		return c.CreateSession(ctx, wsID, "non-interactive")

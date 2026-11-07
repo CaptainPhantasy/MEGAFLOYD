@@ -2,8 +2,9 @@ package server
 
 import (
 	"encoding/json"
-	"github.com/legacy-ai/floyd/internal/config"
 	"net/http"
+
+	"github.com/legacy-ai/floyd/internal/config"
 )
 
 func (c *controllerV1) registerAccountOperations(mux *http.ServeMux) {
@@ -13,6 +14,7 @@ func (c *controllerV1) registerAccountOperations(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{id}/auth/account/token", c.handleManagedAccountToken)
 	mux.HandleFunc("POST /v1/workspaces/{id}/auth/account/refresh", c.handleManagedAccountRefresh)
 }
+
 func (c *controllerV1) handleManagedAccount(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	provider := r.URL.Query().Get("provider")
@@ -40,6 +42,7 @@ func (c *controllerV1) handleManagedAccount(w http.ResponseWriter, r *http.Reque
 	}
 	jsonEncode(w, account)
 }
+
 func (c *controllerV1) handleManagedAccountToken(w http.ResponseWriter, r *http.Request) {
 	token, err := c.backend.GetManagedAccountToken(r.PathValue("id"), r.URL.Query().Get("provider"))
 	if err != nil {
@@ -48,6 +51,7 @@ func (c *controllerV1) handleManagedAccountToken(w http.ResponseWriter, r *http.
 	}
 	jsonEncode(w, token)
 }
+
 func (c *controllerV1) handleManagedAccountRefresh(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Provider string `json:"provider"`

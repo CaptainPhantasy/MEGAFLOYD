@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/legacy-ai/floyd/internal/message"
 	"github.com/legacy-ai/floyd/internal/session"
 )
 
@@ -81,6 +82,7 @@ func RuntimeSwarm(ctx context.Context, svc session.Service, id string) (SwarmSta
 	}
 	return out, nil
 }
+
 func SetRuntimeSwarm(ctx context.Context, svc session.Service, id string, active *bool, parallel *int) (SwarmState, error) {
 	m, ok := svc.(session.MetadataMutator)
 	if !ok {
@@ -111,18 +113,22 @@ func SetRuntimeSwarm(ctx context.Context, svc session.Service, id string, active
 	})
 	return out, err
 }
+
 func (c *coordinator) acquireRuntimeTask(ctx context.Context, sessionID string) (func(), error) {
 	store := c.runtimeTasks()
 	for {
+		// Pair the metadata snapshot with the wake channel under one lock so
+		// a concurrent /swarm change cannot be lost before we begin waiting.
+		store.Lock()
 		swarm, err := RuntimeSwarm(ctx, c.sessions, sessionID)
 		if err != nil {
+			store.Unlock()
 			return nil, err
 		}
 		limit := 1
 		if swarm.Active {
 			limit = swarm.MaxParallel
 		}
-		store.Lock()
 		if store.active[sessionID] < limit {
 			store.active[sessionID]++
 			store.Unlock()
@@ -150,7 +156,7 @@ func (c *coordinator) startRuntimeSubagent(ctx context.Context, params subAgentP
 	id := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	now := time.Now().UTC()
-	task := &runtimeTask{agent: params.Agent, view: RuntimeTask{ID: id, SessionID: params.SessionID, Kind: "subagent", Description: params.SessionTitle, Status: "running", CreatedAt: now, AgentID: id, ParentToolCallID: params.ToolCallID, Model: params.Agent.Model().ModelCfg.Model}, cancel: cancel, detach: make(chan struct{}), done: make(chan struct{})}
+	task := &runtimeTask{agent: params.Agent, view: RuntimeTask{ID: id, SessionID: params.SessionID, Kind: "subagent", Description: params.SessionTitle, Status: "queued", CreatedAt: now, AgentID: id, ParentToolCallID: params.ToolCallID, Model: params.Agent.Model().ModelCfg.Model}, cancel: cancel, detach: make(chan struct{}), done: make(chan struct{})}
 	if background {
 		task.detached = true
 		task.view.RunInBackground = true
@@ -182,6 +188,7 @@ func (c *coordinator) startRuntimeSubagent(ctx context.Context, params subAgentP
 			started := time.Now().UTC()
 			task.mu.Lock()
 			task.view.StartedAt = &started
+			task.view.Status = "running"
 			task.mu.Unlock()
 			response, err = c.runSubAgentInline(runCtx, params)
 		}
@@ -206,6 +213,7 @@ func (c *coordinator) startRuntimeSubagent(ctx context.Context, params subAgentP
 	}()
 	return task, resultCh
 }
+
 func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
 	task, resultCh := c.startRuntimeSubagent(ctx, params, false)
 	id := task.view.ID
@@ -218,6 +226,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return fantasy.ToolResponse{}, ctx.Err()
 	}
 }
+
 func (c *coordinator) RuntimeTasks() []RuntimeTask {
 	store := c.runtimeTasks()
 	store.Lock()
@@ -234,15 +243,30 @@ func (c *coordinator) RuntimeTasks() []RuntimeTask {
 			item.Status = "running"
 			item.CompletedAt = nil
 		}
+		task.mu.Unlock()
+		// Only expose the same reviewed projection used by the conversation UI.
+		// A running task's persisted assistant output is useful progress even
+		// before its final response exists.
+		if item.Status == "running" && c.messages != nil {
+			if messages, err := message.PublicList(context.Background(), c.messages, item.AgentID); err == nil {
+				for i := len(messages) - 1; i >= 0; i-- {
+					if messages[i].Role == message.Assistant && messages[i].Content().Text != "" {
+						item.OutputPreview = messages[i].Content().Text
+						item.OutputBytes = len(item.OutputPreview)
+						break
+					}
+				}
+			}
+		}
 		if len(item.OutputPreview) > 16384 {
 			item.OutputPreview = item.OutputPreview[len(item.OutputPreview)-16384:]
 		}
 		out = append(out, item)
-		task.mu.Unlock()
 	}
 	slices.SortFunc(out, func(a, b RuntimeTask) int { return a.CreatedAt.Compare(b.CreatedAt) })
 	return out
 }
+
 func (c *coordinator) RuntimeTaskControl(id, action string) error {
 	store := c.runtimeTasks()
 	store.Lock()
@@ -261,7 +285,7 @@ func (c *coordinator) RuntimeTaskControl(id, action string) error {
 		task.agent.Cancel(id)
 		return nil
 	}
-	if task.view.Status == "running" && !task.detached {
+	if (task.view.Status == "running" || task.view.Status == "queued") && !task.detached {
 		task.detached = true
 		task.view.RunInBackground = true
 		close(task.detach)
@@ -269,6 +293,7 @@ func (c *coordinator) RuntimeTaskControl(id, action string) error {
 	task.mu.Unlock()
 	return nil
 }
+
 func (c *coordinator) RuntimeCancelTasks() {
 	store := c.runtimeTasks()
 	store.Lock()
@@ -301,6 +326,7 @@ func (c *coordinator) runtimeSessionAgent(id string) SessionAgent {
 	}
 	return c.currentAgent
 }
+
 func (c *coordinator) runtimeChildrenBusy() bool {
 	store := c.runtimeTasks()
 	store.Lock()
@@ -311,7 +337,7 @@ func (c *coordinator) runtimeChildrenBusy() bool {
 	store.Unlock()
 	for _, t := range tasks {
 		t.mu.Lock()
-		running := t.view.Status == "running"
+		running := t.view.Status == "running" || t.view.Status == "queued"
 		t.mu.Unlock()
 		if running || t.agent.IsBusy() {
 			return true
@@ -319,6 +345,7 @@ func (c *coordinator) runtimeChildrenBusy() bool {
 	}
 	return false
 }
+
 func (c *coordinator) runtimeSessionBusy(id string) bool {
 	store := c.runtimeTasks()
 	store.Lock()
@@ -326,9 +353,18 @@ func (c *coordinator) runtimeSessionBusy(id string) bool {
 	store.Unlock()
 	if task != nil {
 		task.mu.Lock()
-		running := task.view.Status == "running"
+		running := task.view.Status == "running" || task.view.Status == "queued"
 		task.mu.Unlock()
 		return running || task.agent.IsSessionBusy(id)
 	}
 	return c.currentAgent.IsSessionBusy(id)
+}
+
+// RuntimeSwarmChanged wakes queued children when a user changes parallelism.
+func (c *coordinator) RuntimeSwarmChanged() {
+	store := c.runtimeTasks()
+	store.Lock()
+	close(store.changed)
+	store.changed = make(chan struct{})
+	store.Unlock()
 }

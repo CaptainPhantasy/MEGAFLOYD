@@ -270,6 +270,7 @@ func fileToProto(f history.File) proto.File {
 
 func messageToProto(m message.Message) proto.Message {
 	msg := proto.Message{
+		RunID:            m.RunID,
 		ID:               m.ID,
 		SessionID:        m.SessionID,
 		Role:             proto.MessageRole(m.Role),

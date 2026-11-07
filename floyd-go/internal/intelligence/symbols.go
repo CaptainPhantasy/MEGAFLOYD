@@ -179,40 +179,12 @@ func (si *SymbolIndex) Query(name string, limit int) []Symbol {
 	nameLower := strings.ToLower(name)
 	var results []Symbol
 
-	// Exact matches first
-	if ptrs, ok := si.byName[name]; ok {
-		for _, p := range ptrs {
-			results = append(results, *p)
-		}
-	}
-
-	// Prefix matches
+	// Collect all matches before ranking and applying the limit. Map iteration
+	// order must not hide an exact match behind a prefix or substring match.
 	for symName, ptrs := range si.byName {
-		if strings.EqualFold(symName, name) {
-			continue // Already added
-		}
-		if strings.HasPrefix(strings.ToLower(symName), nameLower) {
+		if strings.Contains(strings.ToLower(symName), nameLower) {
 			for _, p := range ptrs {
 				results = append(results, *p)
-			}
-		}
-		if limit > 0 && len(results) >= limit {
-			break
-		}
-	}
-
-	// Contains matches (if still under limit)
-	if limit == 0 || len(results) < limit {
-		for symName, ptrs := range si.byName {
-			if strings.Contains(strings.ToLower(symName), nameLower) {
-				if !strings.HasPrefix(strings.ToLower(symName), nameLower) {
-					for _, p := range ptrs {
-						results = append(results, *p)
-					}
-				}
-			}
-			if limit > 0 && len(results) >= limit {
-				break
 			}
 		}
 	}
@@ -229,7 +201,13 @@ func (si *SymbolIndex) Query(name string, limit int) []Symbol {
 		if iPrefix != jPrefix {
 			return iPrefix
 		}
-		return results[i].Name < results[j].Name
+		if results[i].Name != results[j].Name {
+			return results[i].Name < results[j].Name
+		}
+		if results[i].File != results[j].File {
+			return results[i].File < results[j].File
+		}
+		return results[i].Line < results[j].Line
 	})
 
 	if limit > 0 && len(results) > limit {

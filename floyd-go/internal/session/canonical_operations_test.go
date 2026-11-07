@@ -61,14 +61,14 @@ func TestCanonicalSessionOperationsAndTurnHistory(t *testing.T) {
 		return msg
 	}
 	path := filepath.Join(workDir, "example.txt")
-	require.NoError(t, os.WriteFile(path, []byte("before\n"), 0600))
+	require.NoError(t, os.WriteFile(path, []byte("before\n"), 0o600))
 	first := addMessage(message.User, "edit file")
 	turnCtx, err := recorder.BeginTurn(ctx, sess.ID, first.ID, workDir)
 	require.NoError(t, err)
 	require.NoError(t, history.CaptureBefore(turnCtx, files, path))
-	require.NoError(t, os.WriteFile(path, []byte("intermediate\n"), 0600))
+	require.NoError(t, os.WriteFile(path, []byte("intermediate\n"), 0o600))
 	require.NoError(t, history.CaptureBefore(turnCtx, files, path))
-	require.NoError(t, os.WriteFile(path, []byte("after\nadded\n"), 0600))
+	require.NoError(t, os.WriteFile(path, []byte("after\nadded\n"), 0o600))
 	addMessage(message.Assistant, "edited")
 	require.NoError(t, recorder.CompleteTurn(turnCtx))
 	changes, err := recorder.TurnChanges(ctx, sess.ID, 0, workDir)

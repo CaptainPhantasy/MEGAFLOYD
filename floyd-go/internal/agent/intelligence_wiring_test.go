@@ -29,6 +29,7 @@ func (m *intelligenceModel) Stream(ctx context.Context, call fantasy.Call) (fant
 	}
 	return m.finishStreamModel.Stream(ctx, call)
 }
+
 func (m *intelligenceModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
 	m.calls = append(m.calls, call)
 	m.deadline, _ = ctx.Deadline()
@@ -37,6 +38,7 @@ func (m *intelligenceModel) Generate(ctx context.Context, call fantasy.Call) (*f
 	}
 	return m.finishStreamModel.Generate(ctx, call)
 }
+
 func intelligenceCallText(call fantasy.Call) string {
 	var out strings.Builder
 	for _, msg := range call.Prompt {

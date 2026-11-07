@@ -198,6 +198,18 @@ func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID strin
 	return w.client.SetCurrentSession(ctx, w.workspaceID(), sessionID)
 }
 
+// Swarm reads the session's durable parallel-dispatch state from the
+// server.
+func (w *ClientWorkspace) Swarm(ctx context.Context, sessionID string) (proto.SwarmState, error) {
+	return w.client.GetSwarm(ctx, w.workspaceID(), sessionID)
+}
+
+// SetSwarm updates the session's durable parallel-dispatch state on the
+// server.
+func (w *ClientWorkspace) SetSwarm(ctx context.Context, sessionID string, active *bool, parallel *int) (proto.SwarmState, error) {
+	return w.client.SetSwarm(ctx, w.workspaceID(), sessionID, active, parallel)
+}
+
 // -- Messages --
 
 func (w *ClientWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
@@ -1308,6 +1320,7 @@ func protoToFile(f proto.File) history.File {
 func protoToMessage(m proto.Message) message.Message {
 	msg := message.Message{
 		ID:               m.ID,
+		RunID:            m.RunID,
 		SessionID:        m.SessionID,
 		Role:             message.MessageRole(m.Role),
 		Model:            m.Model,

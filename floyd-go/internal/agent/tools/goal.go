@@ -1,9 +1,10 @@
 package tools
 
 import (
-	"charm.land/fantasy"
 	"context"
 	"encoding/json"
+
+	"charm.land/fantasy"
 	"github.com/legacy-ai/floyd/internal/goal"
 	"github.com/legacy-ai/floyd/internal/session"
 )

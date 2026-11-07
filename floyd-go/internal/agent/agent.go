@@ -104,6 +104,7 @@ type SessionAgentCall struct {
 	FrequencyPenalty     *float64
 	PresencePenalty      *float64
 	NonInteractive       bool
+	NoHumanInteraction   bool
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -651,6 +652,7 @@ func protocolKernelPrompt() string {
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
+	ctx = acceptedCallContext(ctx, call)
 	if err := ValidateCall(call); err != nil {
 		return nil, err
 	}
@@ -1553,12 +1555,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if shouldContinue, nextPrompt, sysMsg := a.ralphLoop.Check(call.SessionID, lastOutput); shouldContinue {
 			slog.Info("Ralph loop: requeuing prompt", "prompt_len", len(nextPrompt), "system_msg", sysMsg)
 			queuedMessages = append(queuedMessages, SessionAgentCall{
-				SessionID:       call.SessionID,
-				RunSettings:     call.RunSettings.clone(),
-				Prompt:          fmt.Sprintf("[RALPH LOOP] %s\n\n%s", sysMsg, nextPrompt),
-				MaxOutputTokens: call.MaxOutputTokens,
-				ProviderOptions: call.ProviderOptions,
-				Temperature:     call.Temperature,
+				SessionID:          call.SessionID,
+				RunSettings:        call.RunSettings.clone(),
+				NoHumanInteraction: call.NoHumanInteraction,
+				Prompt:             fmt.Sprintf("[RALPH LOOP] %s\n\n%s", sysMsg, nextPrompt),
+				MaxOutputTokens:    call.MaxOutputTokens,
+				ProviderOptions:    call.ProviderOptions,
+				Temperature:        call.Temperature,
 			})
 			a.messageQueue.Set(call.SessionID, queuedMessages)
 		}
@@ -1705,6 +1708,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	}
 
 	summaryPromptText := BuildTieredSummaryPrompt(formatSummaryTodos(currentSession.Todos), tiered)
+	if instruction := summaryInstruction(ctx); instruction != "" {
+		summaryPromptText += "\n\nUser instructions for this summary:\n" + instruction
+	}
 	slog.Debug("Summarizing tiered context", "session_id", sessionID, "stats", FormatSummaryStats(tiered))
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{

@@ -142,10 +142,11 @@ func (a AgentInfo) IsZero() bool {
 // remains correct only when no other turns are in flight for the
 // same session.
 type AgentMessage struct {
-	SessionID   string       `json:"session_id"`
-	RunID       string       `json:"run_id,omitempty"`
-	Prompt      string       `json:"prompt"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	NonInteractive bool         `json:"non_interactive,omitempty"`
+	SessionID      string       `json:"session_id"`
+	RunID          string       `json:"run_id,omitempty"`
+	Prompt         string       `json:"prompt"`
+	Attachments    []Attachment `json:"attachments,omitempty"`
 	// Heartbeat marks a synthetic auto-continue prompt dispatched by the
 	// harness heartbeat (not typed by a human). It advances the
 	// consecutive-continuation counter; any message without the flag

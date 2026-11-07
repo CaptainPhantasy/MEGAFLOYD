@@ -24,7 +24,7 @@ func IsURL(value string) bool {
 	if err != nil {
 		return false
 	}
-	return parsed.Scheme == "http" || parsed.Scheme == "https"
+	return (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Hostname() != ""
 }
 
 func IsValidPath(value string) bool {

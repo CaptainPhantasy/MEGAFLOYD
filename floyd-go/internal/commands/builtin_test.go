@@ -15,13 +15,15 @@ var requiredBuiltins = []string{
 	"status", "undo", "editor", "theme", "login", "logout", "export-md",
 	"export-debug-zip", "copy", "exit", "version", "swarm", "btw",
 	"desktop", "tui", "feedback", "web", "remote-control",
+	"hooks", "rewind", "file-history", "release-notes", "todos", "agents", "skills", "doctor", "prompt", "codebase", "session", "import", "telemetry", "memory",
+	"context", "cost", "vim", "terminal-setup", "output-style", "privacy-settings",
 }
 
 func TestBuiltinRegistryCoversRequiredList(t *testing.T) {
 	t.Parallel()
 
-	require.Len(t, requiredBuiltins, 43, "all interface handoff commands are registered")
-	require.Len(t, builtinCommands, 43)
+	require.Len(t, requiredBuiltins, 63, "all requested commands are registered")
+	require.Len(t, builtinCommands, len(requiredBuiltins))
 	require.Empty(t, BlockedBuiltin)
 	require.Empty(t, ExcludedBuiltin)
 

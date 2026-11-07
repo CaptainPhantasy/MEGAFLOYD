@@ -11,6 +11,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/legacy-ai/floyd/internal/agent"
+	"github.com/legacy-ai/floyd/internal/agent/ralph"
 	mcptools "github.com/legacy-ai/floyd/internal/agent/tools/mcp"
 	"github.com/legacy-ai/floyd/internal/commands"
 	"github.com/legacy-ai/floyd/internal/config"
@@ -190,6 +192,23 @@ type Workspace interface {
 
 	// History
 	ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error)
+
+	// Session runtime: swarm
+	//
+	// Swarm reads the session's parallel-dispatch state. SetSwarm
+	// updates it; nil fields are left unchanged. Both are proxied to
+	// the server in client mode.
+	Swarm(ctx context.Context, sessionID string) (proto.SwarmState, error)
+	SetSwarm(ctx context.Context, sessionID string, active *bool, parallel *int) (proto.SwarmState, error)
+	RalphGoal(ctx context.Context, sessionID, action, objective string) (*ralph.State, error)
+	ForkSession(ctx context.Context, sessionID string) (*session.ForkResult, error)
+	ReloadConfig(ctx context.Context) error
+	UndoPrompts(ctx context.Context, sessionID string, count int) (*session.UndoResult, error)
+	Summarize(ctx context.Context, sessionID, instruction string) error
+	Tasks(ctx context.Context) ([]agent.RuntimeTask, error)
+	Task(ctx context.Context, id, action string) (agent.RuntimeTask, error)
+	StartAgentTask(ctx context.Context, sessionID, prompt, agentName string) (agent.RuntimeTask, error)
+	Plan(ctx context.Context, sessionID string, in *proto.RuntimePlanRequest) (proto.RuntimePlan, error)
 
 	// LSP
 	LSPStart(ctx context.Context, path string)

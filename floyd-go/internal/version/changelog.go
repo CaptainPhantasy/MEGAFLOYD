@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 // ChangelogEntry represents a single feature or change in the changelog.
@@ -30,12 +31,13 @@ type Changelog struct {
 
 // DefaultChangelog returns the default changelog with known V4.x features.
 func DefaultChangelog() *Changelog {
-	now := time.Now().Format("2006-01-02")
+	const lastUpdated = "2026-10-31"
 	return &Changelog{
 		CurrentVersion: Version,
-		LastUpdated:    now,
+		LastUpdated:    lastUpdated,
 		Categories:     []string{"agent", "tools", "ui", "performance", "safety"},
 		Entries: []ChangelogEntry{
+			{Version: Version, Type: "fix", Title: "Terminal commands and reliable question delivery", Description: "This build repairs command navigation, command arguments, visible session updates, acknowledged question delivery, named swarm routing, and local/server operations. It exposes the existing inspection tools, libraries, file history and session recovery from the terminal.", Category: "ui", Date: lastUpdated},
 			// === v1.8 ===
 			{
 				Version:     "v1.8",
@@ -365,11 +367,13 @@ func GetNewFeaturesSince(sinceVersion string) []ChangelogEntry {
 	return newFeatures
 }
 
-// isNewerVersion compares two version strings (simplified).
+// isNewerVersion compares valid semantic versions, including shorthand
+// major/minor versions used by historical changelog entries.
 func isNewerVersion(current, previous string) bool {
-	// Simplified version comparison
-	// In production, use a proper semver library
-	return strings.HasPrefix(current, "v") && current > previous
+	if previous == "" {
+		return semver.IsValid(current)
+	}
+	return semver.IsValid(current) && semver.IsValid(previous) && semver.Compare(current, previous) > 0
 }
 
 // FormatForBoot formats the changelog for display during agent boot.

@@ -28,7 +28,7 @@ func (s *Service) Update(sessionID, content string) (Status, error) {
 	}
 	tmp := file.Name()
 	defer os.Remove(tmp)
-	if err = file.Chmod(0644); err == nil {
+	if err = file.Chmod(0o644); err == nil {
 		_, err = file.WriteString(content)
 	}
 	closeErr := file.Close()

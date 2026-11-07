@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	githubApiUrl = "https://api.github.com/repos/charmbracelet/floyd/releases/latest"
-	userAgent    = "floyd/1.0"
+	githubApiUrl = "https://api.github.com/repos/CaptainPhantasy/MEGAFLOYD/releases/latest"
+	userAgent    = "MegaFloyd"
 )
 
 // Default is the default [Client].

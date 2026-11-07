@@ -41,7 +41,7 @@ func TestCanonicalSessionControlsAndHistoryHTTP(t *testing.T) {
 	require.NoError(t, err)
 	path := filepath.Join(h.workspace.Path, "http.txt")
 	require.NoError(t, history.CaptureBefore(turnCtx, h.app.History, path))
-	require.NoError(t, os.WriteFile(path, []byte("HTTP snapshot\n"), 0600))
+	require.NoError(t, os.WriteFile(path, []byte("HTTP snapshot\n"), 0o600))
 	require.NoError(t, recorder.CompleteTurn(turnCtx))
 	_, err = h.app.Messages.Create(t.Context(), sess.ID, message.CreateMessageParams{Role: message.Assistant, Parts: []message.ContentPart{message.TextContent{Text: "Created"}}})
 	require.NoError(t, err)

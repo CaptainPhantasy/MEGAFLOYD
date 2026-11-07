@@ -89,6 +89,14 @@ func NewDefaultStepExecutor() *DefaultStepExecutor {
 }
 
 func (e *DefaultStepExecutor) Execute(ctx context.Context, step *Step) (*StepResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if step.Command != "" || step.Validation != "" {
+		step.Status = StepStatusFailed
+		step.Error = "command execution and validation require a configured workflow executor"
+		return &StepResult{Error: step.Error}, nil
+	}
 	now := time.Now()
 	step.StartedAt = &now
 	step.Status = StepStatusRunning
@@ -125,11 +133,7 @@ func (e *DefaultStepExecutor) Rollback(ctx context.Context, step *Step) error {
 		return nil
 	}
 
-	now := time.Now()
-	step.Status = StepStatusRollback
-	step.CompletedAt = &now
-
-	return nil
+	return fmt.Errorf("rollback commands require a configured workflow executor")
 }
 
 func (e *DefaultStepExecutor) Validate(ctx context.Context, step *Step) (bool, error) {
@@ -137,5 +141,5 @@ func (e *DefaultStepExecutor) Validate(ctx context.Context, step *Step) (bool, e
 		return true, nil
 	}
 
-	return true, nil
+	return false, fmt.Errorf("validation commands require a configured workflow executor")
 }

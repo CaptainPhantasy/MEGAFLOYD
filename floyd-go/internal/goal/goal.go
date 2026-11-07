@@ -73,6 +73,7 @@ func read(metadata map[string]any) (*State, error) {
 	}
 	return &s, nil
 }
+
 func refresh(s *State, now time.Time) {
 	elapsed := s.WallClockMs
 	if s.StartedAt != nil && now.After(*s.StartedAt) {
@@ -90,6 +91,7 @@ func refresh(s *State, now time.Time) {
 	s.Budget.RemainingWallClockMs, s.Budget.WallClockBudgetReached = remaining(s.Budget.WallClockBudgetMs, elapsed)
 	s.Budget.OverBudget = s.Budget.TokenBudgetReached || s.Budget.TurnBudgetReached || s.Budget.WallClockBudgetReached
 }
+
 func store(m map[string]any, s *State) error {
 	refresh(s, time.Now())
 	b, err := json.Marshal(s)
@@ -103,6 +105,7 @@ func store(m map[string]any, s *State) error {
 	m["goal"] = value
 	return nil
 }
+
 func mutate(ctx context.Context, svc session.Service, id string, fn func(*State) (*State, error)) (*State, error) {
 	m, ok := svc.(session.MetadataMutator)
 	if !ok {
@@ -126,6 +129,7 @@ func mutate(ctx context.Context, svc session.Service, id string, fn func(*State)
 	})
 	return out, err
 }
+
 func Get(ctx context.Context, svc session.Service, id string) (*State, error) {
 	v, err := svc.Get(ctx, id)
 	if err != nil {
@@ -233,6 +237,7 @@ func Begin(ctx context.Context, svc session.Service, id string) (*Run, error) {
 	}
 	return &Run{svc: svc, sessionID: id, goalID: s.GoalID, started: now}, nil
 }
+
 func (r *Run) Prompt() string {
 	if r == nil {
 		return ""
@@ -243,12 +248,14 @@ func (r *Run) Prompt() string {
 	}
 	return fmt.Sprintf("\n<active_goal id=%q>\nObjective: %s\nCompletion criterion: %s\nWork toward this objective within the user's instructions. Use the goal tool to mark complete only when achieved, or blocked when user input is required. Remaining turns including this turn: %d.\n</active_goal>", s.GoalID, s.Objective, s.CompletionCriterion, remainingTurns(s))
 }
+
 func remainingTurns(s *State) int64 {
 	if s.Budget.RemainingTurns == nil {
 		return 1
 	}
 	return *s.Budget.RemainingTurns + 1
 }
+
 func (r *Run) AddUsage(ctx context.Context, tokens int64) error {
 	if r == nil || tokens <= 0 {
 		return nil
@@ -261,6 +268,7 @@ func (r *Run) AddUsage(ctx context.Context, tokens int64) error {
 	})
 	return err
 }
+
 func (r *Run) ShouldStop() bool {
 	if r == nil {
 		return false
@@ -268,6 +276,7 @@ func (r *Run) ShouldStop() bool {
 	s, err := Get(context.Background(), r.svc, r.sessionID)
 	return err != nil || s == nil || s.GoalID != r.goalID || s.Status != "active" || s.Budget.TokenBudgetReached || s.Budget.WallClockBudgetReached
 }
+
 func (r *Run) Finish(ctx context.Context, runErr error) error {
 	if r == nil {
 		return nil
@@ -302,6 +311,7 @@ func (r *Run) Finish(ctx context.Context, runErr error) error {
 	})
 	return err
 }
+
 func (r *Run) Continuation(ctx context.Context) string {
 	if r == nil {
 		return ""

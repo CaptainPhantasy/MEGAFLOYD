@@ -1,6 +1,11 @@
 package agent
 
-import "context"
+import (
+	"context"
+
+	"github.com/legacy-ai/floyd/internal/message"
+	"github.com/legacy-ai/floyd/internal/permission"
+)
 
 // runIDContextKey is the unexported context key used to carry a
 // caller-supplied RunID from the workspace HTTP boundary
@@ -18,7 +23,7 @@ type runIDContextKey struct{}
 // as-is; downstream code treats an empty RunID as "caller did not
 // supply one" and falls back to SessionID-only correlation.
 func WithRunID(ctx context.Context, runID string) context.Context {
-	return context.WithValue(ctx, runIDContextKey{}, runID)
+	return context.WithValue(message.WithRunID(ctx, runID), runIDContextKey{}, runID)
 }
 
 // RunIDFromContext returns the RunID set by [WithRunID], or "" if
@@ -30,4 +35,10 @@ func RunIDFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// Reapply the accepted request identity when a queued turn runs inside an older
+// turn's context. Neither output nor permission mode may leak between turns.
+func acceptedCallContext(ctx context.Context, call SessionAgentCall) context.Context {
+	return permission.WithNonInteractiveMode(WithRunID(ctx, call.RunID), call.NoHumanInteraction)
 }

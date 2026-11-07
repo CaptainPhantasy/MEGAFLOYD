@@ -3,8 +3,8 @@
 // the permission service pattern: publish a request over pubsub,
 // block on a channel, and resolve when the UI sends back answers.
 //
-// Only one question can be pending at a time (the tool blocks until
-// answered), so no correlation IDs are needed in the domain model.
+// Requests and replies are correlated because notifications and submissions
+// from different clients can arrive after the next request has opened.
 package question
 
 import (
@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/legacy-ai/floyd/internal/permission"
 	"github.com/legacy-ai/floyd/internal/pubsub"
 )
 
@@ -191,6 +192,8 @@ type Service interface {
 	// Answer resolves the pending question with the given answers.
 	Answer(answers []Answer) bool
 	AnswerRequest(id string, answers []Answer) bool
+	SubmitLocal(ctx context.Context, id string, answers []Answer) (bool, error)
+	SubmitRemote(ctx context.Context, id string, answers []Answer) (bool, error)
 	Pending() []Request
 
 	// Cancel cancels the pending question. Returns false if no
@@ -214,6 +217,8 @@ type questionService struct {
 	pendingID          string
 	pendingRequest     *Request
 	askMu              sync.Mutex
+	storageDir         string
+	received           map[string]submissionRecord
 }
 
 // NewService creates a question service for direct in-process input.
@@ -245,15 +250,22 @@ func (s *questionService) SubscribeNotifications(ctx context.Context) <-chan pub
 
 // Ask publishes a request and blocks until the user answers.
 func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error) {
+	if permission.IsNonInteractive(ctx) {
+		return nil, fmt.Errorf("cannot ask a question without an interactive terminal: %w", permission.ErrInteractionRequired)
+	}
 	if req.RequireLocalInput && s.remoteOnly {
 		return nil, ErrLocalInputRequired
 	}
 	if req.ID == "" {
-		req.ID = uuid.New().String()
+		if !req.RequireLocalInput && req.SessionID != "" && req.ToolCallID != "" {
+			req.ID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(req.SessionID+"\x00"+req.ToolCallID)).String()
+		} else {
+			req.ID = uuid.New().String()
+		}
 	}
 	for i := range req.Questions {
 		if req.Questions[i].ID == "" {
-			req.Questions[i].ID = uuid.New().String()
+			req.Questions[i].ID = fmt.Sprintf("%s:%d", req.ID, i)
 		}
 	}
 
@@ -273,6 +285,23 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 
 	s.askMu.Lock()
 	defer s.askMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !req.RequireLocalInput {
+		s.mu.Lock()
+		record, found, err := s.loadSubmission(req.ID)
+		s.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			if !sameJSON(record.Request, req) {
+				return nil, ErrSubmissionConflict
+			}
+			return cloneAnswers(record.Answers), nil
+		}
+	}
 	responseCh := make(chan answerResult, 1)
 	cancelCh := make(chan struct{})
 	s.mu.Lock()
@@ -284,11 +313,15 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 
 	defer func() {
 		s.mu.Lock()
+		unresolved := s.pendingID == req.ID
 		s.pending = nil
 		s.cancelled = nil
 		s.pendingID = ""
 		s.pendingRequest = nil
 		s.mu.Unlock()
+		if unresolved {
+			s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{BatchID: req.ID})
+		}
 	}()
 
 	s.broker.Publish(pubsub.CreatedEvent, req)
@@ -316,13 +349,53 @@ func (s *questionService) AnswerRequest(id string, answers []Answer) bool {
 }
 
 func (s *questionService) answerRequest(id string, answers []Answer, local bool) bool {
+	accepted, _ := s.submit(context.Background(), id, answers, local, false)
+	return accepted
+}
+
+func (s *questionService) submit(ctx context.Context, id string, answers []Answer, local, retry bool) (bool, error) {
 	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return false, err
+	}
+	protected := s.pendingRequest != nil && s.pendingID == id && s.pendingRequest.RequireLocalInput
+	if retry && id != "" && !protected {
+		record, found, err := s.loadSubmission(id)
+		if err != nil || found {
+			if err != nil {
+				s.mu.Unlock()
+				return false, err
+			}
+			if !sameJSON(record.Answers, answers) {
+				s.mu.Unlock()
+				return false, ErrSubmissionConflict
+			}
+			if s.pending == nil || s.pendingID != id {
+				s.mu.Unlock()
+				return true, nil
+			}
+		}
+	}
 	if s.pending == nil || (id != "" && id != s.pendingID) {
 		s.mu.Unlock()
-		return false
+		return false, ErrStaleRequest
 	}
 	batchID, ch := s.pendingID, s.pending
 	accepted := local || (s.pendingRequest != nil && !s.pendingRequest.RequireLocalInput)
+	if accepted {
+		if err := validateAnswers(*s.pendingRequest, answers); err != nil {
+			s.mu.Unlock()
+			return false, err
+		}
+		answers = cloneAnswers(answers)
+		if !s.pendingRequest.RequireLocalInput {
+			if err := s.saveSubmission(submissionRecord{Request: *s.pendingRequest, Answers: answers}); err != nil {
+				s.mu.Unlock()
+				return false, err
+			}
+		}
+	}
 	s.pending, s.cancelled, s.pendingRequest = nil, nil, nil
 	s.pendingID = ""
 	s.mu.Unlock()
@@ -332,7 +405,10 @@ func (s *questionService) answerRequest(id string, answers []Answer, local bool)
 	}
 	ch <- result
 	s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{BatchID: batchID})
-	return accepted
+	if !accepted {
+		return false, ErrLocalInputRequired
+	}
+	return true, nil
 }
 
 // Cancel cancels the pending question. Returns false if no

@@ -1,0 +1,53 @@
+name: Bug Report
+description: Report a problem with MegaFloyd
+labels:
+  - bug
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for submitting a bug report. Please include as much
+        information as possible; the more reproducible the report, the
+        faster it can be fixed.
+
+  - type: input
+    id: version
+    attributes:
+      label: What version of MegaFloyd is running?
+      description: Copy the output of `megafloyd --version`
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: What platform are you running on?
+      description: |
+        For macOS and Linux, copy the output of `uname -mprs`.
+        For Windows, include the Windows version and architecture.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What issue are you seeing?
+      description: Include full error messages with private information redacted. Text is preferred over screenshots.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: What steps reproduce the bug?
+      description: Explain the bug and provide a minimal reproduction if possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true

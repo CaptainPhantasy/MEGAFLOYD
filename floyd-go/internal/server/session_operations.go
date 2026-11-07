@@ -22,6 +22,7 @@ func (c *controllerV1) registerSessionOperationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{id}/sessions/{sid}/fork", c.handleSessionFork)
 	mux.HandleFunc("POST /v1/workspaces/{id}/sessions/{sid}/branch", c.handleSessionBranch)
 	mux.HandleFunc("POST /v1/workspaces/{id}/sessions/{sid}/undo", c.handleSessionUndo)
+	mux.HandleFunc("POST /v1/workspaces/{id}/sessions/{sid}/rewind", c.handleSessionRewind)
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/file-history/turns", c.handleSessionHistoryTurns)
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/file-history/changes", c.handleSessionHistoryChanges)
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/file-history/content", c.handleSessionHistoryContent)
@@ -96,9 +97,11 @@ func (c *controllerV1) handleSessionMetadata(w http.ResponseWriter, r *http.Requ
 func (c *controllerV1) handleSessionFork(w http.ResponseWriter, r *http.Request) {
 	c.handleSessionClone(w, r, false)
 }
+
 func (c *controllerV1) handleSessionBranch(w http.ResponseWriter, r *http.Request) {
 	c.handleSessionClone(w, r, true)
 }
+
 func (c *controllerV1) handleSessionClone(w http.ResponseWriter, r *http.Request, branch bool) {
 	var request proto.SessionCloneRequest
 	if !decodeSessionOperation(w, r, &request, true) {
@@ -126,7 +129,7 @@ func (c *controllerV1) handleSessionUndo(w http.ResponseWriter, r *http.Request)
 		c.sessionOperationError(w, r, err)
 		return
 	}
-	jsonEncode(w, proto.SessionUndoResponse{Session: sessionToProto(result.Session), RemovedTurns: result.RemovedTurns, UndoRecordID: result.RecordID})
+	jsonEncode(w, proto.SessionUndoResponse{Session: sessionToProto(result.Session), RemovedTurns: result.RemovedTurns, UndoRecordID: result.RecordID, RemovedMessageIDs: result.RemovedMessageIDs})
 }
 
 func historyTurnOrdinal(w http.ResponseWriter, r *http.Request) (int64, bool) {

@@ -90,6 +90,7 @@ func (m *Manager) WithCredentialLock(ctx context.Context, fn func() error) error
 	defer release()
 	return fn()
 }
+
 func (m *Manager) SaveToken(ctx context.Context, token Token) error {
 	return m.WithCredentialLock(ctx, func() error { return m.Store.Save(m.Name, token) })
 }

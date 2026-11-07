@@ -1,10 +1,11 @@
 package logo
 
 import (
-	"github.com/charmbracelet/x/ansi"
-	"github.com/legacy-ai/floyd/internal/ui/styles"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+	"github.com/legacy-ai/floyd/internal/ui/styles"
 )
 
 func TestCanonicalMegaFloydWordmarkAcrossProviders(t *testing.T) {

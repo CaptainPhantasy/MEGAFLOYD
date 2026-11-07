@@ -41,7 +41,8 @@ func TestCanonicalDeferredMCPUsesTargetPermissionsAndSettings(t *testing.T) {
 	for _, name := range []string{"probe", "excluded"} {
 		mcpsdk.AddTool(server, &mcpsdk.Tool{Name: name, Description: "Read gateway status"}, func(_ context.Context, _ *mcpsdk.CallToolRequest, args struct {
 			Query string `json:"query"`
-		}) (*mcpsdk.CallToolResult, any, error) {
+		},
+		) (*mcpsdk.CallToolResult, any, error) {
 			executions.Add(1)
 			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "gateway " + args.Query}}}, nil, nil
 		})

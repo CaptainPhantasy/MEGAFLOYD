@@ -58,6 +58,8 @@ func (c *coordinator) runtimeAgentSelector() (*AgentSelector, error) {
 // RuntimeWithIdle holds accepted/dispatch transitions while a workspace-wide
 // control refreshes the installed palette. It includes detached child agents.
 func (c *coordinator) RuntimeWithIdle(operation func() error) error {
+	c.runtimeControlMu.Lock()
+	defer c.runtimeControlMu.Unlock()
 	list := []SessionAgent{c.currentAgent}
 	store := c.runtimeTasks()
 	store.Lock()

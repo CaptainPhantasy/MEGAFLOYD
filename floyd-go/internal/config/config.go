@@ -282,8 +282,11 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	VimMode         bool   `json:"vim_mode,omitempty" jsonschema:"description=Enable Vim editing in the prompt,default=false"`
+	OutputStyle     string `json:"output_style,omitempty" jsonschema:"description=Assistant text presentation,enum=markdown,enum=plain,default=markdown"`
+	TerminalProfile string `json:"terminal_profile,omitempty" jsonschema:"description=Editor send and newline keys,enum=standard,enum=multiline,default=standard"`
+	CompactMode     bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode        string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
 	// Theme selects the TUI palette. Empty keeps the provider-derived
 	// default, which is the dark Charmtone palette for every built-in
 	// provider.
@@ -809,7 +812,9 @@ type Config struct {
 	// environment override, then to its built-in default.
 	Experimental map[string]bool `json:"experimental,omitempty" jsonschema:"description=Experimental feature overrides keyed by flag id"`
 
-	Agents map[string]Agent `json:"-"`
+	// AgentDefinitions keeps explicit choices separate from derived defaults.
+	AgentDefinitions map[string]Agent `json:"agents,omitempty" jsonschema:"description=Named agent model and tool settings"`
+	Agents           map[string]Agent `json:"-"`
 }
 
 // OutputReviewConfig controls the independent assistant publication review.
@@ -1115,6 +1120,37 @@ func (c *Config) SetupAgents() {
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 		},
+	}
+	for name, override := range c.AgentDefinitions {
+		configured, exists := agents[name]
+		if !exists {
+			configured = Agent{ID: name, Name: name, Model: SelectedModelTypeLarge, AllowedTools: slices.Clone(allowedTools), ContextPaths: slices.Clone(c.Options.ContextPaths)}
+		}
+		configured.ID = name
+		if override.Name != "" {
+			configured.Name = override.Name
+		}
+		if override.Description != "" {
+			configured.Description = override.Description
+		}
+		configured.Disabled = override.Disabled
+		if override.Model != "" {
+			configured.Model = override.Model
+		}
+		if override.AllowedTools != nil {
+			configured.AllowedTools = resolveAllowedTools(slices.Clone(override.AllowedTools), c.Options.DisabledTools)
+		}
+		if override.AllowedMCP != nil {
+			configured.AllowedMCP = maps.Clone(override.AllowedMCP)
+		}
+		if override.ContextPaths != nil {
+			configured.ContextPaths = slices.Clone(override.ContextPaths)
+		}
+		if name == AgentTask {
+			configured.AllowedTools = resolveReadOnlyTools(configured.AllowedTools)
+			configured.AllowedMCP = map[string][]string{}
+		}
+		agents[name] = configured
 	}
 	c.Agents = agents
 }

@@ -49,15 +49,29 @@ func newHooksCommand() *cobra.Command {
 				}
 				source = "json_snapshot"
 			} else {
-				c, ws, err := hookInspectionWorkspace(cmd)
+				var err error
+				cwd, err = ResolveCwd(cmd)
 				if err != nil {
 					return err
 				}
-				cfg, err = c.GetConfig(cmd.Context(), ws.ID)
-				if err != nil {
-					return err
+				if cmd.Flags().Changed("host") {
+					c, ws, err := hookInspectionWorkspace(cmd)
+					if err != nil {
+						return err
+					}
+					cfg, err = c.GetConfig(cmd.Context(), ws.ID)
+					if err != nil {
+						return err
+					}
+					cwd, source = ws.Path, "effective_runtime"
+				} else {
+					dataDir, _ := cmd.Flags().GetString("data-dir")
+					cfg, _, err = config.Inspect(cmd.Context(), cwd, dataDir)
+					if err != nil {
+						return err
+					}
+					source = "local_configuration"
 				}
-				cwd, source = ws.Path, "effective_runtime"
 			}
 			result, err := tools.ExplainHooks(cfg, args[0], toolName, cwd, source)
 			if err != nil {
@@ -108,11 +122,23 @@ func newHooksCommand() *cobra.Command {
 			}
 			dataDir, _ := cmd.Flags().GetString("data-dir")
 			if dataDir == "" {
-				_, ws, err := hookInspectionWorkspace(cmd)
-				if err != nil {
-					return err
+				if cmd.Flags().Changed("host") {
+					_, ws, err := hookInspectionWorkspace(cmd)
+					if err != nil {
+						return err
+					}
+					dataDir = ws.DataDir
+				} else {
+					cwd, err := ResolveCwd(cmd)
+					if err != nil {
+						return err
+					}
+					cfg, _, err := config.Inspect(cmd.Context(), cwd, "")
+					if err != nil {
+						return err
+					}
+					dataDir = cfg.Options.DataDirectory
 				}
-				dataDir = ws.DataDir
 				if dataDir == "" {
 					return errors.New("active workspace did not report its data directory; use --data-dir")
 				}
