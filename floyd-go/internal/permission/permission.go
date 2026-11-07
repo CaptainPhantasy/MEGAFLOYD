@@ -290,6 +290,20 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 	s.requestMu.Lock()
 	defer s.requestMu.Unlock()
+
+	s.autoApproveSessionsMu.RLock()
+	autoApprove = s.autoApproveSessions[opts.SessionID]
+	s.autoApproveSessionsMu.RUnlock()
+	_, persistent := s.sessionPermissions.Get(PermissionKey{
+		SessionID: permission.SessionID,
+		ToolName:  permission.ToolName,
+		Action:    permission.Action,
+		Path:      permission.Path,
+	})
+	if autoApprove || persistent {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{ToolCallID: opts.ToolCallID, Granted: true})
+		return true, nil
+	}
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{ToolCallID: opts.ToolCallID})
 
 	s.activeRequestMu.Lock()
