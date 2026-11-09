@@ -2,8 +2,10 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
@@ -73,7 +75,18 @@ func (m *Tool) Info() fantasy.ToolInfo {
 
 	if input, ok := m.tool.InputSchema.(map[string]any); ok {
 		if props, ok := input["properties"].(map[string]any); ok {
-			parameters = props
+			// Clone before inlining: the properties map belongs to the
+			// process-global MCP tool registry, is shared across every
+			// coordinator and server handler, and must never be mutated
+			// here. fantasy reassembles the schema as {"type": "object",
+			// "properties": ..., "required": ...} with nowhere to carry
+			// "$defs", so resolve every "$ref" against the original schema
+			// now. Otherwise providers receive a dangling JSON Pointer and
+			// reject the request (Zapier MCP tools use "$defs"/"__schema0").
+			if cloned, ok := cloneSchemaValue(props).(map[string]any); ok {
+				inlineSchemaRefs(cloned, input, nil, 0)
+				parameters = cloned
+			}
 		}
 		if req, ok := input["required"].([]any); ok {
 			// Convert []any -> []string when elements are strings
@@ -82,9 +95,6 @@ func (m *Tool) Info() fantasy.ToolInfo {
 					required = append(required, s)
 				}
 			}
-		} else if reqStr, ok := input["required"].([]string); ok {
-			// Handle case where it's already []string
-			required = reqStr
 		}
 	}
 
@@ -148,4 +158,114 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 	default:
 		return fantasy.NewTextResponse(result.Content), nil
 	}
+}
+
+// maxSchemaRefDepth bounds the length of a "$ref" expansion chain on one
+// branch while inlining referenced schema definitions. Proper cycle
+// handling is done per expansion branch via the seen list.
+const maxSchemaRefDepth = 64
+
+// jsonPointerUnescape decodes the JSON Pointer escape sequences.
+var jsonPointerUnescape = strings.NewReplacer("~1", "/", "~0", "~")
+
+// inlineSchemaRefs expands every "$ref" inside node against root, which is
+// the MCP tool's full input schema. fantasy rebuilds the tool schema from
+// fantasy.ToolInfo as {"type": "object", "properties": ..., "required":
+// ...} and has nowhere to carry "$defs", so a "$ref" that reaches it
+// unresolved is a dangling JSON Pointer and OpenAI-compatible providers
+// reject the whole request ("Pointer '/$defs/__schema0' does not exist").
+// Pointers that cannot be resolved locally (external URLs, missing
+// definitions, cycles) are replaced by a typed permissive schema so one
+// malformed property cannot break every request. node must be private to
+// the caller; the registry's maps are never mutated here.
+func inlineSchemaRefs(node any, root map[string]any, seen []string, depth int) {
+	switch v := node.(type) {
+	case map[string]any:
+		inlineSchemaRefsMap(v, root, seen, depth)
+	case []any:
+		for _, item := range v {
+			inlineSchemaRefs(item, root, seen, depth)
+		}
+	}
+}
+
+func inlineSchemaRefsMap(node map[string]any, root map[string]any, seen []string, depth int) {
+	if depth > maxSchemaRefDepth {
+		delete(node, "$ref")
+		return
+	}
+
+	if ref, ok := node["$ref"].(string); ok {
+		if target, ok := resolveJSONPointer(ref, root); ok {
+			if def, ok := target.(map[string]any); ok && !slices.Contains(seen, ref) {
+				if clone, ok := cloneSchemaValue(def).(map[string]any); ok {
+					// Overlay the definition on the surviving siblings:
+					// JSON Schema 2020-12 applies keywords like
+					// "description" alongside "$ref", so they must not be
+					// discarded, and existing sibling keys win. The
+					// definition is cloned per reference, so expansions
+					// never share mutable state.
+					delete(node, "$ref")
+					for k, v := range clone {
+						if _, exists := node[k]; !exists {
+							node[k] = v
+						}
+					}
+					inlineSchemaRefsMap(node, root, append(seen, ref), depth+1)
+					return
+				}
+			}
+		}
+		// Unresolvable pointer: degrade this one property to a typed
+		// permissive schema instead of leaving a dangling "$ref" or a
+		// type-less empty object, both of which strict providers reject.
+		delete(node, "$ref")
+		if len(node) == 0 {
+			node["type"] = "object"
+			node["additionalProperties"] = true
+		}
+		return
+	}
+
+	for _, v := range node {
+		inlineSchemaRefs(v, root, seen, depth)
+	}
+}
+
+// resolveJSONPointer resolves a local "#..." JSON Pointer against root,
+// decoding the "~0" and "~1" escapes. Non-local pointers are unsupported.
+func resolveJSONPointer(pointer string, root map[string]any) (any, bool) {
+	if pointer == "#" {
+		return root, true
+	}
+	if !strings.HasPrefix(pointer, "#/") {
+		return nil, false
+	}
+	var current any = root
+	for _, raw := range strings.Split(pointer[2:], "/") {
+		token := jsonPointerUnescape.Replace(raw)
+		m, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		if current, ok = m[token]; !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+// cloneSchemaValue deep-copies schema data decoded from JSON so a
+// definition referenced from several places is expanded independently
+// everywhere it appears.
+func cloneSchemaValue(v any) any {
+	bts, err := json.Marshal(v)
+	if err != nil {
+		return v
+	}
+	var out any
+	if err := json.Unmarshal(bts, &out); err != nil {
+		return v
+	}
+	return out
 }
