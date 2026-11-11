@@ -50,9 +50,9 @@ describe('performance smoke', () => {
     if (!result.ok) {
       // An abort is acceptable only when it is prompt (< 100 ms).
       expect(result).toEqual({ ok: false, reason: 'aborted' });
-      // 500ms gives CI runners headroom (measured 115ms there); a
-    // non-aborting parse of this 400KB source would take far longer.
-    expect(elapsed).toBeLessThan(500);
+      // CI runners measured >100ms here; a non-aborting parse would
+      // take far longer than this bound.
+      expect(elapsed).toBeLessThan(500);
       return;
     }
     // Completed within the default 50 ms budget; re-parse unbounded and
