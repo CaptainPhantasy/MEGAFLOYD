@@ -8,7 +8,9 @@
 // either limit is exceeded the methods throw `Aborted`, which the `parse`
 // entry point catches and reports as `{ ok: false, reason: 'aborted' }`.
 
-export const DEFAULT_TIMEOUT_MS = 50;
+// 250ms wall-clock headroom: a 500KB string literal measured 56ms on a
+// constrained CI runner, so 50ms aborted legitimate parses there.
+export const DEFAULT_TIMEOUT_MS = 250;
 export const DEFAULT_MAX_NODES = 50_000;
 
 /** Internal control-flow error. Never escapes the `parse` entry point. */
