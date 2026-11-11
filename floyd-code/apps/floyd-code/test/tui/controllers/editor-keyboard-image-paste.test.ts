@@ -162,6 +162,9 @@ function withExifOrientation(jpeg: Uint8Array, orientation: number): Uint8Array 
   );
 }
 
+// Image re-encoding through sharp exceeds vitest's 5s default on CI runners.
+vi.setConfig({ testTimeout: 60_000 });
+
 describe('clipboard image paste compression', () => {
   beforeEach(() => {
     readClipboardMedia.mockReset();

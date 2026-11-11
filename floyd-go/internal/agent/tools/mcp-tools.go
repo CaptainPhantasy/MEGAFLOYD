@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -25,15 +27,28 @@ var whitelistDockerTools = []string{
 // GetMCPTools gets all the currently available MCP tools.
 func GetMCPTools(permissions permission.Service, cfg *config.ConfigStore, wd string) []*Tool {
 	var result []*Tool
+	seen := make(map[string]int)
 	for mcpName, tools := range mcp.Tools(cfg) {
 		for _, tool := range tools {
-			result = append(result, &Tool{
+			// Sanitized provider-facing names can collide when two distinct
+			// tool names differ only in characters outside the allowed set;
+			// keep them unique with a deterministic numeric suffix.
+			t := &Tool{
 				mcpName:     mcpName,
 				tool:        tool,
 				permissions: permissions,
 				workingDir:  wd,
 				cfg:         cfg,
-			})
+			}
+			name := t.Name()
+			if n := seen[name]; n > 0 {
+				suffix := fmt.Sprintf("-%d", n+1)
+				t.overrideName = name[:max(1, len(name)-len(suffix))] + suffix
+				seen[name] = n + 1
+			} else {
+				seen[name] = 1
+			}
+			result = append(result, t)
 		}
 	}
 	return result
@@ -46,6 +61,7 @@ type Tool struct {
 	cfg             *config.ConfigStore
 	permissions     permission.Service
 	workingDir      string
+	overrideName    string
 	providerOptions fantasy.ProviderOptions
 }
 
@@ -58,7 +74,39 @@ func (m *Tool) ProviderOptions() fantasy.ProviderOptions {
 }
 
 func (m *Tool) Name() string {
-	return fmt.Sprintf("mcp_%s_%s", m.mcpName, m.tool.Name)
+	if m.overrideName != "" {
+		return m.overrideName
+	}
+	return sanitizeToolName(fmt.Sprintf("mcp_%s_%s", m.mcpName, m.tool.Name))
+}
+
+// maxProviderToolNameLength matches the OpenAI tool-name limit that
+// DeepSeek-compatible providers enforce alongside the character pattern.
+const maxProviderToolNameLength = 64
+
+// sanitizeToolName rewrites a composed tool name into the character set
+// providers accept (^[a-zA-Z0-9_-]+$, at most 64 characters). MCP server
+// names and tool names come from external configuration and may contain
+// dots, slashes or non-ASCII; forwarding them unsanitized made the provider
+// reject the entire request. Only the provider-facing alias changes: tool
+// execution goes through the MCP protocol using the original tool name.
+func sanitizeToolName(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_' || r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := b.String()
+	if len(out) <= maxProviderToolNameLength {
+		return out
+	}
+	sum := sha256.Sum256([]byte(name))
+	return out[:maxProviderToolNameLength-9] + "-" + hex.EncodeToString(sum[:])[:8]
 }
 
 func (m *Tool) MCP() string {

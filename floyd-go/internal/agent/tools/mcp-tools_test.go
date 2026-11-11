@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/legacy-ai/floyd/internal/agent/tools/mcp"
@@ -267,4 +268,40 @@ func TestInfoClonesSharedDefsPerReference(t *testing.T) {
 	require.True(t, ok)
 	first["marker"] = true
 	require.NotContains(t, second, "marker")
+}
+
+// TestNameSanitizesIllegalCharacters covers provider-side tool-name rules
+// (^[a-zA-Z0-9_-]+$): MCP tool names with dots, slashes or non-ASCII must
+// not reach providers as-is.
+func TestNameSanitizesIllegalCharacters(t *testing.T) {
+	t.Parallel()
+
+	tool := &Tool{mcpName: "plugin.data", tool: &mcp.Tool{Name: "events.list/upcoming ✨"}}
+	name := tool.Name()
+	require.Regexp(t, `^[a-zA-Z0-9_-]+$`, name)
+	require.LessOrEqual(t, len(name), 64)
+	require.Equal(t, "mcp_plugin_data_events_list_upcoming__", name)
+}
+
+// TestNameCapsLengthWithStableHash ensures over-long names keep a legal
+// length and stay distinct from each other.
+func TestNameCapsLengthWithStableHash(t *testing.T) {
+	t.Parallel()
+
+	long := "very_long_" + strings.Repeat("segment_", 20)
+	a := (&Tool{mcpName: "srv", tool: &mcp.Tool{Name: long + "-alpha"}}).Name()
+	b := (&Tool{mcpName: "srv", tool: &mcp.Tool{Name: long + "-beta"}}).Name()
+	require.LessOrEqual(t, len(a), 64)
+	require.LessOrEqual(t, len(b), 64)
+	require.Regexp(t, `^[a-zA-Z0-9_-]+$`, a)
+	require.NotEqual(t, a, b)
+}
+
+// TestLegalNamesPassThroughUnchanged ensures compliant names keep their
+// original composition.
+func TestLegalNamesPassThroughUnchanged(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "mcp_zapier_zapier_read_action",
+		(&Tool{mcpName: "zapier", tool: &mcp.Tool{Name: "zapier_read_action"}}).Name())
 }

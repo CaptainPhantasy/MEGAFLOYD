@@ -141,10 +141,15 @@ jobs:
           pnpm install --frozen-lockfile
           node scripts/check-no-comments.mjs
 
-      # The full TypeScript suite has known-broken tests (see issue
-      # "Fix failing TS tests and wire the suite into CI"); it is not
-      # wired into CI until those are fixed. Coverage thresholds are
-      # enforced by vitest.config.ts on local `pnpm test:coverage` runs.
+      - name: Install ripgrep for the glob tool suite
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+
+      - name: TypeScript test suite with coverage
+        working-directory: floyd-code
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm exec vitest run --coverage --silent
 
       - name: Build linux/amd64
         working-directory: floyd-go
