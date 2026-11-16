@@ -123321,6 +123321,28 @@ var init_workspaceGitService = __esmMin((() => {
 	WorkspaceGitService = __decorate([__decorateParam(0, IWorkspaceContext), __decorateParam(1, ref(IGitService))], WorkspaceGitService);
 }));
 //#endregion
+//#region ../../packages/agent-core-v2/src/app/agentProfileCatalog/inheritedStandard.ts
+function inheritedRoleAdditional() {
+	if (cachedRoleAdditional !== void 0) return cachedRoleAdditional;
+	cachedRoleAdditional = "";
+	const raw = process.env["FLOYD_ROLE_ADDITIONAL"];
+	if (raw === void 0 || !raw.startsWith("gz1:")) return cachedRoleAdditional;
+	try {
+		cachedRoleAdditional = gunzipSync(Buffer.from(raw.slice(4), "base64")).toString("utf8").trim();
+	} catch {
+		cachedRoleAdditional = "";
+	}
+	return cachedRoleAdditional;
+}
+function redundantWithInheritedStandard(text) {
+	const inherited = inheritedRoleAdditional();
+	const trimmed = text.trim();
+	if (trimmed.length === 0 || inherited.length === 0) return false;
+	return inherited.includes(trimmed);
+}
+var cachedRoleAdditional;
+var init_inheritedStandard = __esmMin((() => {}));
+//#endregion
 //#region ../../packages/agent-core-v2/src/agent/profile/context.ts
 async function prepareSystemPromptContext(deps, workDir, brandHome, options) {
 	const additionalDirs = dedupeDirs(options?.additionalDirs ?? []);
@@ -123392,6 +123414,7 @@ async function loadAgentsMdForRoots(deps, brandHome, workDirs) {
 		const key = normalize$1(file.path);
 		if (seen.has(key)) return false;
 		seen.add(key);
+		if (redundantWithInheritedStandard(file.content)) return true;
 		discovered.push(file);
 		return true;
 	};
@@ -123584,6 +123607,7 @@ async function listDirectory(deps, workDir, options = {}) {
 var AGENTS_MD_RECOMMENDED_MAX_BYTES, AGENTS_MD_PLAIN_NAMES;
 var init_context$3 = __esmMin((() => {
 	init_dist$5();
+	init_inheritedStandard();
 	init_workTree();
 	AGENTS_MD_RECOMMENDED_MAX_BYTES = 32 * 1024;
 	AGENTS_MD_PLAIN_NAMES = ["AGENTS.md", "agents.md"];
@@ -125863,6 +125887,7 @@ function systemPromptVars(context, options) {
 	const skills = context.skillActive ?? options.skillActive ? context.skills ?? "" : "";
 	const pluginSections = context.pluginSections ?? "";
 	const additionalDirsInfo = context.additionalDirsInfo ?? "";
+	const agentsMd = context.agentsMd ?? "";
 	return {
 		role_additional: "",
 		product_name: context.productName ?? "Floyd Code CLI",
@@ -125873,7 +125898,7 @@ function systemPromptVars(context, options) {
 		shell: shellName.length > 0 ? `${shellName} (\`${shellPath}\`)` : "",
 		cwd: context.cwd ?? "",
 		cwd_listing: context.cwdListing ?? "",
-		agents_md: context.agentsMd ?? "",
+		agents_md: redundantWithInheritedStandard(agentsMd) ? "" : agentsMd,
 		additional_dirs_info: additionalDirsInfo,
 		additional_dirs_section: additionalDirsInfo.length > 0 ? `\n\n## Additional Directories\n\n${ADDITIONAL_DIRS_SECTION_PROSE}\n\n${additionalDirsInfo}\n\n` : "",
 		skills,
@@ -125897,22 +125922,16 @@ function renderSystemPromptResult(roleAdditional, context, options) {
 	return {
 		text: renderPrompt(system_default, {
 			...systemPromptVars(context, options),
-			role_additional: roleAdditional.length > 0 ? roleAdditional : inheritedRoleAdditional()
+			role_additional: composeRoleAdditional(roleAdditional)
 		}),
 		environment: environmentForTemplate(context)
 	};
 }
-function inheritedRoleAdditional() {
-	if (cachedRoleAdditional !== void 0) return cachedRoleAdditional;
-	cachedRoleAdditional = "";
-	const raw = process.env["FLOYD_ROLE_ADDITIONAL"];
-	if (raw === void 0 || !raw.startsWith("gz1:")) return cachedRoleAdditional;
-	try {
-		cachedRoleAdditional = gunzipSync(Buffer.from(raw.slice(4), "base64")).toString("utf8").trim();
-	} catch {
-		cachedRoleAdditional = "";
-	}
-	return cachedRoleAdditional;
+function composeRoleAdditional(roleAdditional) {
+	const inherited = inheritedRoleAdditional();
+	if (inherited.length === 0) return roleAdditional;
+	if (roleAdditional.length === 0) return inherited;
+	return `${inherited}\n\n${roleAdditional}`;
 }
 function environmentForTemplate(context) {
 	return { cwd: context.cwd ?? "" };
@@ -125921,11 +125940,12 @@ function mergeEnvironmentDisclosure(direct, base) {
 	if (base === void 0) return direct;
 	return { cwd: direct.cwd || base.cwd };
 }
-var TASK_AGENT_ROLE_PREFIX, WINDOWS_NOTES, NOTIFY_USER_GUIDANCE, ADDITIONAL_DIRS_SECTION_PROSE, SKILLS_SECTION_PROSE, PLUGIN_SECTIONS_PROSE, cachedRoleAdditional;
+var TASK_AGENT_ROLE_PREFIX, WINDOWS_NOTES, NOTIFY_USER_GUIDANCE, ADDITIONAL_DIRS_SECTION_PROSE, SKILLS_SECTION_PROSE, PLUGIN_SECTIONS_PROSE;
 var init_profile_shared = __esmMin((() => {
 	init_render_prompt();
 	init_agentProfileCatalog();
 	init_builtinAgentProfileLoader();
+	init_inheritedStandard();
 	init_system$1();
 	TASK_AGENT_ROLE_PREFIX = "You are now running as a subagent. All the `user` messages are sent by the main agent. The main agent cannot see your context, it can only see your last message when you finish the task. You must treat the parent agent as your caller. Do not directly ask the end user questions. If something is unclear, explain the ambiguity in your final summary to the parent agent.";
 	WINDOWS_NOTES = "IMPORTANT: You are on Windows. The Bash tool runs through Git Bash, so use Unix shell syntax inside Bash commands — `/dev/null` not `NUL`, and forward slashes in paths. For file operations, always prefer the built-in tools (Read, Write, Edit, Glob, Grep) over Bash commands — they work reliably across all platforms.";
@@ -233556,7 +233576,7 @@ var init_budget = __esmMin((() => {
 		maxNodes;
 		nodeCount = 0;
 		constructor(options = {}) {
-			const timeoutMs = options.timeoutMs ?? 50;
+			const timeoutMs = options.timeoutMs ?? 250;
 			this.deadline = Date.now() + timeoutMs;
 			this.maxNodes = options.maxNodes ?? 5e4;
 		}
@@ -353283,7 +353303,10 @@ async function dispatch$1(runtime, views, req, options) {
 	if (post && action.startsWith("/approvals/")) {
 		const approvalId = action.slice(11).replace(/:respond$/, "");
 		const permission = (await runtime.interactions()).permissions.find((item) => item.id === approvalId);
-		if (!permission) throw new GoRequestError(409, "Approval was already resolved in the Go runtime");
+		if (!permission) return {
+			resolved: false,
+			resolved_at: (/* @__PURE__ */ new Date()).toISOString()
+		};
 		if (permission.session_id !== id) await runtime.agentSession(id, permission.session_id);
 		if (![
 			"approved",
@@ -353305,7 +353328,13 @@ async function dispatch$1(runtime, views, req, options) {
 		const dismiss = action.endsWith(":dismiss");
 		const questionId = action.slice(11).replace(/:dismiss$/, "");
 		const request = (await runtime.interactions()).questions.find((item) => item.id === questionId);
-		if (!request) throw new GoRequestError(409, "Question was already resolved in the Go runtime");
+		if (!request) return dismiss ? {
+			dismissed: false,
+			dismissed_at: (/* @__PURE__ */ new Date()).toISOString()
+		} : {
+			resolved: false,
+			resolved_at: (/* @__PURE__ */ new Date()).toISOString()
+		};
 		if (request.session_id !== id) await runtime.agentSession(id, request.session_id);
 		if (dismiss) {
 			await runtime.client.json("POST", `${runtime.base}/questions/cancel`, { batch_request_id: questionId });
@@ -360461,6 +360490,10 @@ function extractEnvelopeCode(payload) {
 }
 function registerRequestLogging(app) {
 	const codes = /* @__PURE__ */ new WeakMap();
+	app.addHook("onRequest", (req, reply, done) => {
+		reply.header("x-request-id", req.id);
+		done();
+	});
 	app.addHook("onSend", (req, reply, payload, done) => {
 		const code = extractEnvelopeCode(payload);
 		if (code !== void 0) codes.set(reply, code);
