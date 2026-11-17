@@ -430,8 +430,6 @@ test('canonical web chat continues the Go session, preserves tools, and recovers
   expect(messages).toHaveLength(4);
   expect(submissions).toEqual([]);
   await api(`/sessions/${sessionId}/approvals/permission-1:respond`, { decision: 'approved' });
-  // Repeating or reversing a decision on an approval that is already resolved
-  // must be a no-op, not a 409 that the client renders as a fatal error.
   await expect(api(`/sessions/${sessionId}/approvals/permission-1:respond`, { decision: 'denied' })).resolves.toMatchObject({ resolved: false });
   expect((await api(`/sessions/${sessionId}/transcript?agent_id=main`)).pending_interactions).toEqual([]);
   const mcpPermission = { id: 'permission-mcp', session_id: sessionId, tool_call_id: 'call-mcp', tool_name: 'mcp_gateway_health_check', description: 'execute mcp_gateway_health_check with the following parameters:', action: 'execute', params: JSON.stringify({ server: 'example-environment', harness_id: 'example-canonical' }), path: dir };
