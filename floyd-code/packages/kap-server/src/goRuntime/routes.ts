@@ -225,7 +225,7 @@ async function dispatch(runtime: GoRuntime, views: LocalViews, req: FastifyReque
     const approvalId = action.slice(11).replace(/:respond$/, '');
     const pending = await runtime.interactions();
     const permission = pending.permissions.find((item) => item.id === approvalId);
-    if (!permission) throw new GoRequestError(409, 'Approval was already resolved in the Go runtime');
+    if (!permission) return { resolved: false, resolved_at: new Date().toISOString() };
     if (permission.session_id !== id) await runtime.agentSession(id, permission.session_id);
     if (!['approved', 'rejected', 'cancelled'].includes(text(body['decision']))) throw new GoRequestError(400, 'Invalid approval decision');
     const permissionAction = body['decision'] === 'approved' ? body['scope'] === 'session' ? 'allow_session' : 'allow' : 'deny';
@@ -238,7 +238,7 @@ async function dispatch(runtime: GoRuntime, views: LocalViews, req: FastifyReque
     const questionId = action.slice(11).replace(/:dismiss$/, '');
     const pending = await runtime.interactions();
     const request = pending.questions.find((item) => item.id === questionId);
-    if (!request) throw new GoRequestError(409, 'Question was already resolved in the Go runtime');
+    if (!request) return dismiss ? { dismissed: false, dismissed_at: new Date().toISOString() } : { resolved: false, resolved_at: new Date().toISOString() };
     if (request.session_id !== id) await runtime.agentSession(id, request.session_id);
     if (dismiss) { await runtime.client.json('POST', `${runtime.base}/questions/cancel`, { batch_request_id: questionId }); runtime.markDirty(id); return { dismissed: true, dismissed_at: new Date().toISOString() }; }
     const answers = object(body['answers']);
