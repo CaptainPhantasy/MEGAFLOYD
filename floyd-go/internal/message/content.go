@@ -538,7 +538,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		text := strings.TrimSpace(m.Content().Text)
 		var textAttachments []Attachment
 		for _, content := range m.BinaryContent() {
-			if !strings.HasPrefix(content.MIMEType, "text/") {
+			if !IsTextualMIME(content.MIMEType) {
 				continue
 			}
 			textAttachments = append(textAttachments, Attachment{
@@ -561,8 +561,8 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}
 		for _, content := range m.BinaryContent() {
-			// skip text attachements
-			if strings.HasPrefix(content.MIMEType, "text/") {
+			// Skip text attachments; they were inlined above.
+			if IsTextualMIME(content.MIMEType) {
 				continue
 			}
 			parts = append(parts, fantasy.FilePart{

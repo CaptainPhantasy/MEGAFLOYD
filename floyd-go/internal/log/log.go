@@ -16,12 +16,14 @@ import (
 )
 
 var (
-	initOnce    sync.Once
-	initialized atomic.Bool
+	initOnce       sync.Once
+	initialized    atomic.Bool
+	configuredPath atomic.Value
 )
 
 func Setup(logFile string, debug bool, ws ...io.Writer) {
 	initOnce.Do(func() {
+		configuredPath.Store(logFile)
 		logRotator := &lumberjack.Logger{
 			Filename:   logFile,
 			MaxSize:    10,    // Max size in MB
@@ -61,6 +63,15 @@ func Setup(logFile string, debug bool, ws ...io.Writer) {
 
 func Initialized() bool {
 	return initialized.Load()
+}
+
+// Path returns the log file configured by the first Setup call, or "" when
+// logging has not been initialized. Readers such as the floyd_logs tool must
+// use this path instead of deriving one from a workspace configuration: the
+// process that writes the log may use a different data directory.
+func Path() string {
+	path, _ := configuredPath.Load().(string)
+	return path
 }
 
 func RecoverPanic(name string, cleanup func()) {

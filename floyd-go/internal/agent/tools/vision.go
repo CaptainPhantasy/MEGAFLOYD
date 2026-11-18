@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	_ "embed"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -114,16 +113,17 @@ func NewVisionTool(permissions permission.Service, workingDir string) fantasy.Ag
 						"Please describe the image content in text instead."), nil
 			}
 
-			// Build the response with base64 encoded image
-			base64Data := base64.StdEncoding.EncodeToString(imageData)
-
+			// The response carries the raw image bytes. The message layer
+			// encodes binary content for storage and transport; encoding it
+			// here as well produced double-base64, which providers reject as
+			// an unsupported image.
 			metadata := VisionResponseMetadata{
 				ImagePath: imagePath,
 				MimeType:  mimeType,
 				SizeBytes: info.Size(),
 			}
 
-			response := fantasy.NewImageResponse([]byte(base64Data), mimeType)
+			response := fantasy.NewImageResponse(imageData, mimeType)
 			if params.Prompt != "" {
 				response.Content = fmt.Sprintf("Image: %s\n\nUser question: %s", filepath.Base(imagePath), params.Prompt)
 			} else {

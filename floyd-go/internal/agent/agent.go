@@ -8,6 +8,7 @@
 package agent
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	_ "embed"
@@ -213,6 +214,11 @@ type sessionAgent struct {
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
 
+	// mediaBlocked records session+model pairs whose provider rejected an
+	// attached image. Those sessions fall back to text placeholders so one
+	// rejected image cannot make every later request fail.
+	mediaBlocked *csync.Map[string, bool]
+
 	// ralphLoop drives the iterative self-correction loop. It is nil for
 	// sub-agents and any agent built without a data directory; Run
 	// nil-checks it before consulting the loop state.
@@ -325,6 +331,7 @@ func NewSessionAgent(
 		planService:          opts.PlanService,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
+		mediaBlocked:         csync.NewMap[string, bool](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
@@ -976,7 +983,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Add the session to the context. The run context (genCtx) and its
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
-	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
+	supportsImages := largeModel.CatwalkCfg.SupportsImages && !a.mediaBlockedFor(call.SessionID, largeModel)
+	history, files := a.preparePrompt(msgs, supportsImages, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -1055,7 +1063,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 			}
 
-			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
+			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel, supportsImages)
 
 			// Inject the per-request environment block as the first user
 			// message after the system messages. The plan-mode reminder
@@ -1422,6 +1430,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		var fantasyErr *fantasy.Error
 		var providerErr *fantasy.ProviderError
+		// A provider that rejects one image would reject every later request
+		// that includes it. Drop media for this session+model so the poisoned
+		// history no longer blocks the conversation.
+		if errors.As(err, &providerErr) && isUnsupportedImageError(providerErr) {
+			a.blockMedia(call.SessionID, largeModel)
+			slog.Warn("Provider rejected image media; suppressing media for this session and model",
+				"session_id", call.SessionID,
+				"provider", largeModel.ModelCfg.Provider,
+				"model", largeModel.ModelCfg.Model)
+		}
 		const defaultTitle = "Provider Error"
 		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
 		if isCancelErr {
@@ -1438,7 +1456,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
 				)
 			} else {
-				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+				details := providerErr.Message
+				if isUnsupportedImageError(providerErr) {
+					details += "\n\nMedia is omitted for the rest of this session so the conversation can continue."
+				}
+				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), details)
 			}
 		} else if errors.As(err, &fantasyErr) {
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
@@ -2529,21 +2551,38 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //
 //	BEFORE: [tool result: image data]
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
-func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model) []fantasy.Message {
+func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model, supportsImages bool) []fantasy.Message {
 	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
 		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock) ||
 		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrockEurope)
 
-	if providerSupportsMedia {
+	// A natively media-capable provider needs no workaround unless an earlier
+	// request proved it rejects this session's media.
+	if providerSupportsMedia && supportsImages {
 		return messages
 	}
 
-	supportsImages := largeModel.CatwalkCfg.SupportsImages
-
 	convertedMessages := make([]fantasy.Message, 0, len(messages))
+	// Media attachments collected for the current run of tool messages. They
+	// are emitted only after the last tool message of the run: a user message
+	// between tool results violates the provider rule that every tool call is
+	// answered by its tool results before any other message, which makes the
+	// request invalid on every later turn.
+	var pendingMedia []fantasy.FilePart
+
+	flushMedia := func() {
+		for _, file := range pendingMedia {
+			convertedMessages = append(convertedMessages, fantasy.NewUserMessage(
+				"Here is the media content from the tool result:",
+				file,
+			))
+		}
+		pendingMedia = nil
+	}
 
 	for _, msg := range messages {
 		if msg.Role != fantasy.MessageRoleTool {
+			flushMedia()
 			convertedMessages = append(convertedMessages, msg)
 			continue
 		}
@@ -2559,22 +2598,24 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 			}
 
 			if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output); ok {
-				if !supportsImages {
-					// Model cannot process images. Replace with a text
-					// placeholder and skip creating a synthetic user
-					// message with FilePart, which would brick the
-					// session on text-only models.
+				if !supportsImages || !isImageMediaType(media.MediaType) {
+					// The model cannot process this media: either it has no
+					// image support, or the payload is not an image (for
+					// example application/json or application/pdf), which
+					// OpenAI-compatible providers reject as a file part.
+					// Replace it with text and skip the synthetic user
+					// message, which would brick the session.
 					textParts = append(textParts, fantasy.ToolResultPart{
 						ToolCallID: toolResult.ToolCallID,
 						Output: fantasy.ToolResultOutputContentText{
-							Text: "[Image/media content not supported by this model]",
+							Text: "[Media content not supported by this model]",
 						},
 						ProviderOptions: toolResult.ProviderOptions,
 					})
 					continue
 				}
 
-				decoded, err := base64.StdEncoding.DecodeString(media.Data)
+				decoded, err := decodeMediaData(media.Data)
 				if err != nil {
 					slog.Warn("Failed to decode media data", "error", err)
 					textParts = append(textParts, part)
@@ -2603,16 +2644,108 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 			Role:    fantasy.MessageRoleTool,
 			Content: textParts,
 		})
-
-		if len(mediaFiles) > 0 {
-			convertedMessages = append(convertedMessages, fantasy.NewUserMessage(
-				"Here is the media content from the tool result:",
-				mediaFiles...,
-			))
-		}
+		pendingMedia = append(pendingMedia, mediaFiles...)
 	}
+	flushMedia()
 
 	return convertedMessages
+}
+
+// decodeMediaData decodes the base64 payload of provider media. Rows written
+// before the vision tool stopped double-encoding hold base64 text inside
+// base64, so a single decode yields ASCII. When that happens and the decoded
+// text is itself base64 for an image, the inner payload is used instead.
+func decodeMediaData(data string) ([]byte, error) {
+	raw, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return nil, err
+	}
+	if isBinaryImage(raw) {
+		return raw, nil
+	}
+	if inner, innerErr := base64.StdEncoding.DecodeString(string(raw)); innerErr == nil && isBinaryImage(inner) {
+		slog.Warn("Repaired double-encoded media data")
+		return inner, nil
+	}
+	return raw, nil
+}
+
+// mediaBlockKey identifies one session's use of one provider model.
+func mediaBlockKey(sessionID string, model Model) string {
+	return sessionID + "\x00" + model.ModelCfg.Provider + "\x00" + model.ModelCfg.Model
+}
+
+// mediaBlockedFor reports whether a provider already rejected media for this
+// session and model.
+func (a *sessionAgent) mediaBlockedFor(sessionID string, model Model) bool {
+	if a.mediaBlocked == nil || sessionID == "" {
+		return false
+	}
+	blocked, _ := a.mediaBlocked.Get(mediaBlockKey(sessionID, model))
+	return blocked
+}
+
+// blockMedia stops attaching images for a session whose provider rejected one,
+// so the rejected message cannot fail every subsequent request.
+func (a *sessionAgent) blockMedia(sessionID string, model Model) {
+	if a.mediaBlocked == nil || sessionID == "" {
+		return
+	}
+	a.mediaBlocked.Set(mediaBlockKey(sessionID, model), true)
+}
+
+// isUnsupportedImageError reports a provider rejection of an attached image
+// rather than a transient or transport failure.
+func isUnsupportedImageError(err *fantasy.ProviderError) bool {
+	if err == nil {
+		return false
+	}
+	var text strings.Builder
+	text.WriteString(strings.ToLower(err.Title))
+	text.WriteString(" ")
+	text.WriteString(strings.ToLower(err.Message))
+	if err.Cause != nil {
+		text.WriteString(" ")
+		text.WriteString(strings.ToLower(err.Cause.Error()))
+	}
+	if len(err.ResponseBody) > 0 {
+		body := err.ResponseBody
+		if len(body) > 4096 {
+			body = body[:4096]
+		}
+		text.WriteString(" ")
+		text.WriteString(strings.ToLower(string(body)))
+	}
+	lowered := text.String()
+	return strings.Contains(lowered, "unsupported image") ||
+		(strings.Contains(lowered, "image") &&
+			(strings.Contains(lowered, "not supported") || strings.Contains(lowered, "invalid image")))
+}
+
+// isImageMediaType reports whether a payload may be attached as an image file
+// part. Non-image media stays text on providers without file support.
+func isImageMediaType(mediaType string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(strings.SplitN(mediaType, ";", 2)[0])), "image/")
+}
+
+// isBinaryImage reports whether data begins with a supported image signature.
+func isBinaryImage(data []byte) bool {
+	if len(data) < 12 {
+		return false
+	}
+	switch {
+	case bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")):
+		return true
+	case bytes.HasPrefix(data, []byte("\xff\xd8\xff")):
+		return true
+	case bytes.HasPrefix(data, []byte("GIF87a")), bytes.HasPrefix(data, []byte("GIF89a")):
+		return true
+	case bytes.HasPrefix(data, []byte("RIFF")) && string(data[8:12]) == "WEBP":
+		return true
+	case bytes.HasPrefix(data, []byte("BM")):
+		return true
+	}
+	return false
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.

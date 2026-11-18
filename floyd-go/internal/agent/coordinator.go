@@ -840,6 +840,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	}
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "floyd.log")
+	if configured := log.Path(); configured != "" {
+		logFile = configured
+	}
 
 	allTools = append(
 		allTools,
