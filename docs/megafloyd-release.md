@@ -4,6 +4,12 @@ MEGAFLOYD installs one complete release: the Go engine, web server and browser a
 
 Build the host Go executable with `scripts/build-megafloyd.sh --host --version VERSION --build-id BUILD_ID --out OUTPUT`. The build applies release symbol stripping and produces `SHA256SUMS` plus `build-receipt.json`. Use the same three-part product version and unique build ID for every component.
 
+Sign the built engine before the desktop stage. The desktop builder verifies that the embedded binary carries the persistent `ai.legacy.megafloyd.engine` identity, and the packager checks the embedded binary against the build receipt, so the helper also rewrites the receipt and `SHA256SUMS` to the signed hash:
+
+```sh
+node scripts/sign-megafloyd-engine.mjs ABSOLUTE_GO ABSOLUTE_GO_BUILD_RECEIPT
+```
+
 Stage the production web package with the repository's pinned pnpm command, preserving the existing browser bundle:
 
 ```sh
@@ -24,6 +30,8 @@ python3 scripts/megafloyd-release.py package \
 ```
 
 The output contains the full Mac archive, `manifest.json`, `latest.json`, `install.sh`, and `SHA256SUMS`. The manifest records the component checksums, source-input digest, platform, and common release identity. Packaging rejects mismatched identities, broken links, and links that escape the bundled release. Keep the release directory immutable after publication. Publish versioned assets and their manifest first; publish the new `latest.json` last.
+
+Before installing over a live prefix, stop the identified engine, then install, then launch. Replacing the bundle while the old engine is live leaves a writer attached to the session store during the swap. After launch, record the serving process's pid, binary path, and `--version` before running any behavioral check, so the checks cannot pass against the old process.
 
 Install from local artifacts with an explicit destination:
 
