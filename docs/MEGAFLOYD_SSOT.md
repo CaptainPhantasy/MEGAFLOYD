@@ -301,3 +301,23 @@ The next committed build and fresh review remain separate verification steps.
 [Review correction evidence](evidence/pr11-review-20261031.md) records the fixes,
 platform limits, retained data and separate CodeQL assessment. Previous SSOT
 SHA-256 before this append: `63127941d12b12df6eba9264ecf15a50c10e9c02d3619cece0e1ca068c24fb9a`. Detailed private evidence remains ignored.
+
+
+## 2026-11-20 — PR #20 merged; release prep, steward audit, and dry run
+
+Checked: PR #20 squash-merged as `d2e5cdf`; no open PRs. The installed `2026.11.11`
+package still embeds the Nov 15 hand-patched media binary and lacks the rest of PR #20
+and PR #19; the live server was a Nov 18 dev build predating `f928d73`. Local prep
+branch `chore/retire-floyd-md` at `46077d8` retires `FLOYD.md`, files and sanitizes the
+Nov 15 handoff, ignores local scratch trees, and adds the engine-signing release step.
+
+Go gates: build/vet/gofmt clean; targeted tests pass; the full suite is 116 packages ok
+with 5 environment-dependent failures reproduced on `d2e5cdf`; CI on `d2e5cdf` is 9/9
+SUCCESS. TypeScript: the tower subset passes 288/288 with a neutral global git config;
+the remaining local failures are ambient-state, and the merged tree's CI is green.
+git-steward audit: no secrets, no private identifiers, clean scope, CI syntax valid.
+
+Dry run `2026.11.20-dryrun-20261120T114500Z`: signed engine and app, 2,069-entry
+package, archive `381a0a7c…`, verifier 5/5, zero model calls, source commit `46077d8`,
+dirty false, no scratch in the payload. Not done: canonical install and restart, held
+for the owner.
