@@ -64,8 +64,12 @@ func (g *deletionGuardTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 	if err != nil || len(commands) == 0 {
 		response, runErr := g.inner.Run(ctx, call)
 		if sessionID != "" && (call.Name == tools.JobOutputToolName || call.Name == tools.JobKillToolName) {
+			// Reconciliation persists background-deletion evidence; it is not
+			// the output the caller requested. A protected store that cannot be
+			// read must keep a later destructive command blocked, but it must
+			// not fail the whole agent run or discard the job result.
 			if err := g.reconcileBackground(sessionID); err != nil {
-				return response, errors.Join(runErr, err)
+				slog.Warn("Background deletion reconciliation deferred", "session_id", sessionID, "tool", call.Name, "error", err)
 			}
 		}
 		return response, runErr

@@ -368,6 +368,11 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 		return
 	}
 	name := filepath.Base(args[0])
+	// `command -v` and `command -V` only resolve a name; they never execute it,
+	// so a variable operand cannot dispatch a deletion.
+	if name == "command" && commandQueryOnly(args[1:]) {
+		return
+	}
 	if !complete && slices.Contains(args, "") && slices.Contains(
 		[]string{"sudo", "doas", "nohup", "time", "env", "nice", "timeout", "setsid", "stdbuf", "xargs", "command", "builtin", "exec", "eval", "sh", "bash", "dash", "zsh", "ksh"}, name) {
 		// An expansion can supply options, option values or the executable.
@@ -375,7 +380,7 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 		c.unresolved("the wrapper contains a nonliteral argument, so command dispatch cannot be proven")
 		return
 	}
-	if !complete && slices.Contains([]string{"cp", "truncate", "dd", "git", "mv", "rsync"}, name) {
+	if !complete && slices.Contains([]string{"cp", "truncate", "dd", "mv", "rsync"}, name) {
 		c.unresolved("the command arguments are not literal, so its destructive effects cannot be proven")
 		return
 	}
@@ -1074,7 +1079,11 @@ func (c *classifier) find(args []string, complete bool, dir string) {
 	c.add(effect)
 }
 
-// git classifies the git subcommands that destroy working-tree data.
+// git classifies the git subcommands that destroy working-tree data. Read-only
+// subcommands (diff, log, show, status, stash show, branch listing) never need
+// the deletion gate, so a nonliteral ref such as @{0} or HEAD~1 is harmless
+// there. Destructive subcommands still fail closed when their operands cannot
+// be proven.
 func (c *classifier) git(args []string, complete bool, dir string) {
 	if len(args) < 2 {
 		return
@@ -1083,14 +1092,50 @@ func (c *classifier) git(args []string, complete bool, dir string) {
 		c.unresolved("git global options can change the repository or command dispatch")
 		return
 	}
+	if args[1] == "" {
+		c.unresolved("the git subcommand is not literal, so its effect cannot be proven")
+		return
+	}
 	switch args[1] {
-	case "restore", "checkout":
-		c.unresolved("git " + args[1] + " can discard working-tree data whose exact affected set cannot be proven")
+	case "restore":
+		if restoresWorktree(args[1:]) {
+			c.unresolved("git restore can discard working-tree data whose exact affected set cannot be proven")
+		}
+	case "checkout":
+		c.checkout(args[2:], complete)
+	case "switch":
+		if slices.Contains(args[1:], "-f") || slices.Contains(args[1:], "--force") || slices.Contains(args[1:], "--discard-changes") {
+			c.unresolved("git switch --force can discard working-tree changes whose exact affected set cannot be proven")
+		}
+	case "branch":
+		for _, arg := range args[2:] {
+			if arg == "-d" || arg == "-D" || arg == "--delete" {
+				c.add(Classification{
+					Effect:     EffectPermanentDeletion,
+					Command:    "git branch --delete",
+					Unresolved: "git branch deletion removes a ref whose commits cannot be listed before it runs",
+					Reason:     "The command git branch --delete permanently removes a branch reference, and the exact affected commits cannot be proven.",
+				})
+				return
+			}
+		}
+	case "stash":
+		if len(args) < 3 {
+			return
+		}
+		if args[2] == "drop" || args[2] == "clear" {
+			c.add(Classification{
+				Effect:     EffectPermanentDeletion,
+				Command:    "git stash " + args[2],
+				Unresolved: "git stash " + args[2] + " removes stash entries whose contents cannot be listed safely",
+				Reason:     "The command git stash " + args[2] + " permanently deletes stash data, and the exact affected entries cannot be proven.",
+			})
+		}
 	case "rm":
 		_, paths := operands(args[1:])
 		c.removal("git rm", paths, false, complete, dir)
 	case "clean":
-		if hasDryRunFlag(args[1:]) {
+		if hasDryRunFlag(args[1:]) && complete {
 			return
 		}
 		c.add(Classification{
@@ -1101,6 +1146,10 @@ func (c *classifier) git(args []string, complete bool, dir string) {
 			Reason:     "The command git clean permanently deletes untracked files, and their exact set cannot be proven.",
 		})
 	case "reset":
+		if !complete {
+			c.unresolved("git reset arguments are not literal, so a --hard form cannot be excluded")
+			return
+		}
 		if !slices.Contains(args[1:], "--hard") {
 			return
 		}
@@ -1112,6 +1161,59 @@ func (c *classifier) git(args []string, complete bool, dir string) {
 			Reason:     "The command git reset --hard permanently deletes uncommitted work, and the exact set cannot be proven.",
 		})
 	}
+}
+
+// checkout reports whether a git checkout form writes the working tree or the
+// branch ref. Creating a branch (-b) is safe; path restores and forced
+// checkouts are not. A plain branch switch refuses to overwrite local changes,
+// so it is not classified as permanent deletion.
+func (c *classifier) checkout(args []string, complete bool) {
+	operandCount := 0
+	for _, arg := range args {
+		switch {
+		case arg == "-b" || arg == "--branch":
+			return
+		case arg == "-B" || arg == "--force" || arg == "-f" || arg == "--patch" || arg == "-p" || arg == "--ours" || arg == "--theirs" || arg == "--":
+			c.unresolved("git checkout can discard working-tree data whose exact affected set cannot be proven")
+			return
+		case strings.HasPrefix(arg, "-") && arg != "-":
+			continue
+		default:
+			operandCount++
+			if arg == "." || strings.HasPrefix(arg, "./") || filepath.IsAbs(arg) {
+				c.unresolved("git checkout can discard working-tree data whose exact affected set cannot be proven")
+				return
+			}
+		}
+	}
+	// Two operands select a tree and a path, which restores that path.
+	if operandCount >= 2 {
+		c.unresolved("git checkout can discard working-tree data whose exact affected set cannot be proven")
+	}
+}
+
+// restoresWorktree reports whether git restore writes the working tree. A
+// --staged-only restore changes the index without touching stored files.
+func restoresWorktree(args []string) bool {
+	staged := false
+	worktree := false
+	options := true
+	for _, arg := range args[1:] {
+		if !options {
+			continue
+		}
+		switch arg {
+		case "--":
+			options = false
+		case "--staged", "-S":
+			staged = true
+		case "--worktree", "-W":
+			worktree = true
+		case "--help", "-h", "--version":
+			return false
+		}
+	}
+	return worktree || !staged
 }
 
 // truncate classifies a size change that discards existing content. The size
@@ -1274,6 +1376,25 @@ func hasInformationalFlag(args []string) bool {
 	return len(args) == 1 && (args[0] == "--help" || args[0] == "--version")
 }
 
+// commandQueryOnly reports the `command -v`/`command -V` query form. It
+// resolves a command name without executing the resolved command, so operands
+// that cannot be proven are not a dispatch risk.
+func commandQueryOnly(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && len(arg) > 1 {
+			if strings.ContainsAny(arg[1:], "vV") {
+				return true
+			}
+			continue
+		}
+		return false
+	}
+	return false
+}
+
 // hasDryRunFlag reports a documented dry run for git clean. Short flags may be
 // clustered, as in "-nd".
 func hasDryRunFlag(args []string) bool {
@@ -1312,14 +1433,45 @@ func literalWord(word *syntax.Word) (string, bool) {
 	for _, part := range word.Parts {
 		switch value := part.(type) {
 		case *syntax.Lit:
-			if strings.Contains(value.Value, `\`) || strings.ContainsAny(value.Value, "*?[~{") {
+			// A bare "[" never opens a character class and is the POSIX test
+			// builtin in command position. Every other word containing "["
+			// may be a glob and stays unproven.
+			if strings.Contains(value.Value, `\`) || strings.ContainsAny(value.Value, "*?~{") ||
+				(strings.Contains(value.Value, "[") && value.Value != "[") {
 				return "", false
 			}
 			text.WriteString(value.Value)
 		case *syntax.SglQuoted:
 			text.WriteString(value.Value)
 		case *syntax.DblQuoted:
-			inner, ok := literalWord(&syntax.Word{Parts: value.Parts})
+			inner, ok := literalQuotedWord(&syntax.Word{Parts: value.Parts})
+			if !ok {
+				return "", false
+			}
+			text.WriteString(inner)
+		default:
+			return "", false
+		}
+	}
+	return text.String(), true
+}
+
+// literalQuotedWord returns a double-quoted word's text. Globs, braces and
+// tilde characters are literal inside double quotes, while parameter, command
+// and arithmetic expansions are not.
+func literalQuotedWord(word *syntax.Word) (string, bool) {
+	var text strings.Builder
+	for _, part := range word.Parts {
+		switch value := part.(type) {
+		case *syntax.Lit:
+			if strings.Contains(value.Value, `\`) {
+				return "", false
+			}
+			text.WriteString(value.Value)
+		case *syntax.SglQuoted:
+			text.WriteString(value.Value)
+		case *syntax.DblQuoted:
+			inner, ok := literalQuotedWord(&syntax.Word{Parts: value.Parts})
 			if !ok {
 				return "", false
 			}
