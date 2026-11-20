@@ -313,9 +313,12 @@ Nov 15 handoff, ignores local scratch trees, and adds the engine-signing release
 
 Go gates: build/vet/gofmt clean; targeted tests pass; the full suite is 116 packages ok
 with 5 environment-dependent failures reproduced on `d2e5cdf`; CI on `d2e5cdf` is 9/9
-SUCCESS. TypeScript: the tower subset passes 288/288 with a neutral global git config;
-the remaining local failures are ambient-state, and the merged tree's CI is green.
-git-steward audit: no secrets, no private identifiers, clean scope, CI syntax valid.
+SUCCESS. TypeScript: the account-global `core.hooksPath` injects hooks into the tower
+temp repos and produced 67 hook-timeout failures; with
+`GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1` the tower subset passes 288/288.
+The remaining local failures are ambient-state (live server, credentials, config), and
+the merged tree's CI is green. git-steward audit: no secrets, no private identifiers,
+clean scope, CI syntax valid.
 
 Dry run `2026.11.20-dryrun-20261120T114500Z`: signed engine and app, 2,069-entry
 package, archive `381a0a7c…`, verifier 5/5, zero model calls, source commit `46077d8`,
