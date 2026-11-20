@@ -11,6 +11,8 @@ import (
 func TestReadOnlyGitAndFindCommandsAreNotDestructive(t *testing.T) {
 	commands := []string{
 		`git checkout -b doctor/x`,
+		`git checkout main`,
+		`git switch main`,
 		`git switch -c doctor/x`,
 		`git stash show stash@{0} --stat`,
 		`git stash list --format="%H %s"`,

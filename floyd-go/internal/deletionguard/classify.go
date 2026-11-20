@@ -1102,7 +1102,7 @@ func (c *classifier) git(args []string, complete bool, dir string) {
 			c.unresolved("git restore can discard working-tree data whose exact affected set cannot be proven")
 		}
 	case "checkout":
-		c.checkout(args[1:], complete)
+		c.checkout(args[2:], complete)
 	case "switch":
 		if slices.Contains(args[1:], "-f") || slices.Contains(args[1:], "--force") || slices.Contains(args[1:], "--discard-changes") {
 			c.unresolved("git switch --force can discard working-tree changes whose exact affected set cannot be proven")
