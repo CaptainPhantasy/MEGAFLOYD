@@ -324,3 +324,22 @@ Dry run `2026.11.20-dryrun-20261120T114500Z`: signed engine and app, 2,069-entry
 package, archive `381a0a7c…`, verifier 5/5, zero model calls, source commit `46077d8`,
 dirty false, no scratch in the payload. Not done: canonical install and restart, held
 for the owner.
+
+## 2026-11-21 — release 2026.11.20 installed and live-verified
+
+Installed `2026.11.20-megafloyd-20261121T000335Z` (archive `919d34a3…`) from merged
+`main` commit `2ea8718`, `dirty: false`, over `2026.11.11` with dated backups. The old
+dev engine (`0e570301-dirty`, server PID 59824) and its TUIs were stopped by path
+before install; the installed app was launched after.
+
+Serving identity: server PID 26177 and TUI PID 26514, binary under
+`releases/2026.11.20-megafloyd-20261121T000335Z/.../bin/megafloyd`, `--version`
+`MegaFloyd version 2026.11.20`.
+
+Six live checks through the engine PASS: branch creation in `ouroboros/repo`;
+`[ -f README.md ]`; quoted-glob `find`; `rm -rf` blocked with the run continuing;
+background job plus `job_output` (`completed`, `bg ok`); `floyd_logs` real entries.
+Media: the 1×1 image was rejected and suppression kept the session alive; the 1024×1024
+image returned the suppression placeholder in that session, as designed, and was
+described correctly in a fresh session. The placeholder is
+`internal/agent/agent.go:2611`, not a model limitation.
