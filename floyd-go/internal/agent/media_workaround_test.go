@@ -36,7 +36,7 @@ func TestWorkaroundProviderMediaLimitations_NonImageMediaStaysText(t *testing.T)
 		CatwalkCfg: catwalk.Model{SupportsImages: true},
 	}
 
-	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages, "s")
+	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages, "s", nil)
 
 	require.Len(t, result, 1, "non-image media must not create a file-part user message")
 	require.Equal(t, fantasy.MessageRoleTool, result[0].Role)
@@ -62,7 +62,7 @@ func TestWorkaroundProviderMediaLimitations_MediaFollowsWholeToolRun(t *testing.
 		CatwalkCfg: catwalk.Model{SupportsImages: true},
 	}
 
-	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages, "s")
+	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages, "s", nil)
 
 	// The two tool results stay adjacent; the media user messages are emitted
 	// only after the run closes, before the original user message.

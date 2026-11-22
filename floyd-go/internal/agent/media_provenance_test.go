@@ -123,7 +123,7 @@ func TestBadAndGoodImageSameTurn(t *testing.T) {
 	result := agent.workaroundProviderMediaLimitations([]fantasy.Message{
 		imageToolMessage("good", "image/png", good),
 		imageToolMessage("bad", "image/png", bad),
-	}, model, true, "s")
+	}, model, true, "s", nil)
 
 	require.Len(t, result, 3)
 	require.Equal(t, fantasy.MessageRoleTool, result[0].Role)
@@ -155,7 +155,7 @@ func TestVerdictScopedByModelAndSession(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			result := agent.workaroundProviderMediaLimitations(
 				[]fantasy.Message{imageToolMessage("call", "image/png", payload)},
-				tc.model, true, tc.session)
+				tc.model, true, tc.session, nil)
 			require.Equal(t, 1, filePartCount(result))
 		})
 	}
@@ -173,12 +173,12 @@ func TestRestartReRejectionOnly(t *testing.T) {
 
 	restarted := testSessionAgent(env, nil, nil, "restarted").(*sessionAgent)
 	before := restarted.workaroundProviderMediaLimitations(
-		[]fantasy.Message{imageToolMessage("call", "image/png", payload)}, model, true, "s")
+		[]fantasy.Message{imageToolMessage("call", "image/png", payload)}, model, true, "s", nil)
 	require.Equal(t, 1, filePartCount(before), "a restart forgets the verdict and re-sends once")
 
 	restarted.recordMediaVerdict("s", model, mediaID, reasonRejectedByProvider, "test")
 	after := restarted.workaroundProviderMediaLimitations(
-		[]fantasy.Message{imageToolMessage("call", "image/png", payload)}, model, true, "s")
+		[]fantasy.Message{imageToolMessage("call", "image/png", payload)}, model, true, "s", nil)
 	require.Equal(t, 0, filePartCount(after), "the re-rejection is attributed and withheld")
 	require.Contains(t, toolResultText(t, after[0]), reasonRejectedByProvider)
 }
@@ -238,7 +238,7 @@ func TestNativeProviderWithholdsOnlyRejected(t *testing.T) {
 	result := agent.workaroundProviderMediaLimitations([]fantasy.Message{
 		imageToolMessage("good", "image/png", good),
 		imageToolMessage("bad", "image/png", bad),
-	}, model, true, "s")
+	}, model, true, "s", nil)
 
 	require.Len(t, result, 2, "native providers keep tool-result media in place")
 	require.Equal(t, 0, filePartCount(result))
@@ -255,15 +255,53 @@ func TestModelUnsupportedAndNonImageNotes(t *testing.T) {
 	model := provenanceModel()
 
 	unsupported := agent.workaroundProviderMediaLimitations(
-		[]fantasy.Message{imageToolMessage("call", "image/png", storedPNG(8))}, model, false, "s")
+		[]fantasy.Message{imageToolMessage("call", "image/png", storedPNG(8))}, model, false, "s", nil)
 	require.Contains(t, toolResultText(t, unsupported[0]), reasonModelUnsupported)
 	require.Equal(t, 0, filePartCount(unsupported))
 
 	nonImage := agent.workaroundProviderMediaLimitations(
 		[]fantasy.Message{imageToolMessage("call", "application/json", base64.StdEncoding.EncodeToString([]byte(`{}`)))},
-		model, true, "s")
+		model, true, "s", nil)
 	require.Contains(t, toolResultText(t, nonImage[0]), reasonNonImageAttachment)
 	require.Equal(t, 0, filePartCount(nonImage))
+}
+
+func TestRequestScopedOmission(t *testing.T) {
+	env := testEnv(t)
+	agent := testSessionAgent(env, nil, nil, "test prompt").(*sessionAgent)
+	model := provenanceModel()
+	good, bad := storedPNG(12), storedPNG(13)
+	badID, ok := mediaIDForStoredData(bad, "image/png")
+	require.True(t, ok)
+
+	result := agent.workaroundProviderMediaLimitations(
+		[]fantasy.Message{
+			imageToolMessage("good", "image/png", good),
+			imageToolMessage("bad", "image/png", bad),
+		}, model, true, "s", map[string]struct{}{badID: {}})
+
+	require.Equal(t, 1, filePartCount(result), "the unomitted image is still delivered")
+	require.Contains(t, toolResultText(t, result[1]), reasonUnidentifiedThisTurn)
+	_, recorded := agent.mediaVerdictFor("s", model, badID)
+	require.False(t, recorded, "a scan candidate is request-scoped until it is proven")
+}
+
+func TestFilterProviderMediaOmission(t *testing.T) {
+	env := testEnv(t)
+	agent := testSessionAgent(env, nil, nil, "test prompt").(*sessionAgent)
+	model := provenanceModel()
+	good := provenancePNG(14)
+	bad := provenancePNG(15)
+	badID := mediaPartID(bad, "image/png")
+
+	prompt, files := agent.filterProviderMedia("look", []fantasy.FilePart{
+		{Data: good, MediaType: "image/png", Filename: "good.png"},
+		{Data: bad, MediaType: "image/png", Filename: "bad.png"},
+	}, "s", model, true, map[string]struct{}{badID: {}})
+
+	require.Len(t, files, 1)
+	require.Equal(t, "good.png", files[0].Filename)
+	require.Contains(t, prompt, reasonUnidentifiedThisTurn)
 }
 
 func TestFilterProviderMedia(t *testing.T) {
@@ -278,7 +316,7 @@ func TestFilterProviderMedia(t *testing.T) {
 	prompt, files := agent.filterProviderMedia("look", []fantasy.FilePart{
 		{Data: good, MediaType: "image/png", Filename: "good.png"},
 		{Data: bad, MediaType: "image/png", Filename: "bad.png"},
-	}, "s", model, true)
+	}, "s", model, true, nil)
 
 	require.Len(t, files, 1)
 	require.Equal(t, "good.png", files[0].Filename)
