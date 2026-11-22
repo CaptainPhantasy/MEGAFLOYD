@@ -1021,10 +1021,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	toolsRan := false
 	retryWithoutTools := false
 	mediaHandled := false
+	requestOmit := make(map[string]struct{})
+	scanCandidates := []string{}
+	scanIndex := 0
+	scanActive := false
 	for attempt := 0; ; attempt++ {
 		promptForProvider, filesForProvider := a.filterProviderMedia(
 			message.PromptWithTextAttachments(call.Prompt, call.Attachments),
-			files, call.SessionID, largeModel, supportsImages)
+			files, call.SessionID, largeModel, supportsImages, requestOmit)
 		result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
 			Prompt:           promptForProvider,
 			Files:            filesForProvider,
@@ -1085,7 +1089,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 				lastNewMedia = newMediaIDs(prepared.Messages, seenMedia)
 				runNewMedia = append(runNewMedia, lastNewMedia...)
-				prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel, supportsImages, call.SessionID)
+				prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel, supportsImages, call.SessionID, requestOmit)
 
 				// Inject the per-request environment block as the first user
 				// message after the system messages. The plan-mode reminder
@@ -1356,20 +1360,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				},
 			},
 		})
-		if err == nil || attempt > 0 {
+		if err == nil {
+			if scanActive && len(requestOmit) == 1 {
+				for mediaID := range requestOmit {
+					a.recordMediaVerdict(call.SessionID, largeModel, mediaID, reasonRejectedByProvider, "unattributed_scan")
+					logMediaRejection(call.SessionID, largeModel, mediaID, reasonRejectedByProvider, "unattributed_scan")
+				}
+			}
+			clear(requestOmit)
 			break
 		}
-		fallbackMedia := lastNewMedia
-		if len(fallbackMedia) == 0 {
-			fallbackMedia = runNewMedia
-		}
-		mediaHandled = a.handleMediaRejection(call.SessionID, largeModel, err, fallbackMedia)
-		if !mediaHandled {
+		var providerErr *fantasy.ProviderError
+		if !errors.As(err, &providerErr) || !isUnsupportedImageError(providerErr) {
 			break
 		}
-		if toolsRan {
+		if toolsRan && !retryWithoutTools {
 			// Rebuild the request from stored tool results and disable tools
-			// so the retry cannot execute one of them again.
+			// so a retry cannot execute one of them again.
 			refreshed, listErr := a.messages.List(genCtx, call.SessionID)
 			if listErr != nil {
 				break
@@ -1381,6 +1388,66 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if updateErr := a.messages.Update(genCtx, *currentAssistant); updateErr != nil {
 				break
 			}
+		}
+		if mediaID, ok := attributeRejectedMedia(providerErr); ok {
+			mediaHandled = true
+			a.recordMediaVerdict(call.SessionID, largeModel, mediaID, reasonRejectedByProvider, "provider_error")
+			logMediaRejection(call.SessionID, largeModel, mediaID, reasonRejectedByProvider, "provider_error")
+			clear(requestOmit)
+			requestOmit[mediaID] = struct{}{}
+			if attempt > 0 {
+				break
+			}
+			continue
+		}
+		fallbackMedia := lastNewMedia
+		if len(fallbackMedia) == 0 {
+			fallbackMedia = runNewMedia
+		}
+		if len(fallbackMedia) == 0 {
+			break
+		}
+		if !scanActive {
+			if attempt > 0 {
+				break
+			}
+			if len(fallbackMedia) == 1 {
+				mediaHandled = true
+				a.recordMediaVerdict(call.SessionID, largeModel, fallbackMedia[0], reasonUnidentifiedThisTurn, "provider_error")
+				logMediaRejection(call.SessionID, largeModel, fallbackMedia[0], reasonUnidentifiedThisTurn, "provider_error")
+				clear(requestOmit)
+				requestOmit[fallbackMedia[0]] = struct{}{}
+				continue
+			}
+			// No usable coordinate and more than one new artifact: try one
+			// omission at a time. The first omission that succeeds is the
+			// culprit; every other artifact is delivered in that request.
+			scanCandidates = append([]string(nil), fallbackMedia...)
+			if len(scanCandidates) > 4 {
+				scanCandidates = scanCandidates[:4]
+			}
+			scanIndex = 0
+			scanActive = true
+			mediaHandled = true
+			clear(requestOmit)
+			requestOmit[scanCandidates[0]] = struct{}{}
+			continue
+		}
+		scanIndex++
+		if scanIndex < len(scanCandidates) {
+			clear(requestOmit)
+			requestOmit[scanCandidates[scanIndex]] = struct{}{}
+			continue
+		}
+		clear(requestOmit)
+		for _, mediaID := range scanCandidates {
+			requestOmit[mediaID] = struct{}{}
+			a.recordMediaVerdict(call.SessionID, largeModel, mediaID, reasonUnidentifiedThisTurn, "provider_error")
+			logMediaRejection(call.SessionID, largeModel, mediaID, reasonUnidentifiedThisTurn, "provider_error")
+		}
+		scanActive = false
+		if attempt > len(scanCandidates) {
+			break
 		}
 	}
 
@@ -2595,7 +2662,7 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //
 //	BEFORE: [tool result: image data]
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
-func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model, supportsImages bool, sessionID string) []fantasy.Message {
+func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model, supportsImages bool, sessionID string, requestOmit map[string]struct{}) []fantasy.Message {
 	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
 		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock) ||
 		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrockEurope)
@@ -2603,7 +2670,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	// Native providers keep media in tool results. Only artifacts with a
 	// recorded verdict are replaced, so one rejected image cannot ride along.
 	if providerSupportsMedia && supportsImages {
-		return a.withholdRejectedNativeMedia(messages, largeModel, sessionID)
+		return a.withholdRejectedNativeMedia(messages, largeModel, sessionID, requestOmit)
 	}
 
 	convertedMessages := make([]fantasy.Message, 0, len(messages))
@@ -2622,7 +2689,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	for _, msg := range messages {
 		if msg.Role != fantasy.MessageRoleTool {
 			flushMedia()
-			convertedMessages = append(convertedMessages, a.withholdFileParts(msg, largeModel, supportsImages, sessionID))
+			convertedMessages = append(convertedMessages, a.withholdFileParts(msg, largeModel, supportsImages, sessionID, requestOmit))
 			continue
 		}
 
@@ -2650,9 +2717,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 				reason = reasonNonImageAttachment
 			default:
 				if mediaID, ok := mediaIDForStoredData(media.Data, media.MediaType); ok {
-					if verdict, ok := a.mediaVerdictFor(sessionID, largeModel, mediaID); ok {
-						reason = verdict.Reason
-					}
+					reason = a.withheldReason(sessionID, largeModel, mediaID, requestOmit)
 				}
 			}
 			if reason != "" {
@@ -2697,7 +2762,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 
 // withholdRejectedNativeMedia replaces only artifacts with a verdict on a
 // provider that can carry media in tool results natively.
-func (a *sessionAgent) withholdRejectedNativeMedia(messages []fantasy.Message, largeModel Model, sessionID string) []fantasy.Message {
+func (a *sessionAgent) withholdRejectedNativeMedia(messages []fantasy.Message, largeModel Model, sessionID string, requestOmit map[string]struct{}) []fantasy.Message {
 	out := make([]fantasy.Message, 0, len(messages))
 	for _, msg := range messages {
 		copied := msg
@@ -2706,10 +2771,10 @@ func (a *sessionAgent) withholdRejectedNativeMedia(messages []fantasy.Message, l
 			if toolResult, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
 				if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output); ok {
 					if mediaID, ok := mediaIDForStoredData(media.Data, media.MediaType); ok {
-						if verdict, ok := a.mediaVerdictFor(sessionID, largeModel, mediaID); ok {
+						if reason := a.withheldReason(sessionID, largeModel, mediaID, requestOmit); reason != "" {
 							copied.Content = append(copied.Content, fantasy.ToolResultPart{
 								ToolCallID:      toolResult.ToolCallID,
-								Output:          fantasy.ToolResultOutputContentText{Text: mediaNoteText(verdict.Reason)},
+								Output:          fantasy.ToolResultOutputContentText{Text: mediaNoteText(reason)},
 								ProviderOptions: toolResult.ProviderOptions,
 							})
 							continue
@@ -2718,8 +2783,8 @@ func (a *sessionAgent) withholdRejectedNativeMedia(messages []fantasy.Message, l
 				}
 			}
 			if file, ok := fantasy.AsMessagePart[fantasy.FilePart](part); ok {
-				if verdict, ok := a.mediaVerdictFor(sessionID, largeModel, mediaPartID(file.Data, file.MediaType)); ok {
-					copied.Content = append(copied.Content, fantasy.TextPart{Text: mediaNoteText(verdict.Reason)})
+				if reason := a.withheldReason(sessionID, largeModel, mediaPartID(file.Data, file.MediaType), requestOmit); reason != "" {
+					copied.Content = append(copied.Content, fantasy.TextPart{Text: mediaNoteText(reason)})
 					continue
 				}
 			}
@@ -2732,7 +2797,7 @@ func (a *sessionAgent) withholdRejectedNativeMedia(messages []fantasy.Message, l
 
 // withholdFileParts replaces only file parts with a verdict or a reason the
 // model cannot accept them. Other parts are untouched.
-func (a *sessionAgent) withholdFileParts(msg fantasy.Message, largeModel Model, supportsImages bool, sessionID string) fantasy.Message {
+func (a *sessionAgent) withholdFileParts(msg fantasy.Message, largeModel Model, supportsImages bool, sessionID string, requestOmit map[string]struct{}) fantasy.Message {
 	if len(msg.Content) == 0 {
 		return msg
 	}
@@ -2751,9 +2816,7 @@ func (a *sessionAgent) withholdFileParts(msg fantasy.Message, largeModel Model, 
 		case !strings.HasPrefix(strings.ToLower(file.MediaType), "image/"):
 			reason = reasonNonImageAttachment
 		default:
-			if verdict, ok := a.mediaVerdictFor(sessionID, largeModel, mediaPartID(file.Data, file.MediaType)); ok {
-				reason = verdict.Reason
-			}
+			reason = a.withheldReason(sessionID, largeModel, mediaPartID(file.Data, file.MediaType), requestOmit)
 		}
 		if reason == "" {
 			parts = append(parts, part)

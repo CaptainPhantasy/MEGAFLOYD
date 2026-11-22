@@ -203,6 +203,19 @@ func (a *sessionAgent) mediaVerdictFor(sessionID string, model Model, mediaID st
 	)
 }
 
+// withheldReason reports why one artifact must be replaced in this request.
+// A request-scoped omission is used by the bounded scan that identifies a
+// culprit when the provider supplies no coordinate.
+func (a *sessionAgent) withheldReason(sessionID string, model Model, mediaID string, requestOmit map[string]struct{}) string {
+	if _, ok := requestOmit[mediaID]; ok {
+		return reasonUnidentifiedThisTurn
+	}
+	if verdict, ok := a.mediaVerdictFor(sessionID, model, mediaID); ok {
+		return verdict.Reason
+	}
+	return ""
+}
+
 // handleMediaRejection records only the artifact the provider rejected. When
 // the error has no usable coordinate it records the media introduced by this
 // run, never the session. The bool reports whether a verdict was recorded.
@@ -319,13 +332,14 @@ func newMediaIDs(messages []fantasy.Message, seen map[string]struct{}) []string 
 
 // filterProviderMedia withholds only files with a verdict and adds one typed
 // note per withheld file to the prompt. Every other file is delivered.
-func (a *sessionAgent) filterProviderMedia(prompt string, files []fantasy.FilePart, sessionID string, model Model, supportsImages bool) (string, []fantasy.FilePart) {
+func (a *sessionAgent) filterProviderMedia(prompt string, files []fantasy.FilePart, sessionID string, model Model, supportsImages bool, requestOmit map[string]struct{}) (string, []fantasy.FilePart) {
 	if len(files) == 0 {
 		return prompt, files
 	}
 	kept := make([]fantasy.FilePart, 0, len(files))
 	var notes []string
 	for _, file := range files {
+		mediaID := mediaPartID(file.Data, file.MediaType)
 		reason := ""
 		switch {
 		case !supportsImages && strings.HasPrefix(strings.ToLower(file.MediaType), "image/"):
@@ -333,9 +347,7 @@ func (a *sessionAgent) filterProviderMedia(prompt string, files []fantasy.FilePa
 		case !strings.HasPrefix(strings.ToLower(file.MediaType), "image/"):
 			reason = reasonNonImageAttachment
 		default:
-			if verdict, ok := a.mediaVerdictFor(sessionID, model, mediaPartID(file.Data, file.MediaType)); ok {
-				reason = verdict.Reason
-			}
+			reason = a.withheldReason(sessionID, model, mediaID, requestOmit)
 		}
 		if reason == "" {
 			kept = append(kept, file)
