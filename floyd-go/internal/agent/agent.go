@@ -214,10 +214,9 @@ type sessionAgent struct {
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
 
-	// mediaBlocked records session+model pairs whose provider rejected an
-	// attached image. Those sessions fall back to text placeholders so one
-	// rejected image cannot make every later request fail.
-	mediaBlocked *csync.Map[string, bool]
+	// mediaVerdicts records individual artifacts a provider rejected. Media
+	// is withheld per artifact, never per session.
+	mediaVerdicts *csync.Map[string, mediaVerdict]
 
 	// ralphLoop drives the iterative self-correction loop. It is nil for
 	// sub-agents and any agent built without a data directory; Run
@@ -331,7 +330,7 @@ func NewSessionAgent(
 		planService:          opts.PlanService,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
-		mediaBlocked:         csync.NewMap[string, bool](),
+		mediaVerdicts:        csync.NewMap[string, mediaVerdict](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
@@ -983,7 +982,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Add the session to the context. The run context (genCtx) and its
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
-	supportsImages := largeModel.CatwalkCfg.SupportsImages && !a.mediaBlockedFor(call.SessionID, largeModel)
+	supportsImages := largeModel.CatwalkCfg.SupportsImages
 	history, files := a.preparePrompt(msgs, supportsImages, call.Attachments...)
 
 	startTime := time.Now()
@@ -1006,333 +1005,384 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	retryBudget := newRunRetryBudget(defaultRunMaxAttempts, defaultRunCircuitBreakerHit)
 	maxRetries := retryBudget.maxRetries()
-	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
-		Files:            files,
-		Messages:         history,
-		Headers:          sessionHeaders(call.SessionID),
-		ProviderOptions:  call.ProviderOptions,
-		MaxOutputTokens:  maxOutputTokens,
-		TopP:             call.TopP,
-		Temperature:      call.Temperature,
-		PresencePenalty:  call.PresencePenalty,
-		TopK:             call.TopK,
-		FrequencyPenalty: call.FrequencyPenalty,
-		MaxRetries:       &maxRetries,
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			callContext = turnHistory.Context(callContext)
-			prepared.Messages = options.Messages
-			for i := range prepared.Messages {
-				prepared.Messages[i].ProviderOptions = nil
-			}
-
-			// Enforce the per-session token budget before each step. A
-			// spent-out budget aborts the stream; a crossed warning
-			// threshold injects a system message once.
-			if proceed, warning := a.budgetCheck(call.SessionID); !proceed {
-				return callContext, prepared, fmt.Errorf("%s", warning)
-			} else if warning != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(warning)}, prepared.Messages...)
-			}
-
-			// Use latest tools (updated by SetTools when MCP tools change).
-			prepared.Tools = call.RunSettings.filterTools(a.tools.Copy())
-
-			// Drain queued follow-up prompts for this step. Calls covered
-			// by a cancel recorded while they sat in the queue are dropped:
-			// a cancel that arrived after a prompt was queued must not let
-			// it run as part of this step. Coverage is per-call by accept
-			// sequence so a follow-up queued after the cancel (higher seq)
-			// is not dropped. A dropped prompt carrying a RunID still gets
-			// its terminal cancelled RunComplete so a caller waiting on it
-			// does not hang. Uncanceled prompts without a RunID are folded
-			// into this turn; uncanceled prompts with a RunID are left
-			// queued so each runs as its own turn (with its own
-			// RunComplete) via the recursive run path below.
-			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
-			a.publishCanceledQueueDrops(canceledRunIDs)
-			for _, queued := range fold {
-				userMessage, createErr := a.createUserMessage(callContext, queued)
-				if createErr != nil {
-					return callContext, prepared, createErr
+	runNewMedia := make([]string, 0, 4)
+	lastNewMedia := make([]string, 0, 4)
+	seenMedia := make(map[string]struct{})
+	for _, mediaID := range mediaIDsInMessages(history) {
+		seenMedia[mediaID] = struct{}{}
+	}
+	for _, file := range files {
+		mediaID := mediaPartID(file.Data, file.MediaType)
+		if _, exists := seenMedia[mediaID]; !exists {
+			seenMedia[mediaID] = struct{}{}
+			runNewMedia = append(runNewMedia, mediaID)
+		}
+	}
+	toolsRan := false
+	retryWithoutTools := false
+	mediaHandled := false
+	for attempt := 0; ; attempt++ {
+		promptForProvider, filesForProvider := a.filterProviderMedia(
+			message.PromptWithTextAttachments(call.Prompt, call.Attachments),
+			files, call.SessionID, largeModel, supportsImages)
+		result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
+			Prompt:           promptForProvider,
+			Files:            filesForProvider,
+			Messages:         history,
+			Headers:          sessionHeaders(call.SessionID),
+			ProviderOptions:  call.ProviderOptions,
+			MaxOutputTokens:  maxOutputTokens,
+			TopP:             call.TopP,
+			Temperature:      call.Temperature,
+			PresencePenalty:  call.PresencePenalty,
+			TopK:             call.TopK,
+			FrequencyPenalty: call.FrequencyPenalty,
+			MaxRetries:       &maxRetries,
+			PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+				callContext = turnHistory.Context(callContext)
+				prepared.Messages = options.Messages
+				for i := range prepared.Messages {
+					prepared.Messages[i].ProviderOptions = nil
 				}
-				callContext, createErr = turnHistory.Begin(callContext, call.SessionID, userMessage.ID)
-				if createErr != nil {
-					return callContext, prepared, createErr
-				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
-			}
 
-			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel, supportsImages)
-
-			// Inject the per-request environment block as the first user
-			// message after the system messages. The plan-mode reminder
-			// rides along so it is refreshed every turn without touching
-			// the cacheable system prefix.
-			dynamicCtx := dynamicContext
-			if planReminder != "" {
-				if strings.TrimSpace(dynamicCtx) == "" {
-					dynamicCtx = planReminder
-				} else {
-					dynamicCtx = strings.TrimRight(dynamicCtx, "\n") + "\n\n" + planReminder
+				// Enforce the per-session token budget before each step. A
+				// spent-out budget aborts the stream; a crossed warning
+				// threshold injects a system message once.
+				if proceed, warning := a.budgetCheck(call.SessionID); !proceed {
+					return callContext, prepared, fmt.Errorf("%s", warning)
+				} else if warning != "" {
+					prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(warning)}, prepared.Messages...)
 				}
-			}
-			if dynamicCtx != "" {
-				insertIdx := 0
-				for i, msg := range prepared.Messages {
-					if msg.Role != fantasy.MessageRoleSystem {
-						insertIdx = i
-						break
+
+				// Use latest tools (updated by SetTools when MCP tools change).
+				prepared.Tools = call.RunSettings.filterTools(a.tools.Copy())
+				applyMediaRetryToolPolicy(&prepared, retryWithoutTools)
+
+				// Drain queued follow-up prompts for this step. Calls covered
+				// by a cancel recorded while they sat in the queue are dropped:
+				// a cancel that arrived after a prompt was queued must not let
+				// it run as part of this step. Coverage is per-call by accept
+				// sequence so a follow-up queued after the cancel (higher seq)
+				// is not dropped. A dropped prompt carrying a RunID still gets
+				// its terminal cancelled RunComplete so a caller waiting on it
+				// does not hang. Uncanceled prompts without a RunID are folded
+				// into this turn; uncanceled prompts with a RunID are left
+				// queued so each runs as its own turn (with its own
+				// RunComplete) via the recursive run path below.
+				fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
+				a.publishCanceledQueueDrops(canceledRunIDs)
+				for _, queued := range fold {
+					userMessage, createErr := a.createUserMessage(callContext, queued)
+					if createErr != nil {
+						return callContext, prepared, createErr
+					}
+					callContext, createErr = turnHistory.Begin(callContext, call.SessionID, userMessage.ID)
+					if createErr != nil {
+						return callContext, prepared, createErr
+					}
+					prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+				}
+
+				lastNewMedia = newMediaIDs(prepared.Messages, seenMedia)
+				runNewMedia = append(runNewMedia, lastNewMedia...)
+				prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel, supportsImages, call.SessionID)
+
+				// Inject the per-request environment block as the first user
+				// message after the system messages. The plan-mode reminder
+				// rides along so it is refreshed every turn without touching
+				// the cacheable system prefix.
+				dynamicCtx := dynamicContext
+				if planReminder != "" {
+					if strings.TrimSpace(dynamicCtx) == "" {
+						dynamicCtx = planReminder
+					} else {
+						dynamicCtx = strings.TrimRight(dynamicCtx, "\n") + "\n\n" + planReminder
 					}
 				}
-				dynamicMsg := fantasy.NewUserMessage(dynamicCtx)
-				dynamicMsg.ProviderOptions = nil
-				prepared.Messages = append(prepared.Messages[:insertIdx], append([]fantasy.Message{dynamicMsg}, prepared.Messages[insertIdx:]...)...)
-			}
-
-			lastSystemRoleInx := 0
-			systemMessageUpdated := false
-			for i, msg := range prepared.Messages {
-				// Only add cache control to the last message.
-				if msg.Role == fantasy.MessageRoleSystem {
-					lastSystemRoleInx = i
-				} else if !systemMessageUpdated {
-					prepared.Messages[lastSystemRoleInx].ProviderOptions = a.getCacheControlOptions()
-					systemMessageUpdated = true
+				if dynamicCtx != "" {
+					insertIdx := 0
+					for i, msg := range prepared.Messages {
+						if msg.Role != fantasy.MessageRoleSystem {
+							insertIdx = i
+							break
+						}
+					}
+					dynamicMsg := fantasy.NewUserMessage(dynamicCtx)
+					dynamicMsg.ProviderOptions = nil
+					prepared.Messages = append(prepared.Messages[:insertIdx], append([]fantasy.Message{dynamicMsg}, prepared.Messages[insertIdx:]...)...)
 				}
-				// Than add cache control to the last 2 messages.
-				if i > len(prepared.Messages)-3 {
-					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
+
+				lastSystemRoleInx := 0
+				systemMessageUpdated := false
+				for i, msg := range prepared.Messages {
+					// Only add cache control to the last message.
+					if msg.Role == fantasy.MessageRoleSystem {
+						lastSystemRoleInx = i
+					} else if !systemMessageUpdated {
+						prepared.Messages[lastSystemRoleInx].ProviderOptions = a.getCacheControlOptions()
+						systemMessageUpdated = true
+					}
+					// Than add cache control to the last 2 messages.
+					if i > len(prepared.Messages)-3 {
+						prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
+					}
 				}
-			}
 
-			if promptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
-			}
-
-			// Inject the protocol kernel as its own system message directly
-			// after the provider prefix and before the role template. The
-			// role template carries the cache breakpoint, so providers cache
-			// the whole static prefix (kernel + role) as one block.
-			{
-				kernelMsg := fantasy.NewSystemMessage(protocolKernelPrompt())
-				kernelMsg.ProviderOptions = nil
-				insertAt := 0
 				if promptPrefix != "" {
-					insertAt = 1
+					prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 				}
-				prepared.Messages = append(prepared.Messages[:insertAt], append([]fantasy.Message{kernelMsg}, prepared.Messages[insertAt:]...)...)
-				slog.Debug("Protocol kernel injected", "position", insertAt, "total_messages", len(prepared.Messages))
-			}
 
-			sessionLock.Lock()
-			stepMessages = cloneFantasyMessages(prepared.Messages)
-			sessionLock.Unlock()
+				// Inject the protocol kernel as its own system message directly
+				// after the provider prefix and before the role template. The
+				// role template carries the cache breakpoint, so providers cache
+				// the whole static prefix (kernel + role) as one block.
+				{
+					kernelMsg := fantasy.NewSystemMessage(protocolKernelPrompt())
+					kernelMsg.ProviderOptions = nil
+					insertAt := 0
+					if promptPrefix != "" {
+						insertAt = 1
+					}
+					prepared.Messages = append(prepared.Messages[:insertAt], append([]fantasy.Message{kernelMsg}, prepared.Messages[insertAt:]...)...)
+					slog.Debug("Protocol kernel injected", "position", insertAt, "total_messages", len(prepared.Messages))
+				}
 
-			var assistantMsg message.Message
-			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
-				Role:     message.Assistant,
-				Parts:    []message.ContentPart{},
-				Model:    largeModel.ModelCfg.Model,
-				Provider: largeModel.ModelCfg.Provider,
-			})
-			if err != nil {
+				sessionLock.Lock()
+				stepMessages = cloneFantasyMessages(prepared.Messages)
+				sessionLock.Unlock()
+
+				var assistantMsg message.Message
+				assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
+					Role:     message.Assistant,
+					Parts:    []message.ContentPart{},
+					Model:    largeModel.ModelCfg.Model,
+					Provider: largeModel.ModelCfg.Provider,
+				})
+				if err != nil {
+					return callContext, prepared, err
+				}
+				callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
+				callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
+				callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
+				currentAssistant = &assistantMsg
 				return callContext, prepared, err
-			}
-			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
-			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
-			currentAssistant = &assistantMsg
-			return callContext, prepared, err
-		},
-		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
-			currentAssistant.AppendReasoningContent(reasoning.Text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnReasoningDelta: func(id string, text string) error {
-			currentAssistant.AppendReasoningContent(text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-			// handle anthropic signature
-			if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
-				if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
-					currentAssistant.AppendReasoningSignature(reasoning.Signature)
+			},
+			OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
+				currentAssistant.AppendReasoningContent(reasoning.Text)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnReasoningDelta: func(id string, text string) error {
+				currentAssistant.AppendReasoningContent(text)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
+				// handle anthropic signature
+				if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
+					if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
+						currentAssistant.AppendReasoningSignature(reasoning.Signature)
+					}
 				}
-			}
-			if googleData, ok := reasoning.ProviderMetadata[google.Name]; ok {
-				if reasoning, ok := googleData.(*google.ReasoningMetadata); ok {
-					currentAssistant.AppendThoughtSignature(reasoning.Signature, reasoning.ToolID)
+				if googleData, ok := reasoning.ProviderMetadata[google.Name]; ok {
+					if reasoning, ok := googleData.(*google.ReasoningMetadata); ok {
+						currentAssistant.AppendThoughtSignature(reasoning.Signature, reasoning.ToolID)
+					}
 				}
-			}
-			if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {
-				if reasoning, ok := openaiData.(*openai.ResponsesReasoningMetadata); ok {
-					currentAssistant.SetReasoningResponsesData(reasoning)
+				if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {
+					if reasoning, ok := openaiData.(*openai.ResponsesReasoningMetadata); ok {
+						currentAssistant.SetReasoningResponsesData(reasoning)
+					}
 				}
-			}
-			currentAssistant.FinishThinking()
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnTextDelta: func(id string, text string) error {
-			// Strip leading newline from initial text content. This is is
-			// particularly important in non-interactive mode where leading
-			// newlines are very visible.
-			if len(currentAssistant.Parts) == 0 {
-				text = strings.TrimPrefix(text, "\n")
-			}
+				currentAssistant.FinishThinking()
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnTextDelta: func(id string, text string) error {
+				// Strip leading newline from initial text content. This is is
+				// particularly important in non-interactive mode where leading
+				// newlines are very visible.
+				if len(currentAssistant.Parts) == 0 {
+					text = strings.TrimPrefix(text, "\n")
+				}
 
-			currentAssistant.AppendContent(text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnToolInputStart: func(id string, toolName string) error {
-			toolCall := message.ToolCall{
-				ID:               id,
-				Name:             toolName,
-				ProviderExecuted: false,
-				Finished:         false,
+				currentAssistant.AppendContent(text)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnToolInputStart: func(id string, toolName string) error {
+				toolCall := message.ToolCall{
+					ID:               id,
+					Name:             toolName,
+					ProviderExecuted: false,
+					Finished:         false,
+				}
+				currentAssistant.AddToolCall(toolCall)
+				// Use parent ctx instead of genCtx to ensure the update succeeds
+				// even if the request is canceled mid-stream
+				return a.messages.Update(ctx, *currentAssistant)
+			},
+			OnRetry: runRetryHandler(retryBudget, cancel, func(err *fantasy.ProviderError, delay time.Duration) {
+				slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
+				// Reset streamed content so the retried response doesn't
+				// concatenate with partial content from the failed attempt.
+				// On the final attempt (no more retries), any partial content
+				// stays in the message as useful context beneath the error.
+				currentAssistant.ResetStreamedContent()
+				if updateErr := a.messages.Update(genCtx, *currentAssistant); updateErr != nil {
+					slog.Error("Failed to reset message on retry", "error", updateErr)
+				}
+			}),
+			OnAuthRefresh: call.OnAuthRefresh,
+			ModelProvider: func() fantasy.LanguageModel {
+				m := a.largeModel.Get()
+				slog.Info("ModelProvider called",
+					"provider", m.ModelCfg.Provider,
+					"model", m.ModelCfg.Model)
+				return m.Model
+			},
+			OnToolCall: func(tc fantasy.ToolCallContent) error {
+				input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
+				if wasSanitized {
+					sanitizedToolCalls[tc.ToolCallID] = true
+				}
+				toolCall := message.ToolCall{
+					ID:               tc.ToolCallID,
+					Name:             tc.ToolName,
+					Input:            input,
+					ProviderExecuted: false,
+					Finished:         true,
+				}
+				currentAssistant.AddToolCall(toolCall)
+				// Use parent ctx instead of genCtx to ensure the update succeeds
+				// even if the request is canceled mid-stream
+				return a.messages.Update(ctx, *currentAssistant)
+			},
+			OnToolResult: func(result fantasy.ToolResultContent) error {
+				toolsRan = true
+				toolResult := a.convertToToolResult(result)
+				if sanitizedToolCalls[result.ToolCallID] {
+					toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
+					toolResult.IsError = true
+				}
+				// Use parent ctx instead of genCtx to ensure the message is created
+				// even if the request is canceled mid-stream
+				_, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
+					Role: message.Tool,
+					Parts: []message.ContentPart{
+						toolResult,
+					},
+				})
+				return createMsgErr
+			},
+			OnStepFinish: func(stepResult fantasy.StepResult) error {
+				for _, w := range stepResult.Warnings {
+					slog.Warn("Provider warning", "type", w.Type, "message", w.Message)
+				}
+				finishReason := message.FinishReasonUnknown
+				switch stepResult.FinishReason {
+				case fantasy.FinishReasonLength:
+					finishReason = message.FinishReasonMaxTokens
+				case fantasy.FinishReasonStop:
+					finishReason = message.FinishReasonEndTurn
+				case fantasy.FinishReasonToolCalls:
+					finishReason = message.FinishReasonToolUse
+				case fantasy.FinishReasonContentFilter:
+					// Provider safety classifier stopped the model
+					// (Anthropic stop_reason=refusal, OpenAI content_filter).
+					// The TUI owns the display copy; we only persist the
+					// reason so the UI can show a REFUSED banner.
+					finishReason = message.FinishReasonContentFilter
+					slog.Warn(
+						"Provider content filter stopped the model",
+						"session_id", call.SessionID,
+						"finish_reason", string(stepResult.FinishReason),
+					)
+				}
+				// If a tool result halted the turn (e.g. a hook halt or a
+				// permission denial), the step ends on FinishReasonToolCalls but
+				// the model will not be called again. Treat it as the end of the
+				// turn so the UI can render the assistant footer.
+				if finishReason == message.FinishReasonToolUse {
+					for _, tr := range stepResult.Content.ToolResults() {
+						if tr.StopTurn {
+							finishReason = message.FinishReasonEndTurn
+							break
+						}
+					}
+				}
+				currentAssistant.AddFinish(finishReason, "", "")
+				sessionLock.Lock()
+				defer sessionLock.Unlock()
+
+				updatedSession, getSessionErr := a.sessions.Get(ctx, call.SessionID)
+				if getSessionErr != nil {
+					return getSessionErr
+				}
+				usage, estimated := fallbackStepUsage(stepMessages, stepResult)
+				if err := goalRun.AddUsage(context.WithoutCancel(ctx), usage.InputTokens+usage.OutputTokens+usage.CacheCreationTokens+usage.CacheReadTokens); err != nil {
+					return err
+				}
+				a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
+				extractHyperCredits(stepResult.ProviderMetadata)
+				_, sessionErr := a.sessions.Save(ctx, updatedSession)
+				if sessionErr != nil {
+					return sessionErr
+				}
+				currentSession = updatedSession
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			StopWhen: []fantasy.StopCondition{
+				func(_ []fantasy.StepResult) bool { return goalRun.ShouldStop() },
+				func(_ []fantasy.StepResult) bool {
+					cw := int64(largeModel.CatwalkCfg.ContextWindow)
+					// If context window is unknown (0), skip auto-summarize
+					// to avoid immediately truncating custom/local models.
+					if cw == 0 {
+						return false
+					}
+					tokens := currentSession.CompletionTokens + currentSession.PromptTokens
+					remaining := cw - tokens
+					var threshold int64
+					if cw > largeContextWindowThreshold {
+						threshold = largeContextWindowBuffer
+					} else {
+						threshold = int64(float64(cw) * smallContextWindowRatio)
+					}
+					if (remaining <= threshold) && !a.disableAutoSummarize {
+						shouldSummarize = true
+						return true
+					}
+					return false
+				},
+				func(steps []fantasy.StepResult) bool {
+					return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
+				},
+			},
+		})
+		if err == nil || attempt > 0 {
+			break
+		}
+		fallbackMedia := lastNewMedia
+		if len(fallbackMedia) == 0 {
+			fallbackMedia = runNewMedia
+		}
+		mediaHandled = a.handleMediaRejection(call.SessionID, largeModel, err, fallbackMedia)
+		if !mediaHandled {
+			break
+		}
+		if toolsRan {
+			// Rebuild the request from stored tool results and disable tools
+			// so the retry cannot execute one of them again.
+			refreshed, listErr := a.messages.List(genCtx, call.SessionID)
+			if listErr != nil {
+				break
 			}
-			currentAssistant.AddToolCall(toolCall)
-			// Use parent ctx instead of genCtx to ensure the update succeeds
-			// even if the request is canceled mid-stream
-			return a.messages.Update(ctx, *currentAssistant)
-		},
-		OnRetry: runRetryHandler(retryBudget, cancel, func(err *fantasy.ProviderError, delay time.Duration) {
-			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
-			// Reset streamed content so the retried response doesn't
-			// concatenate with partial content from the failed attempt.
-			// On the final attempt (no more retries), any partial content
-			// stays in the message as useful context beneath the error.
+			rebuilt, _ := a.preparePrompt(refreshed, supportsImages, call.Attachments...)
+			history = rebuilt
+			retryWithoutTools = true
 			currentAssistant.ResetStreamedContent()
 			if updateErr := a.messages.Update(genCtx, *currentAssistant); updateErr != nil {
-				slog.Error("Failed to reset message on retry", "error", updateErr)
+				break
 			}
-		}),
-		OnAuthRefresh: call.OnAuthRefresh,
-		ModelProvider: func() fantasy.LanguageModel {
-			m := a.largeModel.Get()
-			slog.Info("ModelProvider called",
-				"provider", m.ModelCfg.Provider,
-				"model", m.ModelCfg.Model)
-			return m.Model
-		},
-		OnToolCall: func(tc fantasy.ToolCallContent) error {
-			input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
-			if wasSanitized {
-				sanitizedToolCalls[tc.ToolCallID] = true
-			}
-			toolCall := message.ToolCall{
-				ID:               tc.ToolCallID,
-				Name:             tc.ToolName,
-				Input:            input,
-				ProviderExecuted: false,
-				Finished:         true,
-			}
-			currentAssistant.AddToolCall(toolCall)
-			// Use parent ctx instead of genCtx to ensure the update succeeds
-			// even if the request is canceled mid-stream
-			return a.messages.Update(ctx, *currentAssistant)
-		},
-		OnToolResult: func(result fantasy.ToolResultContent) error {
-			toolResult := a.convertToToolResult(result)
-			if sanitizedToolCalls[result.ToolCallID] {
-				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
-				toolResult.IsError = true
-			}
-			// Use parent ctx instead of genCtx to ensure the message is created
-			// even if the request is canceled mid-stream
-			_, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
-				Role: message.Tool,
-				Parts: []message.ContentPart{
-					toolResult,
-				},
-			})
-			return createMsgErr
-		},
-		OnStepFinish: func(stepResult fantasy.StepResult) error {
-			for _, w := range stepResult.Warnings {
-				slog.Warn("Provider warning", "type", w.Type, "message", w.Message)
-			}
-			finishReason := message.FinishReasonUnknown
-			switch stepResult.FinishReason {
-			case fantasy.FinishReasonLength:
-				finishReason = message.FinishReasonMaxTokens
-			case fantasy.FinishReasonStop:
-				finishReason = message.FinishReasonEndTurn
-			case fantasy.FinishReasonToolCalls:
-				finishReason = message.FinishReasonToolUse
-			case fantasy.FinishReasonContentFilter:
-				// Provider safety classifier stopped the model
-				// (Anthropic stop_reason=refusal, OpenAI content_filter).
-				// The TUI owns the display copy; we only persist the
-				// reason so the UI can show a REFUSED banner.
-				finishReason = message.FinishReasonContentFilter
-				slog.Warn(
-					"Provider content filter stopped the model",
-					"session_id", call.SessionID,
-					"finish_reason", string(stepResult.FinishReason),
-				)
-			}
-			// If a tool result halted the turn (e.g. a hook halt or a
-			// permission denial), the step ends on FinishReasonToolCalls but
-			// the model will not be called again. Treat it as the end of the
-			// turn so the UI can render the assistant footer.
-			if finishReason == message.FinishReasonToolUse {
-				for _, tr := range stepResult.Content.ToolResults() {
-					if tr.StopTurn {
-						finishReason = message.FinishReasonEndTurn
-						break
-					}
-				}
-			}
-			currentAssistant.AddFinish(finishReason, "", "")
-			sessionLock.Lock()
-			defer sessionLock.Unlock()
-
-			updatedSession, getSessionErr := a.sessions.Get(ctx, call.SessionID)
-			if getSessionErr != nil {
-				return getSessionErr
-			}
-			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
-			if err := goalRun.AddUsage(context.WithoutCancel(ctx), usage.InputTokens+usage.OutputTokens+usage.CacheCreationTokens+usage.CacheReadTokens); err != nil {
-				return err
-			}
-			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
-			extractHyperCredits(stepResult.ProviderMetadata)
-			_, sessionErr := a.sessions.Save(ctx, updatedSession)
-			if sessionErr != nil {
-				return sessionErr
-			}
-			currentSession = updatedSession
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		StopWhen: []fantasy.StopCondition{
-			func(_ []fantasy.StepResult) bool { return goalRun.ShouldStop() },
-			func(_ []fantasy.StepResult) bool {
-				cw := int64(largeModel.CatwalkCfg.ContextWindow)
-				// If context window is unknown (0), skip auto-summarize
-				// to avoid immediately truncating custom/local models.
-				if cw == 0 {
-					return false
-				}
-				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
-				remaining := cw - tokens
-				var threshold int64
-				if cw > largeContextWindowThreshold {
-					threshold = largeContextWindowBuffer
-				} else {
-					threshold = int64(float64(cw) * smallContextWindowRatio)
-				}
-				if (remaining <= threshold) && !a.disableAutoSummarize {
-					shouldSummarize = true
-					return true
-				}
-				return false
-			},
-			func(steps []fantasy.StepResult) bool {
-				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
-			},
-		},
-	})
+		}
+	}
 
 	if budgetErr := retryBudgetError(err, retryBudget); budgetErr != nil {
 		err = budgetErr
@@ -1430,16 +1480,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		var fantasyErr *fantasy.Error
 		var providerErr *fantasy.ProviderError
-		// A provider that rejects one image would reject every later request
-		// that includes it. Drop media for this session+model so the poisoned
-		// history no longer blocks the conversation.
-		if errors.As(err, &providerErr) && isUnsupportedImageError(providerErr) {
-			a.blockMedia(call.SessionID, largeModel)
-			slog.Warn("Provider rejected image media; suppressing media for this session and model",
-				"session_id", call.SessionID,
-				"provider", largeModel.ModelCfg.Provider,
-				"model", largeModel.ModelCfg.Model)
-		}
 		const defaultTitle = "Provider Error"
 		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
 		if isCancelErr {
@@ -1458,7 +1498,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			} else {
 				details := providerErr.Message
 				if isUnsupportedImageError(providerErr) {
-					details += "\n\nMedia is omitted for the rest of this session so the conversation can continue."
+					if mediaHandled {
+						details += "\n\nThe rejected image is withheld from later requests; other media is unaffected."
+					} else {
+						details += "\n\nMedia could not be attributed to a specific artifact; the session continues."
+					}
 				}
 				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), details)
 			}
@@ -2551,23 +2595,18 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //
 //	BEFORE: [tool result: image data]
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
-func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model, supportsImages bool) []fantasy.Message {
+func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model, supportsImages bool, sessionID string) []fantasy.Message {
 	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
 		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock) ||
 		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrockEurope)
 
-	// A natively media-capable provider needs no workaround unless an earlier
-	// request proved it rejects this session's media.
+	// Native providers keep media in tool results. Only artifacts with a
+	// recorded verdict are replaced, so one rejected image cannot ride along.
 	if providerSupportsMedia && supportsImages {
-		return messages
+		return a.withholdRejectedNativeMedia(messages, largeModel, sessionID)
 	}
 
 	convertedMessages := make([]fantasy.Message, 0, len(messages))
-	// Media attachments collected for the current run of tool messages. They
-	// are emitted only after the last tool message of the run: a user message
-	// between tool results violates the provider rule that every tool call is
-	// answered by its tool results before any other message, which makes the
-	// request invalid on every later turn.
 	var pendingMedia []fantasy.FilePart
 
 	flushMedia := func() {
@@ -2583,7 +2622,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	for _, msg := range messages {
 		if msg.Role != fantasy.MessageRoleTool {
 			flushMedia()
-			convertedMessages = append(convertedMessages, msg)
+			convertedMessages = append(convertedMessages, a.withholdFileParts(msg, largeModel, supportsImages, sessionID))
 			continue
 		}
 
@@ -2597,47 +2636,52 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 				continue
 			}
 
-			if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output); ok {
-				if !supportsImages || !isImageMediaType(media.MediaType) {
-					// The model cannot process this media: either it has no
-					// image support, or the payload is not an image (for
-					// example application/json or application/pdf), which
-					// OpenAI-compatible providers reject as a file part.
-					// Replace it with text and skip the synthetic user
-					// message, which would brick the session.
-					textParts = append(textParts, fantasy.ToolResultPart{
-						ToolCallID: toolResult.ToolCallID,
-						Output: fantasy.ToolResultOutputContentText{
-							Text: "[Media content not supported by this model]",
-						},
-						ProviderOptions: toolResult.ProviderOptions,
-					})
-					continue
+			media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output)
+			if !ok {
+				textParts = append(textParts, part)
+				continue
+			}
+
+			reason := ""
+			switch {
+			case !supportsImages:
+				reason = reasonModelUnsupported
+			case !isImageMediaType(media.MediaType):
+				reason = reasonNonImageAttachment
+			default:
+				if mediaID, ok := mediaIDForStoredData(media.Data, media.MediaType); ok {
+					if verdict, ok := a.mediaVerdictFor(sessionID, largeModel, mediaID); ok {
+						reason = verdict.Reason
+					}
 				}
-
-				decoded, err := decodeMediaData(media.Data)
-				if err != nil {
-					slog.Warn("Failed to decode media data", "error", err)
-					textParts = append(textParts, part)
-					continue
-				}
-
-				mediaFiles = append(mediaFiles, fantasy.FilePart{
-					Data:      decoded,
-					MediaType: media.MediaType,
-					Filename:  fmt.Sprintf("tool-result-%s", toolResult.ToolCallID),
-				})
-
+			}
+			if reason != "" {
 				textParts = append(textParts, fantasy.ToolResultPart{
-					ToolCallID: toolResult.ToolCallID,
-					Output: fantasy.ToolResultOutputContentText{
-						Text: "[Image/media content loaded - see attached file]",
-					},
+					ToolCallID:      toolResult.ToolCallID,
+					Output:          fantasy.ToolResultOutputContentText{Text: mediaNoteText(reason)},
 					ProviderOptions: toolResult.ProviderOptions,
 				})
-			} else {
-				textParts = append(textParts, part)
+				continue
 			}
+
+			decoded, err := decodeMediaData(media.Data)
+			if err != nil {
+				slog.Warn("Failed to decode media data", "error", err)
+				textParts = append(textParts, part)
+				continue
+			}
+
+			mediaFiles = append(mediaFiles, fantasy.FilePart{
+				Data:      decoded,
+				MediaType: media.MediaType,
+				Filename:  fmt.Sprintf("tool-result-%s", toolResult.ToolCallID),
+			})
+
+			textParts = append(textParts, fantasy.ToolResultPart{
+				ToolCallID:      toolResult.ToolCallID,
+				Output:          fantasy.ToolResultOutputContentText{Text: "[Image/media content loaded - see attached file]"},
+				ProviderOptions: toolResult.ProviderOptions,
+			})
 		}
 
 		convertedMessages = append(convertedMessages, fantasy.Message{
@@ -2649,6 +2693,80 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	flushMedia()
 
 	return convertedMessages
+}
+
+// withholdRejectedNativeMedia replaces only artifacts with a verdict on a
+// provider that can carry media in tool results natively.
+func (a *sessionAgent) withholdRejectedNativeMedia(messages []fantasy.Message, largeModel Model, sessionID string) []fantasy.Message {
+	out := make([]fantasy.Message, 0, len(messages))
+	for _, msg := range messages {
+		copied := msg
+		copied.Content = nil
+		for _, part := range msg.Content {
+			if toolResult, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+				if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output); ok {
+					if mediaID, ok := mediaIDForStoredData(media.Data, media.MediaType); ok {
+						if verdict, ok := a.mediaVerdictFor(sessionID, largeModel, mediaID); ok {
+							copied.Content = append(copied.Content, fantasy.ToolResultPart{
+								ToolCallID:      toolResult.ToolCallID,
+								Output:          fantasy.ToolResultOutputContentText{Text: mediaNoteText(verdict.Reason)},
+								ProviderOptions: toolResult.ProviderOptions,
+							})
+							continue
+						}
+					}
+				}
+			}
+			if file, ok := fantasy.AsMessagePart[fantasy.FilePart](part); ok {
+				if verdict, ok := a.mediaVerdictFor(sessionID, largeModel, mediaPartID(file.Data, file.MediaType)); ok {
+					copied.Content = append(copied.Content, fantasy.TextPart{Text: mediaNoteText(verdict.Reason)})
+					continue
+				}
+			}
+			copied.Content = append(copied.Content, part)
+		}
+		out = append(out, copied)
+	}
+	return out
+}
+
+// withholdFileParts replaces only file parts with a verdict or a reason the
+// model cannot accept them. Other parts are untouched.
+func (a *sessionAgent) withholdFileParts(msg fantasy.Message, largeModel Model, supportsImages bool, sessionID string) fantasy.Message {
+	if len(msg.Content) == 0 {
+		return msg
+	}
+	changed := false
+	parts := make([]fantasy.MessagePart, 0, len(msg.Content))
+	for _, part := range msg.Content {
+		file, ok := fantasy.AsMessagePart[fantasy.FilePart](part)
+		if !ok {
+			parts = append(parts, part)
+			continue
+		}
+		reason := ""
+		switch {
+		case !supportsImages && strings.HasPrefix(strings.ToLower(file.MediaType), "image/"):
+			reason = reasonModelUnsupported
+		case !strings.HasPrefix(strings.ToLower(file.MediaType), "image/"):
+			reason = reasonNonImageAttachment
+		default:
+			if verdict, ok := a.mediaVerdictFor(sessionID, largeModel, mediaPartID(file.Data, file.MediaType)); ok {
+				reason = verdict.Reason
+			}
+		}
+		if reason == "" {
+			parts = append(parts, part)
+			continue
+		}
+		parts = append(parts, fantasy.TextPart{Text: mediaNoteText(reason)})
+		changed = true
+	}
+	if !changed {
+		return msg
+	}
+	msg.Content = parts
+	return msg
 }
 
 // decodeMediaData decodes the base64 payload of provider media. Rows written
@@ -2668,30 +2786,6 @@ func decodeMediaData(data string) ([]byte, error) {
 		return inner, nil
 	}
 	return raw, nil
-}
-
-// mediaBlockKey identifies one session's use of one provider model.
-func mediaBlockKey(sessionID string, model Model) string {
-	return sessionID + "\x00" + model.ModelCfg.Provider + "\x00" + model.ModelCfg.Model
-}
-
-// mediaBlockedFor reports whether a provider already rejected media for this
-// session and model.
-func (a *sessionAgent) mediaBlockedFor(sessionID string, model Model) bool {
-	if a.mediaBlocked == nil || sessionID == "" {
-		return false
-	}
-	blocked, _ := a.mediaBlocked.Get(mediaBlockKey(sessionID, model))
-	return blocked
-}
-
-// blockMedia stops attaching images for a session whose provider rejected one,
-// so the rejected message cannot fail every subsequent request.
-func (a *sessionAgent) blockMedia(sessionID string, model Model) {
-	if a.mediaBlocked == nil || sessionID == "" {
-		return
-	}
-	a.mediaBlocked.Set(mediaBlockKey(sessionID, model), true)
 }
 
 // isUnsupportedImageError reports a provider rejection of an attached image

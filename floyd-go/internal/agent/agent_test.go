@@ -933,7 +933,7 @@ func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
 		},
 	}
 
-	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages)
+	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages, "test-session")
 
 	// Should produce exactly one message: the tool message with a text
 	// placeholder. No synthetic user message with FilePart.
@@ -977,7 +977,7 @@ func TestWorkaroundProviderMediaLimitations_VisionModel(t *testing.T) {
 		},
 	}
 
-	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages)
+	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages, "test-session")
 
 	// Should produce two messages: tool message with placeholder text,
 	// and synthetic user message with FilePart.
@@ -1030,7 +1030,7 @@ func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 		},
 	}
 
-	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages)
+	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages, "test-session")
 	require.Len(t, result, 1)
 	require.Equal(t, fantasy.MessageRoleTool, result[0].Role)
 

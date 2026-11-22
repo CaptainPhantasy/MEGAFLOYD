@@ -5,7 +5,6 @@
 [文档](docs/zh/index.md) · [Issues](https://github.com/CaptainPhantasy/f7/issues) · [English](README.md)
 
 
-![Floyd Code 的使用演示](./docs/media/intro.gif)
 
 
 ## 什么是 Floyd Code CLI

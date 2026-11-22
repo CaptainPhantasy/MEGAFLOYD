@@ -36,7 +36,7 @@ func TestWorkaroundProviderMediaLimitations_NonImageMediaStaysText(t *testing.T)
 		CatwalkCfg: catwalk.Model{SupportsImages: true},
 	}
 
-	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages)
+	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages, "s")
 
 	require.Len(t, result, 1, "non-image media must not create a file-part user message")
 	require.Equal(t, fantasy.MessageRoleTool, result[0].Role)
@@ -44,7 +44,7 @@ func TestWorkaroundProviderMediaLimitations_NonImageMediaStaysText(t *testing.T)
 	require.True(t, ok)
 	text, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](tr.Output)
 	require.True(t, ok)
-	require.Contains(t, text.Text, "not supported")
+	require.Contains(t, text.Text, "non_image_attachment")
 }
 
 func TestWorkaroundProviderMediaLimitations_MediaFollowsWholeToolRun(t *testing.T) {
@@ -62,7 +62,7 @@ func TestWorkaroundProviderMediaLimitations_MediaFollowsWholeToolRun(t *testing.
 		CatwalkCfg: catwalk.Model{SupportsImages: true},
 	}
 
-	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages)
+	result := agent.workaroundProviderMediaLimitations(messages, largeModel, largeModel.CatwalkCfg.SupportsImages, "s")
 
 	// The two tool results stay adjacent; the media user messages are emitted
 	// only after the run closes, before the original user message.
@@ -108,31 +108,4 @@ func TestIsUnsupportedImageError(t *testing.T) {
 	require.True(t, isUnsupportedImageError(rejected))
 	require.False(t, isUnsupportedImageError(&fantasy.ProviderError{Title: "Rate limit", Message: "too many requests"}))
 	require.False(t, isUnsupportedImageError(nil))
-}
-
-func TestMediaBlockSuppressesImagesForOneSession(t *testing.T) {
-	env := testEnv(t)
-	agent := testSessionAgent(env, nil, nil, "test prompt").(*sessionAgent)
-	largeModel := Model{
-		ModelCfg:   config.SelectedModel{Provider: "deepseek", Model: "deepseek-v4-flash"},
-		CatwalkCfg: catwalk.Model{SupportsImages: true},
-	}
-
-	require.False(t, agent.mediaBlockedFor("s", largeModel))
-	agent.blockMedia("s", largeModel)
-	require.True(t, agent.mediaBlockedFor("s", largeModel))
-	require.False(t, agent.mediaBlockedFor("other", largeModel), "another session keeps media")
-
-	payload := base64.StdEncoding.EncodeToString([]byte("fake-png-data"))
-	result := agent.workaroundProviderMediaLimitations(
-		[]fantasy.Message{imageToolMessage("call_1", "image/png", payload)},
-		largeModel,
-		false,
-	)
-	require.Len(t, result, 1, "suppressed media must not create a file-part message")
-	tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](result[0].Content[0])
-	require.True(t, ok)
-	text, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](tr.Output)
-	require.True(t, ok)
-	require.Contains(t, text.Text, "not supported")
 }

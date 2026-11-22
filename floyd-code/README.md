@@ -3,7 +3,6 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) <br>
 [Documentation](docs/en/index.md) · [Issues](https://github.com/CaptainPhantasy/f7/issues) · [中文](README.zh-CN.md)
 
-![Demo of using Floyd Code](./docs/media/intro.gif)
 
 ## What is Floyd Code CLI
 

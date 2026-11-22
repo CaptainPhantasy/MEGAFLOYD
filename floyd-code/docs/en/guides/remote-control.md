@@ -22,7 +22,6 @@ Start it on your machine in any of the following ways — they are equivalent: e
 
 Once started, the terminal prints the access URL (the Remote Control relay host, followed by `/devices/<device ID>/`), a QR code, and the device name (the machine's hostname), and the default browser opens the URL automatically (use `--no-open` to skip). Besides the terminal rendering, the QR code is also saved as a PNG file (the path is printed in the startup output) — if the QR code doesn't render properly in your terminal, open that file instead.
 
-![Terminal output after starting f7 rc: QR code and connection status](../../media/floyd-rc-banner.jpg)
 
 ::: warning Note
 The Remote Control link is a remote control entry point to this machine — anyone who has it may control your sessions and files. Do not share it with others or post it anywhere public.
