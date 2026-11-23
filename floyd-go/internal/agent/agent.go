@@ -984,6 +984,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// mutex above for both the accepted and in-process paths.
 	supportsImages := largeModel.CatwalkCfg.SupportsImages
 	history, files := a.preparePrompt(msgs, supportsImages, call.Attachments...)
+	requestCandidates := requestMediaIDs(history, files)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -1405,6 +1406,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			fallbackMedia = runNewMedia
 		}
 		if len(fallbackMedia) == 0 {
+			fallbackMedia = requestCandidates
+		}
+		if len(fallbackMedia) == 0 {
 			break
 		}
 		if !scanActive {
@@ -1419,9 +1423,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				requestOmit[fallbackMedia[0]] = struct{}{}
 				continue
 			}
-			// No usable coordinate and more than one new artifact: try one
-			// omission at a time. The first omission that succeeds is the
-			// culprit; every other artifact is delivered in that request.
+			// No usable coordinate: try one omission at a time. The first
+			// omission that succeeds is the culprit; every other artifact is
+			// delivered in that request.
 			scanCandidates = append([]string(nil), fallbackMedia...)
 			if len(scanCandidates) > 4 {
 				scanCandidates = scanCandidates[:4]

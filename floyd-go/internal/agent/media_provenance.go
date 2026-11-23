@@ -236,6 +236,29 @@ func (a *sessionAgent) handleMediaRejection(sessionID string, model Model, err e
 	return len(runMedia) > 0
 }
 
+// requestMediaIDs lists the media already present in the request, most recent
+// last, capped at the four candidates the omission scan will try. It is the
+// fallback after a restart, when a rejection has no new artifact to blame.
+func requestMediaIDs(messages []fantasy.Message, files []fantasy.FilePart) []string {
+	ids := mediaIDsInMessages(messages)
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		seen[id] = struct{}{}
+	}
+	for _, file := range files {
+		id := mediaPartID(file.Data, file.MediaType)
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) > 4 {
+		ids = ids[len(ids)-4:]
+	}
+	return ids
+}
+
 // applyMediaRetryToolPolicy makes a retry safe after tool results were stored:
 // the retry reuses the stored tool results and cannot start another tool. The
 // model can answer, but no tool executes twice.

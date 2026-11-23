@@ -266,6 +266,23 @@ func TestModelUnsupportedAndNonImageNotes(t *testing.T) {
 	require.Equal(t, 0, filePartCount(nonImage))
 }
 
+func TestRequestMediaIDsAfterRestart(t *testing.T) {
+	good, bad := storedPNG(16), storedPNG(17)
+	messages := []fantasy.Message{
+		imageToolMessage("good", "image/png", good),
+		imageToolMessage("bad", "image/png", bad),
+	}
+	ids := requestMediaIDs(messages, nil)
+	require.Len(t, ids, 2)
+	require.Contains(t, ids, mediaPartID(provenancePNG(16), "image/png"))
+	require.Contains(t, ids, mediaPartID(provenancePNG(17), "image/png"))
+
+	file := fantasy.FilePart{Data: provenancePNG(18), MediaType: "image/png"}
+	ids = requestMediaIDs(messages, []fantasy.FilePart{file})
+	require.Len(t, ids, 3)
+	require.Contains(t, ids, mediaPartID(provenancePNG(18), "image/png"))
+}
+
 func TestRequestScopedOmission(t *testing.T) {
 	env := testEnv(t)
 	agent := testSessionAgent(env, nil, nil, "test prompt").(*sessionAgent)
