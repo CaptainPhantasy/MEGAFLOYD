@@ -28,7 +28,7 @@ func TestDeletionCopyActualParallelRecovery(t *testing.T) {
 	copyCommand := "cp source destination"
 	failedCommand := "if false; then rm -f remaining; fi; false"
 	inner := tools.NewParallelBashTool(permission.NewPermissionService(f.workingDir, true, nil), f.workingDir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "fixture")
-	tool := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
+	tool := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir, nil)[0]
 	params := tools.ParallelBashParams{Commands: []tools.ParallelBashCommand{
 		{Command: copyCommand, Description: "copy isolated fixture"},
 		{Command: failedCommand, Description: "safe failed branch"},

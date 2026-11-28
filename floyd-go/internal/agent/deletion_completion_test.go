@@ -93,7 +93,7 @@ func TestDeletionCompletionRecordingThroughGuard(t *testing.T) {
 			ran := false
 			expected := fantasy.ToolResponse{Content: "original tool output", Metadata: tc.metadata}
 			inner := deletionRecordingTool{ran: &ran, resp: expected, err: tc.err}
-			wrapper := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
+			wrapper := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir, nil)[0]
 			input := `{"command":"rm -f a"}`
 			if tc.tool == "parallel_bash" {
 				input = `{"commands":[{"command":"rm -f a"},{"command":"rm -f b"}]}`
@@ -119,7 +119,7 @@ func TestDeletionParallelOverlapDeniedBeforeExecution(t *testing.T) {
 		f.answers = []bool{true, true}
 		ran := false
 		inner := deletionRecordingTool{ran: &ran}
-		wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
+		wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir, nil)[0]
 		params := tools.ParallelBashParams{}
 		for _, command := range commands {
 			params.Commands = append(params.Commands, tools.ParallelBashCommand{Command: command})
@@ -157,7 +157,7 @@ func TestDeletionCompletionUsesPreExecutionClassification(t *testing.T) {
 		deletionRecordingTool: deletionRecordingTool{ran: &ran, resp: fantasy.ToolResponse{Metadata: `{"exit_code":0}`}},
 		after:                 func() error { return os.WriteFile(target, nil, 0o600) },
 	}
-	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
+	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir, nil)[0]
 	response, err := wrapped.Run(context.WithValue(t.Context(), tools.SessionIDContextKey, "truncation"), fantasy.ToolCall{ID: "truncate", Name: tools.BashToolName, Input: `{"command":"> content"}`})
 	require.NoError(t, err)
 	require.False(t, response.IsError)

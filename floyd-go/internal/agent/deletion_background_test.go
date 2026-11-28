@@ -31,7 +31,7 @@ func TestDeletionBackgroundTerminalFailureReusesApproval(t *testing.T) {
 		job.Wait() // no deletion runs: the destructive branch is never entered
 		return fantasy.WithResponseMetadata(fantasy.NewTextResponse("background fixture"), tools.BashResponseMetadata{Background: true, ShellID: job.ID, WorkingDirectory: f.workingDir}), nil
 	})
-	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
+	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir, nil)[0]
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "s")
 	response, err := wrapped.Run(ctx, fantasy.ToolCall{ID: "background-call", Name: tools.BashToolName, Input: `{"command":"if false; then rm -f a; fi; false"}`})
 	require.NoError(t, err)
@@ -52,7 +52,7 @@ func TestDeletionBackgroundActualBashAndJobOutput(t *testing.T) {
 			f.answers = []bool{true, true}
 			require.NoError(t, os.WriteFile(f.target("a"), []byte("preserved"), 0o600))
 			inner := tools.NewBashTool(permission.NewPermissionService(f.workingDir, true, nil), f.workingDir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "fixture")
-			wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner, tools.NewJobOutputTool()}, f.guard, f.workingDir)
+			wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner, tools.NewJobOutputTool()}, f.guard, f.workingDir, nil)
 			ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "s")
 			params := tools.BashParams{Command: "sleep 1.2; if false; then rm -f a; fi; false", Description: "safe background regression", AutoBackgroundAfter: 1, RunInBackground: explicit}
 			input, err := json.Marshal(params)
@@ -91,7 +91,7 @@ func TestDeletionBackgroundKillRetainsTerminalEvidence(t *testing.T) {
 	f.answers = []bool{true, true}
 	require.NoError(t, os.WriteFile(f.target("a"), []byte("preserved"), 0o600))
 	inner := tools.NewBashTool(permission.NewPermissionService(f.workingDir, true, nil), f.workingDir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "fixture")
-	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner, tools.NewJobKillTool()}, f.guard, f.workingDir)
+	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner, tools.NewJobKillTool()}, f.guard, f.workingDir, nil)
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "s")
 	command := "sleep 30; if false; then rm -f a; fi"
 	input, err := json.Marshal(tools.BashParams{Command: command, RunInBackground: true})
@@ -163,7 +163,7 @@ func TestDeletionBackgroundRetryRetainsKilledJobAfterPersistenceFailure(t *testi
 	authority := &transientBackgroundAuthority{Authority: f.authority, failed: make(chan struct{}, 1)}
 	f.guard = deletionguard.NewGuardWithAuthority(f.dataDir, f, authority)
 	inner := tools.NewBashTool(permission.NewPermissionService(f.workingDir, true, nil), f.workingDir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "fixture")
-	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner, tools.NewJobKillTool()}, f.guard, f.workingDir)
+	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner, tools.NewJobKillTool()}, f.guard, f.workingDir, nil)
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "s")
 	command := "sleep 30; if false; then rm -f a; fi"
 	input, err := json.Marshal(tools.BashParams{Command: command, RunInBackground: true})

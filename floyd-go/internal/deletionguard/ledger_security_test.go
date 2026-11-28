@@ -111,6 +111,31 @@ func TestUnsupportedTransportIsDistinctFromAnUnreachableService(t *testing.T) {
 	require.Empty(t, fixtureBackend(working.ledger.dataDir).data, "the probe must store nothing")
 }
 
+// countingAuthority counts reads so a test can see how often the guard asks.
+type countingAuthority struct {
+	fixtureAuthority
+	reads int
+}
+
+func (a *countingAuthority) Read(ctx context.Context, namespace, session string) ([]byte, uint64, error) {
+	a.mu.Lock()
+	a.reads++
+	a.mu.Unlock()
+	return a.fixtureAuthority.Read(ctx, namespace, session)
+}
+
+// TestUnsupportedTransportIsReadOncePerGuard: whether this platform has an
+// approval transport cannot change while the process runs, and the probe is a
+// read through the authority, so it is not repeated on every gated call.
+func TestUnsupportedTransportIsReadOncePerGuard(t *testing.T) {
+	authority := &countingAuthority{fixtureAuthority: fixtureAuthority{data: map[string][]byte{}, revisions: map[string]uint64{}}}
+	guard := NewGuardWithAuthority(t.TempDir(), nil, authority)
+	for range 3 {
+		require.False(t, guard.UnsupportedTransport())
+	}
+	require.Equal(t, 1, authority.reads)
+}
+
 // TestDefaultRuntimeReportsItsRealPlatform checks the guard the runtime builds,
 // not a fixture: only Linux has an authenticated transport.
 func TestDefaultRuntimeReportsItsRealPlatform(t *testing.T) {

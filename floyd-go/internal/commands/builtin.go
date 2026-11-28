@@ -20,8 +20,8 @@ type BuiltinCommand struct {
 // and the dispatcher in internal/ui/model/builtin.go in sync; the tests in
 // both packages enforce it.
 var builtinCommands = []BuiltinCommand{
-	{Name: "yolo", Aliases: []string{"yes"}, Description: "Toggle automatic permission for ordinary tools"},
-	{Name: "auto", Description: "Allow ordinary tools; protected confirmations still apply"},
+	{Name: "yolo", Aliases: []string{"yes"}, Description: "Toggle automatic permission for all tools; deletion checks are skipped and noted"},
+	{Name: "auto", Description: "Allow all tools without prompts; deletion checks are skipped and noted"},
 	{Name: "permission", Description: "Select the permission mode"},
 	{Name: "settings", Aliases: []string{"config"}, Description: "Show configuration sources and audit"},
 	{Name: "model", Description: "Switch the large model", ArgumentHint: "[provider/model|name]"},

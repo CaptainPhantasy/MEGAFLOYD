@@ -1004,12 +1004,14 @@ func (c *coordinator) buildMCPTools(agent config.Agent, isSubAgent bool) []fanta
 func (c *coordinator) wrapAgentTools(filteredTools []fantasy.AgentTool, isSubAgent bool) []fantasy.AgentTool {
 	plans := c.planService()
 	// Permanent deletion checks the actual post-hook input immediately before
-	// the tool body. A hook allow or generic permission approval cannot supply
-	// either human confirmation, and rewritten targets need their own approval.
+	// the tool body, in the permission modes that ask. A hook allow or generic
+	// permission approval cannot supply either human confirmation, and rewritten
+	// targets need their own approval. Under yolo the gate steps aside.
 	filteredTools = wrapToolsWithDeletionGuard(
 		filteredTools,
 		c.deletionGuard(),
 		c.cfg.WorkingDir(),
+		func() bool { return permission.Yolo(c.permissions) },
 	)
 	filteredTools = wrapToolsWithRuntimePre(filteredTools, c.hookDispatcher())
 

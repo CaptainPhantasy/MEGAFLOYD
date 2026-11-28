@@ -18,9 +18,10 @@ func shellQuote(path string) string {
 
 // TestDeletionDirectoryProofClassification covers how a proven working
 // directory changes classification. A cd proves its result only when it names a
-// literal existing directory on the guaranteed right-hand side of an && chain:
-// a rename inside that one directory is quarantine, while an unproven cd leaves
-// destructive targets unresolved.
+// literal existing directory on the left side of an && chain, so that the rest
+// of the chain runs only after the cd succeeded: a rename inside that one
+// directory is quarantine, while an unproven cd leaves destructive targets
+// unresolved.
 func TestDeletionDirectoryProofClassification(t *testing.T) {
 	t.Parallel()
 
@@ -127,6 +128,66 @@ func TestDeletionDirectoryProofClassification(t *testing.T) {
 			},
 			effect:  EffectQuarantine,
 			targets: []string{"a"},
+		},
+		{
+			name: "a group's first statement inherits the proof",
+			prepare: func(t *testing.T, base string) (string, string) {
+				work := filepath.Join(base, "group")
+				dir := filepath.Join(work, "tree")
+				require.NoError(t, os.MkdirAll(dir, 0o700))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "a"), []byte("data"), 0o600))
+				return work, "cd " + shellQuote(dir) + " && { rm -f a; }"
+			},
+			effect:  EffectPermanentDeletion,
+			targets: []string{"tree/a"},
+		},
+		{
+			name: "a subshell's first statement inherits the proof",
+			prepare: func(t *testing.T, base string) (string, string) {
+				work := filepath.Join(base, "subshell-inherit")
+				dir := filepath.Join(work, "tree")
+				require.NoError(t, os.MkdirAll(dir, 0o700))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "a"), []byte("data"), 0o600))
+				return work, "cd " + shellQuote(dir) + " && (rm -f a)"
+			},
+			effect:  EffectPermanentDeletion,
+			targets: []string{"tree/a"},
+		},
+		{
+			name: "a subshell may prove its own directory",
+			prepare: func(t *testing.T, base string) (string, string) {
+				work := filepath.Join(base, "subshell-own")
+				dir := filepath.Join(work, "tree")
+				require.NoError(t, os.MkdirAll(dir, 0o700))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "a"), []byte("data"), 0o600))
+				return work, "(cd " + shellQuote(dir) + " && rm -f a)"
+			},
+			effect:  EffectPermanentDeletion,
+			targets: []string{"tree/a"},
+		},
+		{
+			name: "a later statement in a subshell does not inherit a proof earned there",
+			prepare: func(t *testing.T, base string) (string, string) {
+				work := filepath.Join(base, "subshell-later")
+				dir := filepath.Join(work, "tree")
+				require.NoError(t, os.MkdirAll(dir, 0o700))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "a"), []byte("data"), 0o600))
+				return work, "(cd " + shellQuote(dir) + "; rm -f a)"
+			},
+			effect:     EffectPermanentDeletion,
+			unresolved: true,
+		},
+		{
+			name: "a negated cd proves nothing",
+			prepare: func(t *testing.T, base string) (string, string) {
+				work := filepath.Join(base, "negated")
+				dir := filepath.Join(work, "tree")
+				require.NoError(t, os.MkdirAll(dir, 0o700))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "a"), []byte("data"), 0o600))
+				return work, "! cd " + shellQuote(dir) + " && rm -f a"
+			},
+			effect:     EffectPermanentDeletion,
+			unresolved: true,
 		},
 	}
 

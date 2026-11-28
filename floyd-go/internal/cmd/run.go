@@ -268,6 +268,7 @@ func init() {
 }
 
 // tuiActive reports whether the root TUI currently owns the terminal.
+// event.TerminalUI carries the same fact to packages that cannot import this one.
 var tuiActive atomic.Bool
 
 const (
@@ -306,11 +307,23 @@ func installWebHandoff(cmd *cobra.Command) {
 		if c != rootCmd {
 			return run(c, args)
 		}
-		// The TUI runtime restores the terminal on its own exit, panic,
-		// SIGINT, and SIGTERM paths. tuiActive only enables the fatal
-		// signal handler for the paths it does not cover.
+		return ownTerminalWhileRunning(run)(c, args)
+	}
+}
+
+// ownTerminalWhileRunning reports the terminal interface as the owner of the
+// process terminal for as long as the root command runs, and releases it
+// afterwards whether the run succeeds or fails. The TUI runtime restores the
+// terminal on its own exit, panic, SIGINT, and SIGTERM paths. tuiActive only
+// enables the fatal signal handler for the paths it does not cover.
+func ownTerminalWhileRunning(run func(*cobra.Command, []string) error) func(*cobra.Command, []string) error {
+	return func(c *cobra.Command, args []string) error {
 		tuiActive.Store(true)
-		defer tuiActive.Store(false)
+		event.SetTerminalUI(true)
+		defer func() {
+			tuiActive.Store(false)
+			event.SetTerminalUI(false)
+		}()
 		return run(c, args)
 	}
 }

@@ -35,20 +35,21 @@ func TestMoveRecoveryProvesReplacementAndPreservesRemainder(t *testing.T) {
 	require.Equal(t, 4, confirmer.calls)
 }
 
-func TestMoveRecoveryReplacesSymlinkEntryWithoutChangingReferent(t *testing.T) {
-	guard, dir, _, _ := recoveryFixture(t)
+// A move onto an existing symbolic link is not approved. The link stands for
+// somewhere the classifier cannot confirm, so the gate denies before asking
+// and the file behind the link is never touched.
+func TestMoveRecoveryRefusesASymlinkDestination(t *testing.T) {
+	guard, dir, _, confirmer := recoveryFixture(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "source"), []byte("replacement"), 0o600))
 	link := filepath.Join(dir, "link")
 	require.NoError(t, os.Symlink(filepath.Join(dir, "b"), link))
 	c := Classify("mv -T source link", dir)
-	require.True(t, guard.Check(t.Context(), "move-link", "one", c).Allowed)
-	require.NoError(t, guard.BeginExecution("move-link", c, "one"))
-	require.NoError(t, os.Rename(link, filepath.Join(dir, "quarantined-link")))
-	require.NoError(t, os.Rename(filepath.Join(dir, "source"), link))
-	require.NoError(t, guard.RecordOutcome("move-link", c, "one", c.Targets, false))
-	record, err := guard.Ledger().Read("move-link")
-	require.NoError(t, err)
-	require.Len(t, record.Executions, 1)
+	require.True(t, c.IsDestructive())
+	require.NotEmpty(t, c.Unresolved)
+	asked := confirmer.calls
+	require.False(t, guard.Check(t.Context(), "move-link", "one", c).Allowed)
+	require.Equal(t, asked, confirmer.calls, "nothing may be asked for an unproven destination")
+	require.ErrorIs(t, guard.BeginExecution("move-link", c, "one"), ErrNotConfirmed)
 	content, err := os.ReadFile(filepath.Join(dir, "b"))
 	require.NoError(t, err)
 	require.Equal(t, "b", string(content))

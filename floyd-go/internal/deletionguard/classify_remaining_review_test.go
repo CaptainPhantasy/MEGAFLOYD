@@ -131,7 +131,6 @@ func TestDeletionCopyDestinationSemantics(t *testing.T) {
 		{`cp /dev/null report`, "report"},
 		{`cp report destination/`, "destination/report"},
 		{`cp -t destination report`, "destination/report"},
-		{`cp -T report linked`, "linked"},
 		{`cp -n -f /dev/null report`, "report"},
 		{`cp --no-clobber --interactive /dev/null report`, "report"},
 	} {
@@ -139,6 +138,10 @@ func TestDeletionCopyDestinationSemantics(t *testing.T) {
 		require.True(t, c.IsDestructive(), tc.command)
 		require.Equal(t, []string{filepath.Join(dir, tc.target)}, c.Targets, tc.command)
 	}
+	// A destination that is an existing symbolic link is not followed.
+	linked := Classify(`cp -T report linked`, dir)
+	require.True(t, linked.IsDestructive())
+	require.NotEmpty(t, linked.Unresolved)
 	for _, command := range []string{`cp -f -n /dev/null report`, `cp /dev/null new-report`, `cp -R source new-directory`} {
 		require.False(t, Classify(command, dir).IsDestructive(), command)
 	}

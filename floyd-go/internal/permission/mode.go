@@ -47,6 +47,21 @@ func (s *permissionService) Mode() string {
 	return ModeManual
 }
 
+// Yolo reports a selection the owner made to run without permission prompts:
+// skip requests (the --yolo flag, the ctrl+y toggle, "Never Ask",
+// --dangerously-skip-permissions) or the yolo policy. Manual is the only mode
+// that keeps asking, so a check that needs a human answer asks only there.
+func Yolo(service Service) bool {
+	if service == nil {
+		return false
+	}
+	if service.SkipRequests() {
+		return true
+	}
+	mode, ok := service.(ModeService)
+	return ok && mode.Mode() == ModeYolo
+}
+
 func sensitivePath(path string) bool {
 	for _, part := range strings.Split(filepath.ToSlash(filepath.Clean(path)), "/") {
 		name := strings.ToLower(part)

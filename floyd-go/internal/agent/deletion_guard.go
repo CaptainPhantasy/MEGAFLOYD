@@ -11,12 +11,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/x/term"
 	"github.com/legacy-ai/floyd/internal/agent/tools"
 	"github.com/legacy-ai/floyd/internal/deletionguard"
+	"github.com/legacy-ai/floyd/internal/event"
 	"github.com/legacy-ai/floyd/internal/permission"
 	"github.com/legacy-ai/floyd/internal/question"
 	"github.com/legacy-ai/floyd/internal/shell"
@@ -27,10 +26,19 @@ import (
 // generic permission prompt still runs inside the tool, and configured user
 // hooks still see the call. A command that only moves data is quarantine and
 // passes through unchanged.
+//
+// The selected permission mode decides whether the check runs. Under yolo the
+// gate steps aside and notes that, so the mode alone governs the call. In every
+// other mode both confirmations stand, and a platform that cannot run the
+// approval service is denied with the quarantine remedy, never waved through.
 type deletionGuardTool struct {
 	inner      fantasy.AgentTool
 	guard      *deletionguard.Guard
 	workingDir string
+	// yolo reports, when the call arrives, whether the selected permission
+	// mode runs without prompts. It is read per call because the owner can
+	// change the mode between calls. Nil means no mode steps aside.
+	yolo func() bool
 }
 
 // wrapToolsWithDeletionGuard returns the tools wrapped in permanent-deletion
@@ -39,13 +47,14 @@ func wrapToolsWithDeletionGuard(
 	input []fantasy.AgentTool,
 	guard *deletionguard.Guard,
 	workingDir string,
+	yolo func() bool,
 ) []fantasy.AgentTool {
 	if guard == nil {
 		return input
 	}
 	out := make([]fantasy.AgentTool, len(input))
 	for i, tool := range input {
-		out[i] = &deletionGuardTool{inner: tool, guard: guard, workingDir: workingDir}
+		out[i] = &deletionGuardTool{inner: tool, guard: guard, workingDir: workingDir, yolo: yolo}
 	}
 	return out
 }
@@ -86,17 +95,17 @@ func (g *deletionGuardTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 		return g.inner.Run(ctx, call)
 	}
 
-	if call.Name == tools.ParallelBashToolName && overlappingDeletionCommands(commands, dir) {
-		return fantasy.NewTextErrorResponse("Permanent deletion is blocked because parallel commands have overlapping targets. Run each distinct target once."), nil
+	// The selected permission mode decides whether this gate has a say. Under
+	// yolo it steps aside and notes that. In every other mode the two
+	// confirmations stand, and a platform that cannot run the approval service
+	// is never a reason to skip them.
+	if g.yolo != nil && g.yolo() {
+		noteSkippedDeletionCheck(sessionID, call.ID, len(commands))
+		return g.inner.Run(ctx, call)
 	}
 
-	// The protected approval service cannot run on every platform. Where it
-	// cannot, no confirmation can be read or recorded, so a denial on that
-	// ground could never be lifted in any permission mode. The gate steps
-	// aside, leaves the call to the selected permission mode, and notes that.
-	if g.guard.UnsupportedTransport() {
-		noteSkippedDeletionCheck(sessionID, call.ID, commands)
-		return g.inner.Run(ctx, call)
+	if call.Name == tools.ParallelBashToolName && overlappingDeletionCommands(commands, dir) {
+		return fantasy.NewTextErrorResponse("Permanent deletion is blocked because parallel commands have overlapping targets. Run each distinct target once."), nil
 	}
 
 	// Missing manager evidence remains uncertain, including after a restart. An
@@ -311,39 +320,24 @@ func deletionDeniedMessage(decision deletionguard.Decision) string {
 // skipped. Production leaves it as process stderr; tests replace it.
 var deletionGateNotes io.Writer = os.Stderr
 
-// deletionGateTerminal reports whether the note destination is the interactive
-// terminal. Tests replace it.
-var deletionGateTerminal = func(writer io.Writer) bool {
-	file, ok := writer.(*os.File)
-	return ok && term.IsTerminal(file.Fd())
-}
+// deletionGateTerminalUI reports whether the terminal interface owns the
+// process terminal. Production reads the flag the run command sets; tests
+// replace it.
+var deletionGateTerminalUI = event.TerminalUI
 
-// noteSkippedDeletionCheck records one deletion check that did not run. While
-// the terminal interface is active, process stderr is the screen itself and a
-// line written there would be left on it, so the note goes to the application
-// log instead.
-func noteSkippedDeletionCheck(sessionID, toolCallID string, commands []string) {
-	command := noteLine(strings.Join(commands, "; "))
-	if deletionGateTerminal(deletionGateNotes) {
-		slog.Warn("Deletion check skipped: the protected approval service cannot run on this platform, so the selected permission mode alone applied",
-			"session_id", sessionID, "tool_call_id", toolCallID, "commands", commands)
+// noteSkippedDeletionCheck records one deletion check that did not run. It
+// never carries command text: a command can hold a credential, and the note is
+// written before the permission check has looked at the call. While the
+// terminal interface owns the process terminal, stderr is the screen itself and
+// a line written there would be left on it, so the note goes to the
+// application log instead.
+func noteSkippedDeletionCheck(sessionID, toolCallID string, commands int) {
+	if deletionGateTerminalUI() {
+		slog.Warn("Deletion check skipped: yolo is selected, so the permission mode alone applies",
+			"session_id", sessionID, "tool_call_id", toolCallID, "command_count", commands)
 		return
 	}
-	fmt.Fprintf(deletionGateNotes, "megafloyd: skipped the two-confirmation deletion check. The protected approval service cannot run on this platform, so the selected permission mode alone applied to: %s\n", command)
-}
-
-// noteLine keeps text on one line and bounds its length.
-func noteLine(text string) string {
-	runes := []rune(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
-			return ' '
-		}
-		return r
-	}, text))
-	if len(runes) > 200 {
-		return string(runes[:200]) + "..."
-	}
-	return string(runes)
+	fmt.Fprintf(deletionGateNotes, "megafloyd: skipped the two-confirmation deletion check for %d command(s). Yolo is selected, so the permission mode alone applies. (session %s, tool call %s)\n", commands, sessionID, toolCallID)
 }
 
 // questionConfirmer asks the human through the interactive question service.

@@ -83,10 +83,15 @@ func TestDeletionMoveSymlinkAndDuplicateDestinations(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600))
 	}
 	require.NoError(t, os.Symlink("destination", filepath.Join(dir, "linked")))
-	target := filepath.Join(dir, "linked/report")
-	classification := Classify("mv one/report linked/", dir)
+	// A destination that is an existing symbolic link is not followed: where
+	// the data lands cannot be proven. The same overwrite named by its real
+	// path is exact.
+	linked := Classify("mv one/report linked/", dir)
+	require.True(t, linked.IsDestructive())
+	require.NotEmpty(t, linked.Unresolved)
+	classification := Classify("mv one/report destination/", dir)
 	require.True(t, classification.IsDestructive())
-	require.Equal(t, []string{target}, classification.Targets)
+	require.Equal(t, []string{filepath.Join(dir, "destination/report")}, classification.Targets)
 	duplicate := Classify("mv one/report two/report destination/", dir)
 	require.True(t, duplicate.IsDestructive())
 	require.NotEmpty(t, duplicate.Unresolved)
