@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/x/term"
 	"github.com/legacy-ai/floyd/internal/agent/tools"
 	"github.com/legacy-ai/floyd/internal/deletionguard"
 	"github.com/legacy-ai/floyd/internal/permission"
@@ -86,8 +90,21 @@ func (g *deletionGuardTool) Run(ctx context.Context, call fantasy.ToolCall) (fan
 		return fantasy.NewTextErrorResponse("Permanent deletion is blocked because parallel commands have overlapping targets. Run each distinct target once."), nil
 	}
 
-	// Missing manager evidence remains uncertain, including after a restart.
-	if err := g.reconcileBackground(sessionID); err != nil {
+	// The protected approval service cannot run on every platform. Where it
+	// cannot, no confirmation can be read or recorded, so a denial on that
+	// ground could never be lifted in any permission mode. The gate steps
+	// aside, leaves the call to the selected permission mode, and notes that.
+	if g.guard.UnsupportedTransport() {
+		noteSkippedDeletionCheck(sessionID, call.ID, commands)
+		return g.inner.Run(ctx, call)
+	}
+
+	// Missing manager evidence remains uncertain, including after a restart. An
+	// unreadable session record falls through to the guard's own check, which
+	// reads the record again and denies with its actionable reason; the check is
+	// fail-closed there, so the destructive command still never runs. Any other
+	// reconciliation failure keeps the current denial.
+	if err := g.reconcileBackground(sessionID); err != nil && !errors.Is(err, deletionguard.ErrSessionRecordUnavailable) {
 		return fantasy.NewTextErrorResponse("Permanent deletion is blocked because its session record cannot be read during background reconciliation: " + err.Error()), nil
 	}
 	decision := g.guard.Check(ctx, sessionID, call.ID, classification)
@@ -288,6 +305,45 @@ func deletionDeniedMessage(decision deletionguard.Decision) string {
 	}
 	return message + " (evidence: effect=" + decision.Effect.String() +
 		" targets=" + strings.Join(decision.Targets, ",") + ")"
+}
+
+// deletionGateNotes receives the one-line note for a deletion check the gate
+// skipped. Production leaves it as process stderr; tests replace it.
+var deletionGateNotes io.Writer = os.Stderr
+
+// deletionGateTerminal reports whether the note destination is the interactive
+// terminal. Tests replace it.
+var deletionGateTerminal = func(writer io.Writer) bool {
+	file, ok := writer.(*os.File)
+	return ok && term.IsTerminal(file.Fd())
+}
+
+// noteSkippedDeletionCheck records one deletion check that did not run. While
+// the terminal interface is active, process stderr is the screen itself and a
+// line written there would be left on it, so the note goes to the application
+// log instead.
+func noteSkippedDeletionCheck(sessionID, toolCallID string, commands []string) {
+	command := noteLine(strings.Join(commands, "; "))
+	if deletionGateTerminal(deletionGateNotes) {
+		slog.Warn("Deletion check skipped: the protected approval service cannot run on this platform, so the selected permission mode alone applied",
+			"session_id", sessionID, "tool_call_id", toolCallID, "commands", commands)
+		return
+	}
+	fmt.Fprintf(deletionGateNotes, "megafloyd: skipped the two-confirmation deletion check. The protected approval service cannot run on this platform, so the selected permission mode alone applied to: %s\n", command)
+}
+
+// noteLine keeps text on one line and bounds its length.
+func noteLine(text string) string {
+	runes := []rune(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return ' '
+		}
+		return r
+	}, text))
+	if len(runes) > 200 {
+		return string(runes[:200]) + "..."
+	}
+	return string(runes)
 }
 
 // questionConfirmer asks the human through the interactive question service.

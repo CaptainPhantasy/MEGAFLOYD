@@ -2,6 +2,7 @@ package deletionguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -70,6 +71,19 @@ func (g *Guard) SetConfirmer(confirmer Confirmer) {
 
 // Ledger exposes the durable record for diagnostics and tests.
 func (g *Guard) Ledger() *Ledger { return g.ledger }
+
+// transportProbe names a record that is read only to learn whether this
+// platform can reach the approval service at all. Nothing is stored under it.
+const transportProbe = "deletionguard-transport-probe"
+
+// UnsupportedTransport reports a platform where the approval service has no
+// authenticated transport, so neither confirmation can be read or recorded. A
+// service that merely cannot be reached is not reported here, because starting
+// it lifts that condition.
+func (g *Guard) UnsupportedTransport() bool {
+	_, err := g.ledger.Read(transportProbe)
+	return errors.Is(err, ErrUnsupportedApproval)
+}
 
 // Check decides whether one classified call may run. Recoverable moves pass
 // through; permanent deletion needs both confirmations for its exact target

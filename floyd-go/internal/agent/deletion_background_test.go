@@ -24,7 +24,7 @@ func TestDeletionBackgroundTerminalFailureReusesApproval(t *testing.T) {
 	f := newDeletionFixture(t)
 	f.answers = []bool{true, true}
 	require.NoError(t, os.WriteFile(f.target("a"), []byte("preserved"), 0o600))
-	command := "if false; then rm a; fi; false"
+	command := "if false; then rm -f a; fi; false"
 	inner := fantasy.NewAgentTool(tools.BashToolName, "background fixture", func(ctx context.Context, params tools.BashParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		job, err := shell.GetBackgroundShellManager().StartForSession(context.Background(), f.workingDir, nil, params.Command, "fixture", tools.GetSessionFromContext(ctx), f.workingDir)
 		require.NoError(t, err)
@@ -33,7 +33,7 @@ func TestDeletionBackgroundTerminalFailureReusesApproval(t *testing.T) {
 	})
 	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "s")
-	response, err := wrapped.Run(ctx, fantasy.ToolCall{ID: "background-call", Name: tools.BashToolName, Input: `{"command":"if false; then rm a; fi; false"}`})
+	response, err := wrapped.Run(ctx, fantasy.ToolCall{ID: "background-call", Name: tools.BashToolName, Input: `{"command":"if false; then rm -f a; fi; false"}`})
 	require.NoError(t, err)
 	require.False(t, response.IsError, response.Content)
 	// The next tool call reconciles terminal manager evidence before Check.
@@ -54,7 +54,7 @@ func TestDeletionBackgroundActualBashAndJobOutput(t *testing.T) {
 			inner := tools.NewBashTool(permission.NewPermissionService(f.workingDir, true, nil), f.workingDir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "fixture")
 			wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner, tools.NewJobOutputTool()}, f.guard, f.workingDir)
 			ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "s")
-			params := tools.BashParams{Command: "sleep 1.2; if false; then rm a; fi; false", Description: "safe background regression", AutoBackgroundAfter: 1, RunInBackground: explicit}
+			params := tools.BashParams{Command: "sleep 1.2; if false; then rm -f a; fi; false", Description: "safe background regression", AutoBackgroundAfter: 1, RunInBackground: explicit}
 			input, err := json.Marshal(params)
 			require.NoError(t, err)
 			resp, err := wrapped[0].Run(ctx, fantasy.ToolCall{ID: "actual-background", Name: tools.BashToolName, Input: string(input)})
@@ -93,7 +93,7 @@ func TestDeletionBackgroundKillRetainsTerminalEvidence(t *testing.T) {
 	inner := tools.NewBashTool(permission.NewPermissionService(f.workingDir, true, nil), f.workingDir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "fixture")
 	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner, tools.NewJobKillTool()}, f.guard, f.workingDir)
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "s")
-	command := "sleep 30; if false; then rm a; fi"
+	command := "sleep 30; if false; then rm -f a; fi"
 	input, err := json.Marshal(tools.BashParams{Command: command, RunInBackground: true})
 	require.NoError(t, err)
 	resp, err := wrapped[0].Run(ctx, fantasy.ToolCall{ID: "launch", Name: tools.BashToolName, Input: string(input)})
@@ -117,7 +117,7 @@ func TestDeletionBackgroundKillRetainsTerminalEvidence(t *testing.T) {
 func TestDeletionBackgroundRestartMissingOrReusedJobStaysBlocked(t *testing.T) {
 	f := newDeletionFixture(t)
 	f.answers = []bool{true, true}
-	command := "if false; then rm a; fi"
+	command := "if false; then rm -f a; fi"
 	c := deletionguard.Classify(command, f.workingDir)
 	require.True(t, f.guard.Check(t.Context(), "s", "launch", c).Allowed)
 	require.NoError(t, f.guard.BeginExecution("s", c, "launch"))
@@ -165,7 +165,7 @@ func TestDeletionBackgroundRetryRetainsKilledJobAfterPersistenceFailure(t *testi
 	inner := tools.NewBashTool(permission.NewPermissionService(f.workingDir, true, nil), f.workingDir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "fixture")
 	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner, tools.NewJobKillTool()}, f.guard, f.workingDir)
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "s")
-	command := "sleep 30; if false; then rm a; fi"
+	command := "sleep 30; if false; then rm -f a; fi"
 	input, err := json.Marshal(tools.BashParams{Command: command, RunInBackground: true})
 	require.NoError(t, err)
 	resp, err := wrapped[0].Run(ctx, fantasy.ToolCall{ID: "launch", Name: tools.BashToolName, Input: string(input)})

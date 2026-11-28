@@ -10,21 +10,21 @@ import (
 
 func TestDeletionGuardNestedCommandsNeverReachToolWithoutAuthorization(t *testing.T) {
 	for _, command := range []string{
-		`if true; then rm widget; fi`,
+		`if true; then rm -f widget; fi`,
 		`for item in widget; do rm "$item"; done`,
-		`case x in x) { (rm widget); };; esac`,
-		`echo "$(rm widget)"`,
+		`case x in x) { (rm -f widget); };; esac`,
+		`echo "$(rm -f widget)"`,
 		`if true; then echo data > "$target"; fi`,
 		`bash -c "$script"`,
-		`sudo -n rm widget`,
-		`sudo -u root rm widget`,
-		`nohup -- rm widget`,
-		`env rm widget`,
-		`xargs env rm widget`,
-		`nice -n 5 rm widget`,
-		`timeout 2 rm widget`,
-		`setsid -fw rm widget`,
-		`stdbuf -o L env rm widget`,
+		`sudo -n rm -f widget`,
+		`sudo -u root rm -f widget`,
+		`nohup -- rm -f widget`,
+		`env rm -f widget`,
+		`xargs env rm -f widget`,
+		`nice -n 5 rm -f widget`,
+		`timeout 2 rm -f widget`,
+		`setsid -fw rm -f widget`,
+		`stdbuf -o L env rm -f widget`,
 	} {
 		t.Run(command, func(t *testing.T) {
 			for _, answers := range [][]bool{nil, {true, false}} {

@@ -18,7 +18,7 @@ func TestCopyRecoveryPreservesUnchangedRemovalRemainder(t *testing.T) {
 	guard, dir, _, _ := recoveryFixture(t)
 	source, destination := filepath.Join(dir, "source"), filepath.Join(dir, "b")
 	require.NoError(t, os.WriteFile(source, []byte("approved replacement"), 0o600))
-	all := ClassifyAll([]string{"cp source b", "rm a"}, dir)
+	all := ClassifyAll([]string{"cp source b", "rm -f a"}, dir)
 	require.True(t, guard.Check(t.Context(), "copy", "launch", all).Allowed)
 	require.NoError(t, guard.BeginExecution("copy", all, "launch"))
 	// Preserve the overwritten fixture; no user data is removed.
@@ -34,7 +34,7 @@ func TestCopyRecoveryPreservesUnchangedRemovalRemainder(t *testing.T) {
 	require.Equal(t, []string{destination}, record.Executions[0].Targets)
 	require.Len(t, record.Confirmations, 2)
 	restarted := testGuard(guard.ledger.dataDir, nil)
-	require.True(t, restarted.Check(t.Context(), "copy", "retry", Classify("rm a", dir)).Allowed)
+	require.True(t, restarted.Check(t.Context(), "copy", "retry", Classify("rm -f a", dir)).Allowed)
 	require.False(t, restarted.Check(t.Context(), "copy", "repeat-copy", Classify("cp source b", dir)).Allowed)
 }
 
@@ -57,12 +57,12 @@ func simulateFixtureCopy(t *testing.T, dir string) {
 }
 
 func TestCopyRecoveryKnownFailureReconcilesAfterRestart(t *testing.T) {
-	guard, dir, all := copyRecoveryFixture(t, "cp source b; rm a")
+	guard, dir, all := copyRecoveryFixture(t, "cp source b; rm -f a")
 	simulateFixtureCopy(t, dir)
 	guard = testGuard(guard.ledger.dataDir, nil)
 	require.NoError(t, guard.RecordOutcome("copy", all, "launch", nil, false))
 	guard = testGuard(guard.ledger.dataDir, nil)
-	require.True(t, guard.Check(t.Context(), "copy", "retry", Classify("rm a", dir)).Allowed)
+	require.True(t, guard.Check(t.Context(), "copy", "retry", Classify("rm -f a", dir)).Allowed)
 	record, err := guard.Ledger().Read("copy")
 	require.NoError(t, err)
 	require.Len(t, record.Executions, 1)
@@ -74,12 +74,12 @@ func TestCopyRecoveryKnownFailureReconcilesAfterRestart(t *testing.T) {
 }
 
 func TestCopyRecoveryBackgroundPartialFailure(t *testing.T) {
-	guard, dir, all := copyRecoveryFixture(t, "cp source b; rm a")
-	job, err := guard.BindBackground("copy", all, "launch", BackgroundJob{SessionID: "copy", ToolCallID: "launch", ShellID: "001", ExecutionID: "copy-background", Command: "cp source b; rm a", WorkingDir: dir, WorkspaceDir: dir, Classification: all})
+	guard, dir, all := copyRecoveryFixture(t, "cp source b; rm -f a")
+	job, err := guard.BindBackground("copy", all, "launch", BackgroundJob{SessionID: "copy", ToolCallID: "launch", ShellID: "001", ExecutionID: "copy-background", Command: "cp source b; rm -f a", WorkingDir: dir, WorkspaceDir: dir, Classification: all})
 	require.NoError(t, err)
 	simulateFixtureCopy(t, dir)
 	require.NoError(t, guard.ReconcileBackground("copy", BackgroundResult{Job: job, Done: true, ExitCode: 7, Error: "independent removal failed"}))
-	require.True(t, testGuard(guard.ledger.dataDir, nil).Check(t.Context(), "copy", "retry", Classify("rm a", dir)).Allowed)
+	require.True(t, testGuard(guard.ledger.dataDir, nil).Check(t.Context(), "copy", "retry", Classify("rm -f a", dir)).Allowed)
 	record, err := guard.Ledger().Read("copy")
 	require.NoError(t, err)
 	require.Len(t, record.Executions, 1)
@@ -91,7 +91,7 @@ func TestCopyRecoveryBackgroundPartialFailure(t *testing.T) {
 func TestCopyRecoveryRejectsUnprovenReplacement(t *testing.T) {
 	for _, mode := range []string{"unrelated bytes", "source replaced", "source removed", "destination symlink", "destination missing", "pending"} {
 		t.Run(mode, func(t *testing.T) {
-			guard, dir, all := copyRecoveryFixture(t, "cp source b; rm a")
+			guard, dir, all := copyRecoveryFixture(t, "cp source b; rm -f a")
 			simulateFixtureCopy(t, dir)
 			switch mode {
 			case "unrelated bytes":
@@ -117,7 +117,7 @@ func TestCopyRecoveryRejectsUnprovenReplacement(t *testing.T) {
 			require.Empty(t, record.Executions)
 			require.Len(t, record.Confirmations, 2)
 			require.Equal(t, "uncertain", record.Attempts[len(record.Attempts)-1].State)
-			require.False(t, testGuard(guard.ledger.dataDir, nil).Check(t.Context(), "copy", "retry", Classify("rm a", dir)).Allowed)
+			require.False(t, testGuard(guard.ledger.dataDir, nil).Check(t.Context(), "copy", "retry", Classify("rm -f a", dir)).Allowed)
 		})
 	}
 }
@@ -232,7 +232,7 @@ func TestCopyRecoveryRejectsRetargetedDestinationParent(t *testing.T) {
 	}
 	alias := filepath.Join(dir, "alias")
 	require.NoError(t, os.Symlink(filepath.Join(dir, "original-parent"), alias))
-	c := Classify("cp source alias/destination; rm a", dir)
+	c := Classify("cp source alias/destination; rm -f a", dir)
 	require.True(t, guard.Check(t.Context(), "copy", "approve", c).Allowed)
 	require.NoError(t, guard.BeginExecution("copy", c, "launch"))
 	require.NoError(t, os.Rename(alias, filepath.Join(dir, "quarantined-alias")))
@@ -243,7 +243,7 @@ func TestCopyRecoveryRejectsRetargetedDestinationParent(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, record.Executions)
 	require.Equal(t, "uncertain", record.Attempts[1].State)
-	require.False(t, guard.Check(t.Context(), "copy", "retry", Classify("rm a", dir)).Allowed)
+	require.False(t, guard.Check(t.Context(), "copy", "retry", Classify("rm -f a", dir)).Allowed)
 }
 
 func TestCopyRecoveryRejectsChangedParentBeforeLaunch(t *testing.T) {
@@ -285,7 +285,7 @@ func TestCopyRecoveryFailedUnchangedCopyIsNotCompleted(t *testing.T) {
 			source, target := filepath.Join(dir, "source"), filepath.Join(dir, "b")
 			require.NoError(t, os.WriteFile(source, payload, 0o600))
 			require.NoError(t, os.WriteFile(target, payload, 0o600))
-			all := ClassifyAll([]string{"cp source b", "rm a"}, dir)
+			all := ClassifyAll([]string{"cp source b", "rm -f a"}, dir)
 			require.True(t, guard.Check(t.Context(), "copy", "approve", all).Allowed)
 			require.NoError(t, guard.BeginExecution("copy", all, "launch"))
 			// No file changes: a failed/skipped copy must not inherit success merely
@@ -302,12 +302,12 @@ func TestCopyRecoveryFailedUnchangedCopyIsNotCompleted(t *testing.T) {
 			if explicitSuccess {
 				require.Len(t, record.Executions, 1)
 				require.Equal(t, []string{target}, record.Executions[0].Targets)
-				require.True(t, testGuard(guard.ledger.dataDir, nil).Check(t.Context(), "copy", "retry", Classify("rm a", dir)).Allowed)
+				require.True(t, testGuard(guard.ledger.dataDir, nil).Check(t.Context(), "copy", "retry", Classify("rm -f a", dir)).Allowed)
 			} else {
 				require.Empty(t, record.Executions)
 				restarted := testGuard(guard.ledger.dataDir, nil)
 				require.True(t, restarted.Check(t.Context(), "copy", "retry-original-remainder", all).Allowed)
-				require.False(t, restarted.Check(t.Context(), "copy", "unproven-shrink", Classify("rm a", dir)).Allowed)
+				require.False(t, restarted.Check(t.Context(), "copy", "unproven-shrink", Classify("rm -f a", dir)).Allowed)
 			}
 		})
 	}
@@ -319,7 +319,7 @@ func TestCopyRecoveryFailedMatchingCopyTimestampChangeIsNotCompleted(t *testing.
 	source, target := filepath.Join(dir, "source"), filepath.Join(dir, "b")
 	require.NoError(t, os.WriteFile(source, payload, 0o600))
 	require.NoError(t, os.WriteFile(target, payload, 0o600))
-	c := ClassifyAll([]string{"cp source b", "rm a"}, dir)
+	c := ClassifyAll([]string{"cp source b", "rm -f a"}, dir)
 	require.True(t, guard.Check(t.Context(), "copy", "approve", c).Allowed)
 	require.NoError(t, guard.BeginExecution("copy", c, "launch"))
 	// An unrelated metadata update cannot prove a failed/skipped data copy.
@@ -330,7 +330,7 @@ func TestCopyRecoveryFailedMatchingCopyTimestampChangeIsNotCompleted(t *testing.
 	require.NoError(t, err)
 	require.Empty(t, record.Executions)
 	require.Equal(t, "uncertain", record.Attempts[1].State)
-	require.False(t, testGuard(guard.ledger.dataDir, nil).Check(t.Context(), "copy", "retry", Classify("rm a", dir)).Allowed)
+	require.False(t, testGuard(guard.ledger.dataDir, nil).Check(t.Context(), "copy", "retry", Classify("rm -f a", dir)).Allowed)
 	require.Len(t, record.Confirmations, 2)
 }
 
@@ -368,7 +368,7 @@ func TestCopyRecoveryMissingOriginalDestinationPayloadFailsClosed(t *testing.T) 
 }
 
 func TestCopyRecoveryRefusesCompoundSourceOperationsBeforeConfirmations(t *testing.T) {
-	for _, command := range []string{"truncate -s 0 b; cp source b", "rm b; cp source b"} {
+	for _, command := range []string{"truncate -s 0 b; cp source b", "rm -f b; cp source b"} {
 		t.Run(command, func(t *testing.T) {
 			guard, dir, _, confirmer := recoveryFixture(t)
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "source"), []byte("approved source"), 0o600))
@@ -388,7 +388,7 @@ func TestCopyRecoveryRefusesCompoundSourceOperationsBeforeConfirmations(t *testi
 }
 
 func TestCopyRecoveryLegacyCompoundApprovalCannotLaunchChangedSource(t *testing.T) {
-	for _, command := range []string{"truncate -s 0 b; cp source b", "rm b; cp source b"} {
+	for _, command := range []string{"truncate -s 0 b; cp source b", "rm -f b; cp source b"} {
 		t.Run(command, func(t *testing.T) {
 			guard, dir, _, _ := recoveryFixture(t)
 			source := filepath.Join(dir, "source")
@@ -450,7 +450,7 @@ func TestCopyRecoveryAttributePreservationIsRefusedBeforeConfirmation(t *testing
 		t.Run(option, func(t *testing.T) {
 			guard, dir, _, confirmer := recoveryFixture(t)
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "source"), []byte("payload"), 0o600))
-			c := Classify("cp "+option+" source b; rm source", dir)
+			c := Classify("cp "+option+" source b; rm -f source", dir)
 			require.True(t, c.IsDestructive())
 			require.Empty(t, c.Unresolved)
 			before := confirmer.calls
@@ -510,7 +510,7 @@ func TestCopyRecoveryLegacyArchiveCannotAuthorizeSourceRemoval(t *testing.T) {
 			// regression also covers protected history from older classifiers.
 			encoded, err := json.Marshal([][]string{{"cp", option, source, target}})
 			require.NoError(t, err)
-			c := ClassifyAll([]string{"cp -a source b", "rm source"}, dir)
+			c := ClassifyAll([]string{"cp -a source b", "rm -f source"}, dir)
 			c.Operations[target] = string(encoded)
 			snapshots, err := snapshotTargets(c.Targets)
 			require.NoError(t, err)
@@ -523,7 +523,7 @@ func TestCopyRecoveryLegacyArchiveCannotAuthorizeSourceRemoval(t *testing.T) {
 			require.NoError(t, guard.ledger.write("legacy-archive", record))
 			require.Error(t, guard.BeginExecution("legacy-archive", c, "launch"))
 			require.False(t, guard.Check(t.Context(), "legacy-archive", "retry", c).Allowed)
-			require.False(t, guard.Check(t.Context(), "legacy-archive", "source-remainder", Classify("rm source", dir)).Allowed)
+			require.False(t, guard.Check(t.Context(), "legacy-archive", "source-remainder", Classify("rm -f source", dir)).Allowed)
 			// Even matching bytes and all metadata currently checked cannot prove the
 			// archive's unverified extended attributes. Preserve the old fixture bytes.
 			simulateFixtureCopy(t, dir)
@@ -569,7 +569,7 @@ func TestCopyRecoveryActualACLChangeCannotAuthorizePreservingCopy(t *testing.T) 
 	require.Equal(t, before, after, "the ordinary source fingerprint does not capture this real ACL change")
 	require.Equal(t, ordinaryBefore, ordinaryAfter, "mode/mtime/uid/gid do not prove requested ACL preservation")
 	calls := confirmer.calls
-	decision := guard.Check(t.Context(), "acl-copy", "approve", Classify("cp -p source b; rm source", dir))
+	decision := guard.Check(t.Context(), "acl-copy", "approve", Classify("cp -p source b; rm -f source", dir))
 	require.False(t, decision.Allowed)
 	require.Equal(t, calls, confirmer.calls)
 	record, err := guard.Ledger().Read("acl-copy")

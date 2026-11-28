@@ -27,8 +27,10 @@ func TestDeletionClassificationByEffect(t *testing.T) {
 		recursive  bool
 		unresolved bool
 	}{
-		{name: "rm tree", command: "rm -rf widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}, recursive: true},
-		{name: "rm file", command: "rm widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}},
+		{name: "forced recursive rm", command: "rm -rf widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}, recursive: true},
+		{name: "forced rm", command: "rm -f widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}},
+		{name: "unforced rm", command: "rm widget", effect: EffectNone},
+		{name: "unforced recursive rm", command: "rm -r widget", effect: EffectNone},
 		{name: "rmdir", command: "rmdir widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}},
 		{name: "unlink", command: "unlink widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}},
 		{name: "shred", command: "shred -u widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}},

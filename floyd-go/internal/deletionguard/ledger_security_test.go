@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/legacy-ai/floyd/internal/approvalauthority"
@@ -14,7 +15,7 @@ import (
 
 func TestProtectedLedgerRejectsForgedWorkspaceHistory(t *testing.T) {
 	dir, data := t.TempDir(), t.TempDir()
-	c := Classify("rm target", dir)
+	c := Classify("rm -f target", dir)
 	record := Record{Schema: RecordSchema, SessionID: "forged-session"}
 	for stage := 1; stage <= 2; stage++ {
 		record.Confirmations = append(record.Confirmations, Confirmation{ID: string(rune('0' + stage)), Stage: stage, TargetSet: c.Digest(), Targets: c.Targets, Source: "human", RecordedAt: "2026-10-30T00:00:00Z"})
@@ -48,8 +49,8 @@ func TestProtectedLedgerRejectsStaleRevisionAndLocalRollback(t *testing.T) {
 	require.NoError(t, os.MkdirAll(guard.Ledger().Dir("s"), 0o700))
 	require.NoError(t, os.WriteFile(guard.Ledger().Path("s"), bytes, 0o600))
 	restarted := testGuard(guard.ledger.dataDir, nil)
-	require.False(t, restarted.Check(t.Context(), "s", "repeat", Classify("rm a", dir)).Allowed)
-	require.True(t, restarted.Check(t.Context(), "s", "retry", Classify("rm b", dir)).Allowed)
+	require.False(t, restarted.Check(t.Context(), "s", "repeat", Classify("rm -f a", dir)).Allowed)
+	require.True(t, restarted.Check(t.Context(), "s", "retry", Classify("rm -f b", dir)).Allowed)
 }
 
 type unavailableAuthority struct{}
@@ -65,11 +66,55 @@ func (unavailableAuthority) CompareAndSwap(context.Context, string, string, uint
 func TestProtectedAuthorityUnavailableFailsClosedWithoutAffectingHarmlessCalls(t *testing.T) {
 	confirmer := &recoveryConfirmer{}
 	guard := NewGuardWithAuthority(t.TempDir(), confirmer, unavailableAuthority{})
-	denied := guard.Check(t.Context(), "s", "delete", Classify("rm target", t.TempDir()))
+	denied := guard.Check(t.Context(), "s", "delete", Classify("rm -f target", t.TempDir()))
 	require.False(t, denied.Allowed)
 	require.Contains(t, denied.Reason, "administrator-owned approval service")
 	require.Equal(t, 0, confirmer.calls, "answers cannot be collected into an unprotected fallback")
 	require.True(t, guard.Check(t.Context(), "s", "harmless", Classify("printf hello", t.TempDir())).Allowed)
+}
+
+// unsupportedTransportAuthority models a platform whose approval service has
+// no authenticated transport at all.
+type unsupportedTransportAuthority struct{}
+
+func (unsupportedTransportAuthority) Read(context.Context, string, string) ([]byte, uint64, error) {
+	return nil, 0, approvalauthority.ErrTransportUnavailable
+}
+
+func (unsupportedTransportAuthority) CompareAndSwap(context.Context, string, string, uint64, []byte) error {
+	return approvalauthority.ErrTransportUnavailable
+}
+
+// TestUnsupportedTransportIsDistinctFromAnUnreachableService is what lets the
+// Bash gate step aside on a platform that cannot host the approval service
+// while it keeps failing closed where starting the service would help.
+func TestUnsupportedTransportIsDistinctFromAnUnreachableService(t *testing.T) {
+	confirmer := &recoveryConfirmer{}
+	platform := NewGuardWithAuthority(t.TempDir(), confirmer, unsupportedTransportAuthority{})
+	require.True(t, platform.UnsupportedTransport())
+	_, err := platform.Ledger().Read("s")
+	require.ErrorIs(t, err, ErrSessionRecordUnavailable)
+	require.ErrorIs(t, err, ErrUnsupportedApproval)
+	require.Contains(t, err.Error(), "Move the items to a quarantine directory instead")
+	require.NotContains(t, err.Error(), "start the administrator-owned approval service")
+	// A direct check has no gate to step aside from, so it still fails closed.
+	denied := platform.Check(t.Context(), "s", "delete", Classify("rm -f target", t.TempDir()))
+	require.False(t, denied.Allowed)
+	require.Equal(t, 0, confirmer.calls)
+	require.NotContains(t, denied.Reason, "start the administrator-owned approval service")
+
+	service := NewGuardWithAuthority(t.TempDir(), nil, unavailableAuthority{})
+	require.False(t, service.UnsupportedTransport(), "a service that can be started is not reported")
+
+	working := testGuard(t.TempDir(), nil)
+	require.False(t, working.UnsupportedTransport())
+	require.Empty(t, fixtureBackend(working.ledger.dataDir).data, "the probe must store nothing")
+}
+
+// TestDefaultRuntimeReportsItsRealPlatform checks the guard the runtime builds,
+// not a fixture: only Linux has an authenticated transport.
+func TestDefaultRuntimeReportsItsRealPlatform(t *testing.T) {
+	require.Equal(t, runtime.GOOS != "linux", NewGuard(t.TempDir(), nil).UnsupportedTransport())
 }
 
 // This test runs explicitly in the isolated, separately privileged service test.
@@ -91,7 +136,7 @@ func TestProtectedAuthorityProcessIntegration(t *testing.T) {
 	client := approvalauthority.NewClient(socket, 0)
 	confirmer := &recoveryConfirmer{}
 	guard := NewGuardWithAuthority(data, confirmer, client)
-	all := Classify("rm a b", dir)
+	all := Classify("rm -f a b", dir)
 	require.True(t, guard.Check(t.Context(), "protected-process", "one", all).Allowed)
 	require.Equal(t, 2, confirmer.calls)
 	original, err := guard.Ledger().Read("protected-process")
@@ -101,13 +146,13 @@ func TestProtectedAuthorityProcessIntegration(t *testing.T) {
 	require.NoError(t, guard.RecordOutcome("protected-process", all, "one", nil, false))
 	require.Error(t, guard.Ledger().write("protected-process", original), "broker CAS rejects replay of an earlier approval version")
 	restarted := NewGuardWithAuthority(data, nil, client)
-	require.True(t, restarted.Check(t.Context(), "protected-process", "retry", Classify("rm b", dir)).Allowed)
-	require.False(t, restarted.Check(t.Context(), "protected-process", "repeat", Classify("rm a", dir)).Allowed)
+	require.True(t, restarted.Check(t.Context(), "protected-process", "retry", Classify("rm -f b", dir)).Allowed)
+	require.False(t, restarted.Check(t.Context(), "protected-process", "repeat", Classify("rm -f a", dir)).Allowed)
 	bytes, err := json.Marshal(original)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(restarted.Ledger().Dir("protected-process"), 0o700))
 	require.NoError(t, os.WriteFile(restarted.Ledger().Path("protected-process"), bytes, 0o600))
-	require.False(t, restarted.Check(t.Context(), "protected-process", "forged-repeat", Classify("rm a", dir)).Allowed)
+	require.False(t, restarted.Check(t.Context(), "protected-process", "forged-repeat", Classify("rm -f a", dir)).Allowed)
 	history, err := restarted.Ledger().Read("protected-process")
 	require.NoError(t, err)
 	require.Len(t, history.Confirmations, 2)
@@ -139,7 +184,7 @@ func runProtectedAuthorityPhase(t *testing.T, socket, phase, fixtureDir string) 
 		}
 		confirmer := &recoveryConfirmer{}
 		guard := NewGuardWithAuthority(data, confirmer, client)
-		all := Classify("rm a b", dir)
+		all := Classify("rm -f a b", dir)
 		decision := guard.Check(t.Context(), session, "first", all)
 		require.True(t, decision.Allowed, decision.Reason)
 		require.Equal(t, 2, confirmer.calls)
@@ -165,11 +210,11 @@ func runProtectedAuthorityPhase(t *testing.T, socket, phase, fixtureDir string) 
 		require.Positive(t, info.PreparePID)
 		require.NotEqual(t, info.PreparePID, os.Getpid(), "retry must run in a new OS process")
 		guard := NewGuardWithAuthority(data, nil, client)
-		remaining := Classify("rm b", dir)
+		remaining := Classify("rm -f b", dir)
 		decision := guard.Check(t.Context(), session, "retry", remaining)
 		require.True(t, decision.Allowed, decision.Reason)
-		require.False(t, guard.Check(t.Context(), session, "repeat-a", Classify("rm a", dir)).Allowed)
-		require.False(t, guard.Check(t.Context(), session, "extra", Classify("rm b c", dir)).Allowed)
+		require.False(t, guard.Check(t.Context(), session, "repeat-a", Classify("rm -f a", dir)).Allowed)
+		require.False(t, guard.Check(t.Context(), session, "extra", Classify("rm -f b c", dir)).Allowed)
 		// Replacing the remaining pathname must invalidate the old answers.
 		require.NoError(t, os.Rename(filepath.Join(dir, "b"), filepath.Join(dir, "saved-original-b")))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "b"), []byte("substituted"), 0o600))
@@ -192,12 +237,12 @@ func runProtectedAuthorityPhase(t *testing.T, socket, phase, fixtureDir string) 
 		require.NoError(t, err)
 		require.NoError(t, os.MkdirAll(guard.Ledger().Dir(session), 0o700))
 		require.NoError(t, os.WriteFile(guard.Ledger().Path(session), forgedBytes, 0o600))
-		require.False(t, guard.Check(t.Context(), session, "forged-repeat", Classify("rm a", dir)).Allowed)
+		require.False(t, guard.Check(t.Context(), session, "forged-repeat", Classify("rm -f a", dir)).Allowed)
 		require.NoError(t, guard.BeginExecution(session, remaining, "retry"))
 		require.NoError(t, os.Rename(filepath.Join(dir, "b"), filepath.Join(dir, "quarantined-b")))
 		require.NoError(t, guard.RecordOutcome(session, remaining, "retry", nil, false))
 		require.False(t, guard.Check(t.Context(), session, "repeat-b", remaining).Allowed)
-		require.False(t, guard.Check(t.Context(), session, "repeat-original", Classify("rm a b", dir)).Allowed)
+		require.False(t, guard.Check(t.Context(), session, "repeat-original", Classify("rm -f a b", dir)).Allowed)
 		history, err = guard.Ledger().Read(session)
 		require.NoError(t, err)
 		require.Len(t, history.Confirmations, 2)

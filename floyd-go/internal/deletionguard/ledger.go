@@ -31,6 +31,10 @@ var (
 	ErrSessionRecordUnavailable = errors.New("deletion session record is unavailable")
 	// ErrNotConfirmed reports a permanent deletion without both confirmations.
 	ErrNotConfirmed = errors.New("permanent deletion needs two confirmations for its exact target set")
+	// ErrUnsupportedApproval reports a platform on which the protected approval
+	// service has no authenticated transport. No confirmation can be read or
+	// recorded there, so a denial on that ground could never be lifted.
+	ErrUnsupportedApproval = errors.New("the protected approval service has no authenticated transport here")
 )
 
 // Confirmation is one human confirmation for an exact target set.
@@ -204,6 +208,11 @@ func (l *Ledger) Read(sessionID string) (Record, error) {
 	defer cancel()
 	data, revision, err := l.authority.Read(ctx, l.namespace, sessionID)
 	if err != nil {
+		if errors.Is(err, approvalauthority.ErrTransportUnavailable) {
+			// This platform cannot start or reach that service, so telling the
+			// reader to start it would contradict itself and hide the remedy.
+			return Record{}, fmt.Errorf("%w: permanent deletion is unavailable on this platform: %w. Move the items to a quarantine directory instead", ErrSessionRecordUnavailable, ErrUnsupportedApproval)
+		}
 		return Record{}, fmt.Errorf("%w: protected approval authority unavailable; start the administrator-owned approval service (%v)", ErrSessionRecordUnavailable, err)
 	}
 	if len(data) == 0 {

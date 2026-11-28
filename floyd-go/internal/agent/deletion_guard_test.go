@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -271,11 +272,21 @@ func TestDeletionGuardWiredThroughCoordinatorTools(t *testing.T) {
 	input, err := json.Marshal(map[string]string{"command": "rm -rf widget"})
 	require.NoError(t, err)
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "session-deletion")
+	notes := captureDeletionGateNotes(t)
 	response, err := wrapped[0].Run(ctx, fantasy.ToolCall{ID: "deletion-wired", Name: tools.BashToolName, Input: string(input)})
 
 	require.NoError(t, err)
-	require.True(t, response.IsError, response.Content)
-	require.False(t, ran, "the coordinator chain must gate the command before the tool body")
+	if runtime.GOOS == "linux" {
+		require.True(t, response.IsError, response.Content)
+		require.False(t, ran, "the coordinator chain must gate the command before the tool body")
+		require.Empty(t, notes.String(), "a reachable platform does not skip the check")
+		return
+	}
+	// No other platform has an authenticated transport to the approval service,
+	// so the chain the coordinator builds leaves the call to the permission mode.
+	require.False(t, response.IsError, response.Content)
+	require.True(t, ran)
+	require.Equal(t, 1, strings.Count(notes.String(), "\n"), "one skipped check leaves one note")
 }
 
 // Test-only authority keeps shell metadata fixtures independent of a system service.

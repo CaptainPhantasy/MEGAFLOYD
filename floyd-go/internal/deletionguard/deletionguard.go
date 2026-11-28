@@ -4,6 +4,9 @@
 // requires two separate human confirmations for the exact target set. The
 // confirmations are read from the durable per-session record, never from model
 // text, and an unreadable record refuses permanent deletion.
+//
+// An unforced rm (no force flag) with literal operands is an ordinary removal.
+// It is left to the selected permission mode and is not gated here.
 package deletionguard
 
 import (
@@ -20,7 +23,8 @@ import (
 type Effect int
 
 const (
-	// EffectNone means the command does not remove stored data.
+	// EffectNone means the command has no effect this gate protects. That
+	// includes an unforced rm, which the permission mode alone governs.
 	EffectNone Effect = iota
 	// EffectQuarantine means the command moves data, which a later move can
 	// restore.
