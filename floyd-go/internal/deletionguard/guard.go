@@ -2,9 +2,11 @@ package deletionguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,6 +50,11 @@ type Guard struct {
 	ledger    *Ledger
 	confirmer Confirmer
 	now       func() time.Time
+	// transport settles noTransport on the first call. Whether this platform
+	// has an approval transport cannot change while the process runs, and the
+	// probe is a read through the authority.
+	transport   sync.Once
+	noTransport bool
 }
 
 // NewGuard returns a guard backed by the durable session record in dataDir.
@@ -70,6 +77,23 @@ func (g *Guard) SetConfirmer(confirmer Confirmer) {
 
 // Ledger exposes the durable record for diagnostics and tests.
 func (g *Guard) Ledger() *Ledger { return g.ledger }
+
+// transportProbe names a record that is read only to learn whether this
+// platform can reach the approval service at all. Nothing is stored under it.
+const transportProbe = "deletionguard-transport-probe"
+
+// UnsupportedTransport reports a platform where the approval service has no
+// authenticated transport, so neither confirmation can be read or recorded. A
+// service that merely cannot be reached is not reported here, because starting
+// it lifts that condition. The answer is read from the authority once per
+// Guard.
+func (g *Guard) UnsupportedTransport() bool {
+	g.transport.Do(func() {
+		_, err := g.ledger.Read(transportProbe)
+		g.noTransport = errors.Is(err, ErrUnsupportedApproval)
+	})
+	return g.noTransport
+}
 
 // Check decides whether one classified call may run. Recoverable moves pass
 // through; permanent deletion needs both confirmations for its exact target

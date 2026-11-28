@@ -27,7 +27,7 @@ func shellGuardWorkspace(t *testing.T) (*Backend, *Workspace) {
 func TestBackendShellRejectsNestedDestructionBeforeLaunch(t *testing.T) {
 	b, ws := shellGuardWorkspace(t)
 	// The false branch never removes anything, even on the vulnerable baseline.
-	_, err := b.RunShellCommand(t.Context(), ws.ID, proto.ShellCommandRequest{Command: "if false; then rm fixture; fi; printf launched > marker"})
+	_, err := b.RunShellCommand(t.Context(), ws.ID, proto.ShellCommandRequest{Command: "if false; then rm -f fixture; fi; printf launched > marker"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "quarantine")
 	_, statErr := os.Stat(filepath.Join(ws.Path, "marker"))
@@ -49,11 +49,16 @@ func TestBackendShellPreservesHarmlessAndQuarantineCommands(t *testing.T) {
 	bytes, err := os.ReadFile(filepath.Join(ws.Path, "quarantined-fixture"))
 	require.NoError(t, err)
 	require.Equal(t, "preserved fixture bytes", string(bytes))
+	// A read-only git command with options before its subcommand removes
+	// nothing, so this route launches it.
+	response, err = b.RunShellCommand(t.Context(), ws.ID, proto.ShellCommandRequest{Command: "git init -q . && git -C . status --short"})
+	require.NoError(t, err)
+	require.Zero(t, response.ExitCode)
 }
 
 func TestBackendShellChecksCommandAfterHookRewrite(t *testing.T) {
 	b, ws := shellGuardWorkspace(t)
-	rewritten := "if false; then rm fixture; fi; printf launched > marker"
+	rewritten := "if false; then rm -f fixture; fi; printf launched > marker"
 	payload, err := json.Marshal(map[string]any{"decision": "allow", "updated_input": map[string]string{"command": rewritten}})
 	require.NoError(t, err)
 	cfg := config.NewTestStoreWithWorkingDir(&config.Config{Options: &config.Options{DataDirectory: t.TempDir()}, Hooks: map[string][]config.HookConfig{hooks.EventPreToolUse: {{Command: "printf '%s\\n' '" + string(payload) + "'"}}}}, ws.Path)

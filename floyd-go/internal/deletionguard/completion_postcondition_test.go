@@ -105,7 +105,7 @@ func TestCompletionInPlaceSymlinkCannotApproveReferencedData(t *testing.T) {
 func TestCompletionUnlinkSymlinkKeepsItsOwnIdentity(t *testing.T) {
 	guard, dir, _, _ := recoveryFixture(t)
 	require.NoError(t, os.Symlink(filepath.Join(dir, "b"), filepath.Join(dir, "link")))
-	classification := Classify("rm link", dir)
+	classification := Classify("rm -f link", dir)
 	require.True(t, guard.Check(t.Context(), "unlink-link", "call", classification).Allowed)
 	// Changing the referent does not change the exact link that rm would unlink.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "b"), []byte("referent stays preserved"), 0o600))

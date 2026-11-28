@@ -45,23 +45,23 @@ func TestDeletionMoveEffectiveDirectoryDestinations(t *testing.T) {
 
 func TestDeletionWrapperOptionsCannotHideCommand(t *testing.T) {
 	for _, command := range []string{
-		`sudo -n rm important.txt`,
-		`sudo -u root rm important.txt`,
-		`sudo --user=root -- rm important.txt`,
-		`sudo -n -u root bash -c 'if true; then rm important.txt; fi'`,
-		`doas -n -u root rm important.txt`,
-		`nohup -- rm important.txt`,
-		`sudo --unknown rm important.txt`,
+		`sudo -n rm -f important.txt`,
+		`sudo -u root rm -f important.txt`,
+		`sudo --user=root -- rm -f important.txt`,
+		`sudo -n -u root bash -c 'if true; then rm -f important.txt; fi'`,
+		`doas -n -u root rm -f important.txt`,
+		`nohup -- rm -f important.txt`,
+		`sudo --unknown rm -f important.txt`,
 		`sudo -D /elsewhere rm important.txt`,
-		`sudo --host elsewhere rm important.txt`,
+		`sudo --host elsewhere rm -f important.txt`,
 		`/usr/bin/time -o important.txt echo safe`,
 		`sudo "$command" important.txt`,
-		`sudo PATH=/different rm important.txt`,
-		`sudo -- PATH=/different rm important.txt`,
-		`sudo -nEu root rm important.txt`,
-		`sudo -uroot rm important.txt`,
-		`doas -n -uroot rm important.txt`,
-		`/usr/bin/time -p rm important.txt`,
+		`sudo PATH=/different rm -f important.txt`,
+		`sudo -- PATH=/different rm -f important.txt`,
+		`sudo -nEu root rm -f important.txt`,
+		`sudo -uroot rm -f important.txt`,
+		`doas -n -uroot rm -f important.txt`,
+		`/usr/bin/time -p rm -f important.txt`,
 	} {
 		t.Run(command, func(t *testing.T) {
 			classification := Classify(command, t.TempDir())
@@ -83,10 +83,15 @@ func TestDeletionMoveSymlinkAndDuplicateDestinations(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600))
 	}
 	require.NoError(t, os.Symlink("destination", filepath.Join(dir, "linked")))
-	target := filepath.Join(dir, "linked/report")
-	classification := Classify("mv one/report linked/", dir)
+	// A destination that is an existing symbolic link is not followed: where
+	// the data lands cannot be proven. The same overwrite named by its real
+	// path is exact.
+	linked := Classify("mv one/report linked/", dir)
+	require.True(t, linked.IsDestructive())
+	require.NotEmpty(t, linked.Unresolved)
+	classification := Classify("mv one/report destination/", dir)
 	require.True(t, classification.IsDestructive())
-	require.Equal(t, []string{target}, classification.Targets)
+	require.Equal(t, []string{filepath.Join(dir, "destination/report")}, classification.Targets)
 	duplicate := Classify("mv one/report two/report destination/", dir)
 	require.True(t, duplicate.IsDestructive())
 	require.NotEmpty(t, duplicate.Unresolved)
@@ -95,15 +100,15 @@ func TestDeletionMoveSymlinkAndDuplicateDestinations(t *testing.T) {
 
 func TestDeletionLaunchWrappersCannotHideCommand(t *testing.T) {
 	for _, command := range []string{
-		`env rm important.txt`, `env -- rm important.txt`,
-		`xargs env rm`, `xargs -I {} nice -n 5 rm '{}'`, `xargs --max-args=1 timeout 5 rm`, `xargs sh -c 'rm important.txt' --help`, `/usr/bin/env nice -n 5 rm important.txt`,
-		`nice rm important.txt`, `nice -n 5 rm important.txt`, `nice --adjustment=-5 rm important.txt`, `nice -10 rm important.txt`,
-		`timeout 5 rm important.txt`, `timeout --signal=KILL --kill-after=2 5s rm important.txt`, `timeout -s TERM -k 2 5 rm important.txt`,
-		`setsid -fw rm important.txt`, `stdbuf -o L rm important.txt`, `stdbuf --output=L timeout 5 env rm important.txt`,
-		`env PATH=/different rm important.txt`, `env FOO=value echo safe`, `env -i rm important.txt`,
-		`env -u PATH rm important.txt`, `env -C /elsewhere rm important.txt`, `env -S 'rm important.txt'`,
-		`timeout --unknown 5 rm important.txt`, `nice --unknown rm important.txt`, `env --unknown rm important.txt`,
-		`env "$command" important.txt`, `xargs "$command"`, `timeout "$duration" rm important.txt`,
+		`env rm -f important.txt`, `env -- rm -f important.txt`,
+		`xargs env rm`, `xargs -I {} nice -n 5 rm '{}'`, `xargs --max-args=1 timeout 5 rm`, `xargs sh -c 'rm -f important.txt' --help`, `/usr/bin/env nice -n 5 rm -f important.txt`,
+		`nice rm -f important.txt`, `nice -n 5 rm -f important.txt`, `nice --adjustment=-5 rm -f important.txt`, `nice -10 rm -f important.txt`,
+		`timeout 5 rm -f important.txt`, `timeout --signal=KILL --kill-after=2 5s rm -f important.txt`, `timeout -s TERM -k 2 5 rm -f important.txt`,
+		`setsid -fw rm -f important.txt`, `stdbuf -o L rm -f important.txt`, `stdbuf --output=L timeout 5 env rm -f important.txt`,
+		`env PATH=/different rm -f important.txt`, `env FOO=value echo safe`, `env -i rm -f important.txt`,
+		`env -u PATH rm important.txt`, `env -C /elsewhere rm important.txt`, `env -S 'rm -f important.txt'`,
+		`timeout --unknown 5 rm -f important.txt`, `nice --unknown rm -f important.txt`, `env --unknown rm -f important.txt`,
+		`env "$command" important.txt`, `xargs "$command"`, `timeout "$duration" rm -f important.txt`,
 	} {
 		t.Run(command, func(t *testing.T) {
 			classification := Classify(command, t.TempDir())
@@ -114,7 +119,7 @@ func TestDeletionLaunchWrappersCannotHideCommand(t *testing.T) {
 	for _, command := range []string{`env echo safe`, `env -- echo safe`, `xargs -n 1 echo`, `nice -n 5 echo safe`, `timeout 2 printf safe`, `setsid -f echo safe`, `stdbuf -o L echo safe`} {
 		require.False(t, Classify(command, t.TempDir()).IsDestructive(), command)
 	}
-	for _, command := range []string{`env PATH=/different echo safe`, `env -C /different echo safe`, `env -S 'rm important.txt'`, `timeout "$duration" rm important.txt`, `nice -n "$priority" rm important.txt`} {
+	for _, command := range []string{`env PATH=/different echo safe`, `env -C /different echo safe`, `env -S 'rm -f important.txt'`, `timeout "$duration" rm -f important.txt`, `nice -n "$priority" rm -f important.txt`} {
 		classification := Classify(command, t.TempDir())
 		require.True(t, classification.IsDestructive(), command)
 		require.NotEmpty(t, classification.Unresolved, command)

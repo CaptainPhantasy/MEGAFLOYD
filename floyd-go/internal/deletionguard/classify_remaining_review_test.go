@@ -57,7 +57,7 @@ func TestDeletionDynamicArgumentsCannotHideLaterEffects(t *testing.T) {
 	for _, command := range []string{
 		`find "$target" -delete`, `find "$target" -exec rm '{}' ';'`,
 		`dd if="$input" of=report.txt`, `dd "$options" of=report.txt`,
-		`env "$command" rm report.txt`, `sudo -u "$user" rm report.txt`,
+		`env "$command" rm -f report.txt`, `sudo -u "$user" rm -f report.txt`,
 		`xargs -I "$marker" rm '{}'`, `git "$option" restore report.txt`,
 	} {
 		t.Run(command, func(t *testing.T) {
@@ -78,8 +78,8 @@ func TestDeletionMixedQuarantineTargetsAreNotApprovedForDestruction(t *testing.T
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600))
 	}
 	for _, c := range []Classification{
-		Classify(`mv a saved; rm b`, dir),
-		ClassifyAll([]string{`mv a saved`, `rm b`}, dir),
+		Classify(`mv a saved; rm -f b`, dir),
+		ClassifyAll([]string{`mv a saved`, `rm -f b`}, dir),
 	} {
 		require.True(t, c.IsDestructive())
 		require.Equal(t, []string{filepath.Join(dir, "b")}, c.Targets)
@@ -131,7 +131,6 @@ func TestDeletionCopyDestinationSemantics(t *testing.T) {
 		{`cp /dev/null report`, "report"},
 		{`cp report destination/`, "destination/report"},
 		{`cp -t destination report`, "destination/report"},
-		{`cp -T report linked`, "linked"},
 		{`cp -n -f /dev/null report`, "report"},
 		{`cp --no-clobber --interactive /dev/null report`, "report"},
 	} {
@@ -139,10 +138,14 @@ func TestDeletionCopyDestinationSemantics(t *testing.T) {
 		require.True(t, c.IsDestructive(), tc.command)
 		require.Equal(t, []string{filepath.Join(dir, tc.target)}, c.Targets, tc.command)
 	}
+	// A destination that is an existing symbolic link is not followed.
+	linked := Classify(`cp -T report linked`, dir)
+	require.True(t, linked.IsDestructive())
+	require.NotEmpty(t, linked.Unresolved)
 	for _, command := range []string{`cp -f -n /dev/null report`, `cp /dev/null new-report`, `cp -R source new-directory`} {
 		require.False(t, Classify(command, dir).IsDestructive(), command)
 	}
-	for _, command := range []string{`cp -R source destination`, `cp a new-report; cp b new-report`, `cp a new-report; rm new-report`} {
+	for _, command := range []string{`cp -R source destination`, `cp a new-report; cp b new-report`, `cp a new-report; rm -f new-report`} {
 		c := Classify(command, dir)
 		require.True(t, c.IsDestructive(), command)
 		require.NotEmpty(t, c.Unresolved, command)
@@ -161,7 +164,7 @@ func TestDeletionInformationalOperandsCannotSuppressEffects(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("original"), 0o600))
 	}
 	for _, command := range []string{
-		`rm -- --help report`, `rm -- --version report`,
+		`rm -f -- --help report`, `rm -f -- --version report`,
 		`cp -- source --help`, `cp -- source --version`,
 		`mv -- source --help`, `truncate -s 0 -- --version`,
 		`find . -name --help -delete`, `find . -name --version -delete`,

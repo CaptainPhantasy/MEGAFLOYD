@@ -63,14 +63,14 @@ func TestRuntimeHookDeletionRewriteRequiresBothConfirmations(t *testing.T) {
 			f := newDeletionFixture(t)
 			f.answers = answers
 			ran, actual := false, ""
-			tool := hookDeletionTool(t, f, "rm a", hookDeletionRecordingBody(&ran, &actual))
+			tool := hookDeletionTool(t, f, "rm -f a", hookDeletionRecordingBody(&ran, &actual))
 			ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "rewrite")
 			response, err := tool.Run(ctx, fantasy.ToolCall{ID: "call", Name: tools.BashToolName, Input: `{"command":"printf harmless"}`})
 			require.NoError(t, err)
 			require.Equal(t, len(answers) == 2, ran, response.Content)
 			require.Equal(t, len(answers) != 2, response.IsError, response.Content)
 			if ran {
-				require.Equal(t, "rm a", actual)
+				require.Equal(t, "rm -f a", actual)
 				require.Len(t, f.record("rewrite").Confirmations, 2)
 			}
 		})
@@ -80,11 +80,11 @@ func TestRuntimeHookDeletionRewriteRequiresBothConfirmations(t *testing.T) {
 func TestRuntimeHookDeletionRewriteDoesNotReuseOtherTargetApproval(t *testing.T) {
 	f := newDeletionFixture(t)
 	f.answers = []bool{true, true}
-	require.True(t, f.guard.Check(t.Context(), "rewrite-target", "approved", deletionguard.Classify("rm a", f.workingDir)).Allowed)
+	require.True(t, f.guard.Check(t.Context(), "rewrite-target", "approved", deletionguard.Classify("rm -f a", f.workingDir)).Allowed)
 	ran, actual := false, ""
-	tool := hookDeletionTool(t, f, "rm b", hookDeletionRecordingBody(&ran, &actual))
+	tool := hookDeletionTool(t, f, "rm -f b", hookDeletionRecordingBody(&ran, &actual))
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "rewrite-target")
-	response, err := tool.Run(ctx, fantasy.ToolCall{ID: "call", Name: tools.BashToolName, Input: `{"command":"rm a"}`})
+	response, err := tool.Run(ctx, fantasy.ToolCall{ID: "call", Name: tools.BashToolName, Input: `{"command":"rm -f a"}`})
 	require.NoError(t, err)
 	require.True(t, response.IsError, response.Content)
 	require.False(t, ran)
@@ -109,7 +109,7 @@ func TestRuntimeHookDeletionHarmlessRewriteRemainsUsable(t *testing.T) {
 func TestRuntimeHookDeletionBackgroundBindsActualRewrittenCommand(t *testing.T) {
 	f := newDeletionFixture(t)
 	f.answers = []bool{true, true}
-	rewritten := "sleep 0.02; if false; then rm a; fi; false"
+	rewritten := "sleep 0.02; if false; then rm -f a; fi; false"
 	var job *shell.BackgroundShell
 	body := fantasy.NewAgentTool(tools.BashToolName, "safe background fixture", func(ctx context.Context, p tools.BashParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		var err error

@@ -16,7 +16,7 @@ func TestCompoundTerminalUnlinkPreservesExactRemainder(t *testing.T) {
 	}
 	confirmer := &recoveryConfirmer{}
 	guard := testGuard(t.TempDir(), confirmer)
-	all := ClassifyAll([]string{`truncate -s 0 b; rm b`, `rm a`}, dir)
+	all := ClassifyAll([]string{`truncate -s 0 b; rm -f b`, `rm -f a`}, dir)
 	decision := guard.Check(t.Context(), "compound", "one", all)
 	require.True(t, decision.Allowed, decision.Reason)
 	require.Equal(t, 2, confirmer.calls)
@@ -32,7 +32,7 @@ func TestCompoundTerminalUnlinkPreservesExactRemainder(t *testing.T) {
 	require.Equal(t, []string{b}, record.Executions[0].Targets)
 	require.Equal(t, "finished", record.Attempts[len(record.Attempts)-1].State)
 	restarted := testGuard(guard.ledger.dataDir, nil)
-	remaining := Classify(`rm a`, dir)
+	remaining := Classify(`rm -f a`, dir)
 	decision = restarted.Check(t.Context(), "compound", "retry", remaining)
 	require.True(t, decision.Allowed, decision.Reason)
 	require.NoError(t, restarted.BeginExecution("compound", remaining, "retry"))
@@ -66,7 +66,7 @@ func TestCompoundAbsenceWithoutTerminalUnlinkIsNotCompletion(t *testing.T) {
 
 func TestCompoundUnsupportedTerminalTransformRejectedBeforeApproval(t *testing.T) {
 	t.Parallel()
-	for _, command := range []string{`rm b; truncate -s 0 b`, `truncate -s 0 b; shred b`} {
+	for _, command := range []string{`rm -f b; truncate -s 0 b`, `truncate -s 0 b; shred b`} {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()

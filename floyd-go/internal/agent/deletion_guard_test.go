@@ -15,6 +15,7 @@ import (
 	"github.com/legacy-ai/floyd/internal/agent/tools"
 	"github.com/legacy-ai/floyd/internal/config"
 	"github.com/legacy-ai/floyd/internal/deletionguard"
+	"github.com/legacy-ai/floyd/internal/permission"
 	"github.com/stretchr/testify/require"
 )
 
@@ -79,7 +80,7 @@ func (f *deletionFixture) run(sessionID, command string) (fantasy.ToolResponse, 
 	ran := false
 	exitCode := 0
 	inner := deletionRecordingTool{ran: &ran, resp: fantasy.WithResponseMetadata(fantasy.NewTextResponse("ran"), tools.BashResponseMetadata{ExitCode: &exitCode})}
-	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
+	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir, nil)[0]
 	f.calls++
 	input, err := json.Marshal(map[string]string{"command": command})
 	require.NoError(f.t, err)
@@ -256,26 +257,48 @@ func TestDeletionGuardAllowsNonDestructiveCommand(t *testing.T) {
 	require.Empty(t, f.asked)
 }
 
+// TestDeletionGuardWiredThroughCoordinatorTools runs the chain the coordinator
+// builds, with the guard the runtime constructs rather than a fixture. Manual
+// is gated on every platform. Yolo, selected here the way `megafloyd -y`
+// selects it, steps aside on every platform.
 func TestDeletionGuardWiredThroughCoordinatorTools(t *testing.T) {
-	workingDir := t.TempDir()
-	cfg := config.NewTestStoreWithWorkingDir(&config.Config{
-		Options: &config.Options{DataDirectory: t.TempDir()},
-	}, workingDir)
-	c := &coordinator{cfg: cfg}
+	for _, tc := range []struct {
+		name string
+		skip bool
+	}{
+		{name: "manual"},
+		{name: "yolo", skip: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workingDir := t.TempDir()
+			cfg := config.NewTestStoreWithWorkingDir(&config.Config{
+				Options: &config.Options{DataDirectory: t.TempDir()},
+			}, workingDir)
+			c := &coordinator{cfg: cfg, permissions: permission.NewPermissionService(workingDir, tc.skip, nil)}
 
-	ran := false
-	inner := deletionRecordingTool{ran: &ran, resp: fantasy.NewTextResponse("ran")}
-	wrapped := c.wrapAgentTools([]fantasy.AgentTool{inner}, false)
-	require.NotNil(t, wrapped)
+			ran := false
+			inner := deletionRecordingTool{ran: &ran, resp: fantasy.NewTextResponse("ran")}
+			wrapped := c.wrapAgentTools([]fantasy.AgentTool{inner}, false)
+			require.NotNil(t, wrapped)
 
-	input, err := json.Marshal(map[string]string{"command": "rm -rf widget"})
-	require.NoError(t, err)
-	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "session-deletion")
-	response, err := wrapped[0].Run(ctx, fantasy.ToolCall{ID: "deletion-wired", Name: tools.BashToolName, Input: string(input)})
+			input, err := json.Marshal(map[string]string{"command": "rm -rf widget"})
+			require.NoError(t, err)
+			ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "session-deletion")
+			notes := captureDeletionGateNotes(t)
+			response, err := wrapped[0].Run(ctx, fantasy.ToolCall{ID: "deletion-wired", Name: tools.BashToolName, Input: string(input)})
 
-	require.NoError(t, err)
-	require.True(t, response.IsError, response.Content)
-	require.False(t, ran, "the coordinator chain must gate the command before the tool body")
+			require.NoError(t, err)
+			if !tc.skip {
+				require.True(t, response.IsError, response.Content)
+				require.False(t, ran, "the coordinator chain must gate the command before the tool body")
+				require.Empty(t, notes.String(), "nothing is skipped in manual")
+				return
+			}
+			require.False(t, response.IsError, response.Content)
+			require.True(t, ran)
+			require.Equal(t, 1, strings.Count(notes.String(), "\n"), "one skipped check leaves one note")
+		})
+	}
 }
 
 // Test-only authority keeps shell metadata fixtures independent of a system service.

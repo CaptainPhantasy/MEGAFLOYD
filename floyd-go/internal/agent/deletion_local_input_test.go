@@ -17,7 +17,7 @@ func TestDeletionConfirmerRejectsRemoteOnlyInputPromptly(t *testing.T) {
 	events := service.Subscribe(t.Context())
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	decision := f.guard.Check(ctx, "remote-deletion", "call", deletionguard.Classify("rm item", f.workingDir))
+	decision := f.guard.Check(ctx, "remote-deletion", "call", deletionguard.Classify("rm -f item", f.workingDir))
 	require.False(t, decision.Allowed)
 	require.Contains(t, decision.Reason, question.ErrLocalInputRequired.Error())
 	require.Empty(t, service.Pending())
@@ -38,7 +38,7 @@ func TestDeletionConfirmerRequiresTwoDirectLocalAnswers(t *testing.T) {
 	events := service.Subscribe(ctx)
 	result := make(chan deletionguard.Decision, 1)
 	go func() {
-		result <- f.guard.Check(ctx, "local-deletion", "call", deletionguard.Classify("rm item", f.workingDir))
+		result <- f.guard.Check(ctx, "local-deletion", "call", deletionguard.Classify("rm -f item", f.workingDir))
 	}()
 	for stage := 1; stage <= 2; stage++ {
 		select {

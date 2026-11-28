@@ -30,7 +30,7 @@ func addRuntimeFlags(cmd *cobra.Command) {
 	f.StringSlice("add-dir", nil, "Additional directory the agent may access (repeatable)")
 	f.String("permission-mode", "", "Permission mode: manual, yolo, auto, or plan")
 	f.StringSlice("allowedTools", nil, "Exact tool names allowed without ordinary permission prompts (comma-separated)")
-	f.Bool("dangerously-skip-permissions", false, "Skip ordinary permission prompts; protected-operation confirmations remain required")
+	f.Bool("dangerously-skip-permissions", false, "Skip permission prompts, deletion confirmations included (each skipped check is noted in the log)")
 }
 
 func addPromptFlags(cmd *cobra.Command) {

@@ -21,13 +21,13 @@ func TestDeletionMoveSequencesFailClosedOnOverlappingState(t *testing.T) {
 		"mv a Out; mv b out",
 		"mv a café; mv b cafe\u0301",
 		"mv a alias/out; mv b tree/out",
-		"mv a alias/out; rm tree/out",
-		"mv a out; rm out",
-		"mv tree parked; rm parked/child",
+		"mv a alias/out; rm -f tree/out",
+		"mv a out; rm -f out",
+		"mv tree parked; rm -f parked/child",
 		"mv a out; mv out other",
-		"rm a; mv b a",
+		"rm -f a; mv b a",
 		"bash -c 'mv a out'; mv b out",
-		"mv a out; bash -c 'rm out'",
+		"mv a out; bash -c 'rm -f out'",
 		"if true; then mv a out; fi; mv b out",
 	} {
 		classification := Classify(command, dir)
@@ -38,7 +38,7 @@ func TestDeletionMoveSequencesFailClosedOnOverlappingState(t *testing.T) {
 		require.False(t, decision.Allowed, "confirmations cannot authorize unproven moved data")
 		require.Zero(t, confirmer.calls)
 	}
-	for _, commands := range [][]string{{"mv a out", "mv b out"}, {"mv a out", "rm out"}, {"rm a", "mv b a"}} {
+	for _, commands := range [][]string{{"mv a out", "mv b out"}, {"mv a out", "rm -f out"}, {"rm -f a", "mv b a"}} {
 		classification := ClassifyAll(commands, dir)
 		require.True(t, classification.IsDestructive(), commands)
 		require.NotEmpty(t, classification.Unresolved, commands)
@@ -47,7 +47,7 @@ func TestDeletionMoveSequencesFailClosedOnOverlappingState(t *testing.T) {
 		require.False(t, Classify(command, dir).IsDestructive(), command)
 	}
 	require.False(t, ClassifyAll([]string{"mv a out", "mv b other"}, dir).IsDestructive())
-	disjoint := ClassifyAll([]string{"cd tree", "rm a"}, dir)
+	disjoint := ClassifyAll([]string{"cd tree", "rm -f a"}, dir)
 	require.True(t, disjoint.IsDestructive())
 	require.Empty(t, disjoint.Unresolved, "independent command directories must remain independent")
 }
@@ -62,7 +62,7 @@ func TestDeletionUnprovenDirectoryAndParseStateFailsClosed(t *testing.T) {
 		"if true; then cd sub; fi; : > important",
 		"if true; then cd sub; fi; mv a out",
 		"cd sub; : > important",
-		"rm important\nif true; then",
+		"rm -f important\nif true; then",
 		"printf safe\nif true; then",
 	} {
 		classification := Classify(command, dir)

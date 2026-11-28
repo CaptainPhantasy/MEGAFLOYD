@@ -26,9 +26,9 @@ func TestDeletionCopyActualParallelRecovery(t *testing.T) {
 	// Only disposable copy fixtures are overwritten. The deletion branch is
 	// never entered, and the original destination bytes remain in saved-original.
 	copyCommand := "cp source destination"
-	failedCommand := "if false; then rm remaining; fi; false"
+	failedCommand := "if false; then rm -f remaining; fi; false"
 	inner := tools.NewParallelBashTool(permission.NewPermissionService(f.workingDir, true, nil), f.workingDir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "fixture")
-	tool := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
+	tool := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir, nil)[0]
 	params := tools.ParallelBashParams{Commands: []tools.ParallelBashCommand{
 		{Command: copyCommand, Description: "copy isolated fixture"},
 		{Command: failedCommand, Description: "safe failed branch"},
@@ -67,7 +67,7 @@ func TestDeletionCopyActualParallelRecovery(t *testing.T) {
 func TestDeletionCopyCompoundCannotEnterTool(t *testing.T) {
 	for _, command := range []string{
 		"truncate -s 0 destination; cp source destination",
-		"rm destination; cp source destination",
+		"rm -f destination; cp source destination",
 		"cp source destination; truncate -s 0 destination",
 		"cp source destination; cp other destination",
 	} {
@@ -97,9 +97,9 @@ func TestDeletionCopyArchiveCannotEnterTool(t *testing.T) {
 	for _, command := range []string{
 		"cp -a source destination",
 		"cp -av source destination",
-		"cp -pa source destination; rm source",
+		"cp -pa source destination; rm -f source",
 		"cp -p source destination",
-		"cp -pv source destination; rm source",
+		"cp -pv source destination; rm -f source",
 	} {
 		t.Run(command, func(t *testing.T) {
 			f := newDeletionFixture(t)

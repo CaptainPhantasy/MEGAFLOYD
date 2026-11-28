@@ -10,8 +10,10 @@ select an unprotected fallback.
 The macOS approval transport is deliberately unavailable. Darwin stream peer
 metadata does not authenticate each message's actual writer after descriptor
 inheritance. Both the authority server and client refuse before creating a
-listener, sending a request, or accepting an approval record. Permanent deletion
-remains blocked on macOS; use quarantine. Harmless shell commands remain usable.
+listener, sending a request, or accepting an approval record. In manual mode
+permanent deletion remains blocked on macOS, and the denial names quarantine as
+the remedy. In yolo mode the two-confirmation gate steps aside (see "Scope
+decisions"). Harmless shell commands remain usable in every mode.
 
 The broker authenticates the connecting process using kernel peer credentials
 and the administrator's pinned engine executable path and SHA-256. Production
@@ -30,9 +32,11 @@ are neither imported nor accepted as approval, regardless of signatures or a
 `source: human` field. This change preserves existing files.
 
 If the service is absent, inaccessible, or rejects the client identity, permanent
-deletion is denied before asking for confirmations. The error names the
-administrator-owned approval service. Harmless commands and quarantine moves
-remain available. Recovery requires the administrator to configure the reviewed
+deletion is denied before asking for confirmations, in every mode that asks.
+Where the service can run, the error names the administrator-owned approval
+service. Where the platform has no approval transport, it says so and names
+quarantine. Harmless commands and quarantine moves remain available. Recovery
+requires the administrator to configure the reviewed
 service and pin the intended engine release; weakening file permissions or
 copying local approval JSON does not restore authority.
 
@@ -105,8 +109,32 @@ restart rather than permanently removed.
 
 A successful isolated test or a repository commit does not install this service
 in production. Deployment must satisfy these prerequisites before permanent
-deletion becomes available. Ordinary harmless shell commands and quarantine
-remain usable while the service is absent.
+deletion can be confirmed in the modes that ask. Ordinary harmless shell
+commands and quarantine remain usable while the service is absent.
+
+## Scope decisions
+
+Two decisions settle how the deletion gate relates to the permission mode and
+to the platform.
+
+1. **Effect decides; the mode gates.** The classifier reports what a command
+   does to stored data and never looks at the permission mode: an `rm` is a
+   removal with or without `-f`. Whether the gate asks about it is decided by
+   the mode the owner selected.
+2. **The mode authorizes; the transport never does.** Under yolo the gate steps
+   aside and notes it, so the mode alone governs the call. In every other mode
+   both confirmations stand, and a platform that cannot run the approval
+   service is denied with the quarantine remedy, never waved through.
+
+For this gate, yolo covers every selection that runs without permission
+prompts: the `--yolo` flag, `/yolo` and `ctrl+y`, "Never Ask",
+`--dangerously-skip-permissions`, `--permission-mode auto`, and the `yolo`
+permission mode. Manual, including `default` and `plan`, is the only mode that
+keeps asking. The refusal of parallel commands that remove overlapping targets
+follows the same split: manual keeps it, yolo passes.
+
+The backend's remote shell route has no confirmation channel and asks nothing.
+It refuses every command classified as permanent deletion, in every mode.
 
 
 ## Input-channel boundary

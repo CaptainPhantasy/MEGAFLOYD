@@ -28,7 +28,9 @@ func TestDeletionClassificationByEffect(t *testing.T) {
 		unresolved bool
 	}{
 		{name: "rm tree", command: "rm -rf widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}, recursive: true},
-		{name: "rm file", command: "rm widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}},
+		{name: "rm file", command: "rm -f widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}},
+		{name: "rm file without force", command: "rm widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}},
+		{name: "rm tree without force", command: "rm -r widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}, recursive: true},
 		{name: "rmdir", command: "rmdir widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}},
 		{name: "unlink", command: "unlink widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}},
 		{name: "shred", command: "shred -u widget", effect: EffectPermanentDeletion, targets: []string{join("widget")}},

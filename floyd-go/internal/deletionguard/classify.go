@@ -2,6 +2,7 @@ package deletionguard
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,6 +32,11 @@ func classifyCommand(c *classifier, command string) Classification {
 	}
 	dir := c.workingDir
 	for _, stmt := range file.Stmts {
+		// A proof earned inside one statement list cannot outlive it: a
+		// ;-separated cd may fail while the next statement still runs in the
+		// original directory. Only the caller-provided directory stays proven
+		// while no cd has run.
+		c.dirProven = !c.changedDir
 		c.statement(stmt, &dir)
 	}
 	return c.result()
@@ -38,16 +44,66 @@ func classifyCommand(c *classifier, command string) Classification {
 
 // classifier collects the effects of one parsed command line.
 type classifier struct {
-	workingDir       string
-	changedDir       bool
+	workingDir string
+	// changedDir reports that some cd may have run in the current scope or in
+	// one enclosing it. It is restored when a nested scope ends, because a
+	// subshell cannot change its caller's working directory.
+	changedDir bool
+	// dirProven reports that the directory relative operands currently resolve
+	// against is proven: a literal cd to an existing directory ran as the left
+	// side of an && chain, so the rest of that chain runs only after the cd
+	// succeeded.
+	dirProven bool
+	// dirProofBlocked reports a scope where a cd cannot prove a directory for
+	// later statements: a branch, a loop, a function body or an evaluated
+	// script.
+	dirProofBlocked bool
+	// nested reports a scope whose statements are not the command's own: a
+	// subshell, a command substitution or a nested script. What it creates
+	// does not vouch for anything in the enclosing scope.
+	nested bool
+	// directoryOpaque reports a command that may have moved the shell without
+	// the caller learning where: an evaluated script, or a directory change
+	// behind a wrapper. call() empties the directory when it sees this.
+	directoryOpaque bool
+	// createdDirectories lists directories this command creates that were
+	// absent when it was classified. Nothing stored before the command can be
+	// inside them, so a later move or copy can treat one as an empty directory.
+	// An entry is assumed to hold for the rest of the command: a later
+	// statement that removes the directory leaves a move or copy into it
+	// failing, not destructive. Statements running in the background are
+	// excluded because they may not have finished.
+	createdDirectories []string
+	// createdLinks maps each symbolic link this command creates to the target
+	// it was given, so a later statement can resolve a destination through it.
+	// An empty target means the link's destination is unknown.
+	createdLinks map[string]string
+	// unknownLinks reports an ln in this command that creates links whose
+	// names are not all known.
+	unknownLinks bool
+	// asynchronous reports a statement running in the background, whose
+	// effects may not have happened when the next statement starts.
+	asynchronous     bool
 	effects          []Classification
 	movePaths        []string
 	destructivePaths []string
 }
 
+// directoryUnproven reports that a directory change occurred and its result is
+// not proven, so relative operands cannot be trusted.
+func (c *classifier) directoryUnproven() bool {
+	return c.changedDir && !c.dirProven
+}
+
 func (c *classifier) add(effect Classification) {
 	if effect.Effect == EffectNone {
 		return
+	}
+	if effect.IsDestructive() && effect.Unresolved == "" && c.directoryUnproven() {
+		// Record the doubt where the effect is classified: a later statement
+		// that proves a different directory must not make this target look
+		// provable.
+		effect.Unresolved = "the command changes directory first, so the removed paths are not provable"
 	}
 	if effect.IsDestructive() {
 		if overlappingPaths(effect.Targets, c.movePaths) {
@@ -145,7 +201,7 @@ func (c *classifier) result() Classification {
 		}
 	}
 	out.Targets = CanonicalTargets(out.Targets)
-	if out.Effect == EffectPermanentDeletion && c.changedDir && out.Unresolved == "" {
+	if out.Effect == EffectPermanentDeletion && c.directoryUnproven() && out.Unresolved == "" {
 		out.Unresolved = "the command changes directory first, so the removed paths are not provable"
 	}
 	return out
@@ -158,8 +214,11 @@ func (c *classifier) statement(stmt *syntax.Stmt, dir *string) {
 		return
 	}
 	if stmt.Background {
-		start := len(c.effects)
+		start, directories, asynchronous := len(c.effects), len(c.createdDirectories), c.asynchronous
+		c.asynchronous = true
 		defer func() {
+			c.asynchronous = asynchronous
+			c.createdDirectories = c.createdDirectories[:directories]
 			for i := start; i < len(c.effects); i++ {
 				if c.effects[i].IsDestructive() {
 					c.effects[i].Unresolved = "the destructive shell statement runs asynchronously, so its completion cannot be proven"
@@ -177,21 +236,30 @@ func (c *classifier) statement(stmt *syntax.Stmt, dir *string) {
 		c.call(command, dir)
 	case *syntax.BinaryCmd:
 		if command.Op == syntax.AndStmt {
+			// The right-hand side runs only after a successful left side, so a
+			// directory proof earned on the left carries to the right.
 			c.statement(command.X, dir)
+			if command.X != nil && command.X.Negated {
+				// "! cd tree" succeeds when the cd fails, so the right side may
+				// run in the original directory.
+				c.dirProven = false
+				*dir = ""
+			}
 			c.statement(command.Y, dir)
 			return
 		}
 		// Pipes and or-lists may skip either side, so neither keeps a
 		// provable working directory.
 		unknown := ""
+		c.dirProven = false
 		c.statement(command.X, &unknown)
+		c.dirProven = false
 		unknown = ""
 		c.statement(command.Y, &unknown)
 		*dir = ""
+		c.dirProven = false
 	case *syntax.Block:
-		for _, child := range command.Stmts {
-			c.statement(child, dir)
-		}
+		c.statementList(command.Stmts, dir)
 	case *syntax.Subshell:
 		c.localDirectoryStatements(command.Stmts, *dir)
 	case *syntax.IfClause, *syntax.WhileClause, *syntax.ForClause,
@@ -200,8 +268,14 @@ func (c *classifier) statement(stmt *syntax.Stmt, dir *string) {
 		*syntax.TimeClause, *syntax.CoprocClause, *syntax.TestDecl:
 		// Visit every branch and expansion. We do not predict runtime branch
 		// selection or loop values; nonliteral deletion targets fail closed.
+		// A cd inside a branch or function body cannot prove the caller's
+		// directory for later statements.
+		blocked := c.dirProofBlocked
+		c.dirProofBlocked = true
 		c.nestedStatements(command, *dir)
+		c.dirProofBlocked = blocked
 		*dir = ""
+		c.dirProven = false
 	case nil:
 		// A statement containing only redirects has no command body.
 	default:
@@ -231,21 +305,31 @@ func (c *classifier) nestedStatements(node syntax.Node, dir string) {
 	})
 }
 
-// localDirectoryStatements shares filesystem effects but restores the outer
-// directory proof: a subshell cannot change its caller's working directory.
-func (c *classifier) localDirectoryStatements(statements []*syntax.Stmt, dir string) {
-	outerChanged, start := c.changedDir, len(c.effects)
+// statementList walks statements that run in sequence whether or not the one
+// before succeeded. The first runs in the directory the list was entered with,
+// so it inherits that directory's proof. A later one may run after an earlier
+// cd failed, so a directory proven inside the list does not carry to it.
+func (c *classifier) statementList(statements []*syntax.Stmt, dir *string) {
+	changed := false
 	for _, statement := range statements {
-		c.statement(statement, &dir)
-	}
-	if c.changedDir {
-		for i := start; i < len(c.effects); i++ {
-			if c.effects[i].IsDestructive() && c.effects[i].Unresolved == "" {
-				c.effects[i].Unresolved = "a directory change makes the nested destructive target state unprovable"
-			}
+		if changed {
+			c.dirProven = false
 		}
+		before := *dir
+		c.statement(statement, dir)
+		changed = changed || *dir != before
 	}
-	c.changedDir = outerChanged
+}
+
+// localDirectoryStatements shares filesystem effects but restores the outer
+// directory afterwards: a subshell cannot change its caller's working
+// directory. The subshell inherits the caller's proven directory and may
+// prove its own with a cd, for its own statements only.
+func (c *classifier) localDirectoryStatements(statements []*syntax.Stmt, dir string) {
+	outerChanged, outerProven, outerNested := c.changedDir, c.dirProven, c.nested
+	c.nested = true
+	c.statementList(statements, &dir)
+	c.changedDir, c.dirProven, c.nested = outerChanged, outerProven, outerNested
 }
 
 func (c *classifier) unresolved(reason string) {
@@ -271,11 +355,17 @@ func (c *classifier) redirect(stmt *syntax.Stmt, dir string) {
 		if name == "/dev/null" {
 			continue
 		}
-		if c.changedDir && !filepath.IsAbs(name) {
+		if c.directoryUnproven() && !filepath.IsAbs(name) {
 			c.unresolved("a directory change makes the redirect destination state unprovable")
 			continue
 		}
 		target, err := c.resolve(dir, name)
+		if err == nil && overlappingPaths([]string{target}, c.movePaths) {
+			// The file is not there yet, but an earlier move in this command
+			// puts its only copy there, and writing would destroy that.
+			c.unresolved("an earlier move places data at the redirect destination, so writing there would destroy it")
+			continue
+		}
 		if err != nil || !destroysContent(target) {
 			// Creating a file or redirecting to a device keeps stored data.
 			continue
@@ -332,34 +422,55 @@ func (c *classifier) call(command *syntax.CallExpr, dir *string) {
 		}
 		return
 	}
-	if args[0] == "cd" {
-		if !complete {
+	if args[0] == "cd" || args[0] == "pushd" || args[0] == "popd" {
+		// pushd and popd change the directory as well, and where they leave
+		// the shell is not modeled.
+		if args[0] != "cd" || !complete {
 			c.changedDir = true
+			c.dirProven = false
 			*dir = ""
-		} else {
-			*dir = c.changeDirectory(args, *dir)
+			return
 		}
+		*dir = c.changeDirectory(args, *dir)
 		return
 	}
 	c.command(args, complete, *dir)
+	if c.directoryOpaque {
+		c.directoryOpaque = false
+		*dir = ""
+	}
 }
 
 // changeDirectory returns the directory later statements run in, or an empty
 // string when it cannot be proven.
 func (c *classifier) changeDirectory(args []string, dir string) string {
-	if len(args) != 2 || dir == "" {
+	if len(args) != 2 || dir == "" || args[1] == "" {
 		c.changedDir = true
+		c.dirProven = false
 		return ""
 	}
 	next := args[1]
-	if !filepath.IsAbs(next) {
+	absolute := filepath.IsAbs(next)
+	if !absolute {
 		next = filepath.Join(dir, next)
 	}
 	next = filepath.Clean(next)
 	c.changedDir = true
-	// A relative cd may still fail at run time, so the resolved directory is
-	// used for classification while result() records that it is not provable.
+	// A cd proves the directory only when it names a single literal directory
+	// that exists now, in a scope where the following statement is guaranteed
+	// to run. A relative operand also needs the current directory proven,
+	// because a failed earlier cd would resolve it elsewhere. Otherwise the
+	// resolved directory is still used for classification while result()
+	// records that it is not provable.
+	c.dirProven = !c.dirProofBlocked && (absolute || c.dirProven) && directoryExists(next)
 	return next
+}
+
+// directoryExists reports a directory that exists at classification time. A
+// symbolic link to a directory counts because the shell follows it.
+func directoryExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func (c *classifier) command(args []string, complete bool, dir string) {
@@ -430,10 +541,12 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 		} else if !complete || len(nested) > 0 {
 			c.unresolved("the wrapped command cannot be inspected")
 		}
-	case "cd":
+	case "cd", "pushd", "popd":
 		// A directory change hidden behind a builtin wrapper still affects
-		// the target identity of later commands.
+		// the target identity of later commands, but its result is not proven.
 		c.changedDir = true
+		c.dirProven = false
+		c.directoryOpaque = true
 	case "eval":
 		if !complete {
 			c.unresolved("the evaluated script is not literal")
@@ -444,9 +557,17 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 			c.unresolved("the evaluated script cannot be parsed")
 			return
 		}
+		blocked := c.dirProofBlocked
+		c.dirProofBlocked = true
 		for _, stmt := range script.Stmts {
 			c.statement(stmt, &dir)
 		}
+		c.dirProofBlocked = blocked
+		// The evaluated script may have changed the directory, or defined a
+		// function that replaces a builtin, and neither is modeled outside
+		// the script, so no proof survives it.
+		c.dirProven = false
+		c.directoryOpaque = true
 	case "xargs":
 		c.xargs(args, complete, dir)
 	case "sh", "bash", "dash", "zsh", "ksh":
@@ -463,6 +584,10 @@ func (c *classifier) command(args []string, complete bool, dir string) {
 		c.find(args, complete, dir)
 	case "git":
 		c.git(args, complete, dir)
+	case "mkdir":
+		c.makeDirectories(args, complete, dir)
+	case "ln":
+		c.makeLinks(args, dir)
 	case "mv":
 		c.move(args, complete, dir)
 	case "cp":
@@ -588,7 +713,7 @@ func (c *classifier) move(args []string, complete bool, dir string) {
 		c.unresolved("the move has no exact source or destination")
 		return
 	}
-	if c.changedDir {
+	if c.directoryUnproven() {
 		for _, path := range append([]string{destination}, sources...) {
 			if !filepath.IsAbs(path) {
 				c.unresolved("a directory change makes the move source or destination state unprovable")
@@ -596,9 +721,9 @@ func (c *classifier) move(args []string, complete bool, dir string) {
 			}
 		}
 	}
-	target, err := c.resolve(dir, destination)
-	if err != nil {
-		c.unresolved("the move destination cannot be resolved")
+	target, known := c.destination(dir, destination)
+	if !known {
+		c.unresolved("the move destination is a symbolic link whose target is not known, so where the data lands cannot be proven; name the real path")
 		return
 	}
 	info, statErr := os.Stat(target)
@@ -606,7 +731,10 @@ func (c *classifier) move(args []string, complete bool, dir string) {
 		c.unresolved("the move destination cannot be inspected")
 		return
 	}
-	intoDirectory := statErr == nil && info.IsDir() && !noTargetDirectory
+	// A directory this command creates is empty when the move runs, so nothing
+	// stored before the command can be under it.
+	created := os.IsNotExist(statErr) && slices.Contains(c.createdDirectories, target)
+	intoDirectory := ((statErr == nil && info.IsDir()) || created) && !noTargetDirectory
 	if (targetDirectory && !intoDirectory) || (len(sources) > 1 && !intoDirectory) {
 		c.unresolved("the move needs a verified destination directory")
 		return
@@ -724,8 +852,12 @@ func (c *classifier) copy(args []string, dir string) {
 		c.unresolved("the copy has no verified source and destination")
 		return
 	}
-	target, err := c.resolve(dir, destination)
-	if err != nil || c.changedDir {
+	target, known := c.destination(dir, destination)
+	if !known {
+		c.unresolved("the copy destination is a symbolic link whose target is not known, so where the data lands cannot be proven; name the real path")
+		return
+	}
+	if c.directoryUnproven() {
 		c.unresolved("the copy destination cannot be resolved safely")
 		return
 	}
@@ -734,7 +866,8 @@ func (c *classifier) copy(args []string, dir string) {
 		c.unresolved("the copy destination cannot be inspected")
 		return
 	}
-	intoDirectory := err == nil && info.IsDir() && !noTargetDirectory
+	created := os.IsNotExist(err) && slices.Contains(c.createdDirectories, target)
+	intoDirectory := ((err == nil && info.IsDir()) || created) && !noTargetDirectory
 	if !intoDirectory && (targetDirectory || len(paths) > 1) {
 		c.unresolved("the copy needs a verified destination directory")
 		return
@@ -778,6 +911,173 @@ func (c *classifier) copy(args []string, dir string) {
 		})
 	}
 	c.movePaths = append(c.movePaths, changed...)
+}
+
+// destination resolves the path a move or copy writes to. A destination that
+// is a symbolic link stands for somewhere else, so it is followed only when
+// this command created it from a literal target. Any other link leaves the
+// real destination unknown. The recorded links are read before the
+// filesystem, because a link this command creates does not exist yet.
+func (c *classifier) destination(dir, destination string) (string, bool) {
+	target, err := c.resolve(dir, destination)
+	if err != nil {
+		return "", false
+	}
+	for range 8 {
+		created, ok := c.createdLinks[target]
+		if !ok {
+			info, err := os.Lstat(target)
+			if errors.Is(err, os.ErrNotExist) && c.unknownLinks {
+				// It may be a link this command creates under a name that
+				// could not be read.
+				return "", false
+			}
+			if err != nil || info.Mode()&os.ModeSymlink == 0 {
+				return target, true
+			}
+			return "", false
+		}
+		if created == "" {
+			// This command creates the link, but its target is not literal.
+			return "", false
+		}
+		if !filepath.IsAbs(created) {
+			created = filepath.Join(filepath.Dir(target), created)
+		}
+		target = filepath.Clean(created)
+	}
+	return "", false
+}
+
+// makeLinks remembers each symbolic link this ln creates, so a later move or
+// copy can resolve a destination through it. Only the command's own scope is
+// read, and only the one- and two-operand forms of ln -s with every word
+// literal: an option that changes which operand is the link would put the
+// link somewhere else. Any other ln that may create a link sets unknownLinks,
+// which makes a destination that does not exist yet suspect.
+func (c *classifier) makeLinks(args []string, dir string) {
+	if c.dirProofBlocked || c.nested || c.asynchronous {
+		return
+	}
+	symbolic, options, unread := false, true, false
+	var operands []string
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if options && arg == "--" {
+			options = false
+			continue
+		}
+		if options && len(operands) == 0 && (arg == "" || arg != "-" && strings.HasPrefix(arg, "-")) {
+			switch {
+			case arg == "--symbolic":
+				symbolic = true
+			case arg != "" && strings.Trim(arg[1:], "sfinvh") == "":
+				symbolic = symbolic || strings.Contains(arg, "s")
+			default:
+				unread = true
+			}
+			continue
+		}
+		operands = append(operands, arg)
+	}
+	if unread {
+		// A lone plain literal operand names a link either way: as the link
+		// of a two-operand form, or as the target of a one-operand form,
+		// whose link takes the target's name in the current directory. Where
+		// it points is not known. Anything else could put a link anywhere.
+		if len(operands) != 1 || operands[0] == "" || operands[0] == "." || strings.Contains(operands[0], "/") {
+			c.unknownLinks = true
+			return
+		}
+		operands = []string{"", operands[0]}
+	}
+	if !symbolic || len(operands) < 1 || len(operands) > 2 {
+		if symbolic {
+			c.unknownLinks = true
+		}
+		return
+	}
+	target, link := operands[0], operands[0]
+	if len(operands) == 2 {
+		link = operands[1]
+	}
+	if link == "" || link == "." {
+		c.unknownLinks = true
+		return
+	}
+	if c.directoryUnproven() && !filepath.IsAbs(link) {
+		return
+	}
+	path, err := c.resolve(dir, link)
+	if err != nil {
+		return
+	}
+	if c.createdLinks == nil {
+		c.createdLinks = make(map[string]string)
+	}
+	c.createdLinks[path] = target
+}
+
+// makeDirectories remembers each directory this mkdir creates, so a later
+// statement can move or copy into it. Only a literal mkdir in the command's
+// own scope, in a statement that finishes before the next one starts, can
+// vouch for a directory: one inside a subshell, a branch or a nested script
+// cannot.
+func (c *classifier) makeDirectories(args []string, complete bool, dir string) {
+	if !complete || c.dirProofBlocked || c.nested || c.asynchronous {
+		return
+	}
+	parents := false
+	var paths []string
+	options := true
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case options && arg == "--":
+			options = false
+		case options && arg == "--parents":
+			parents = true
+		case options && arg == "--verbose":
+		case options && (arg == "-m" || arg == "--mode"):
+			i++
+		case options && strings.HasPrefix(arg, "--mode="):
+		case options && strings.HasPrefix(arg, "-") && arg != "-":
+			flags, mode, hasMode := strings.Cut(arg[1:], "m")
+			if strings.Trim(flags, "pv") != "" {
+				return
+			}
+			if hasMode && mode == "" {
+				i++
+			}
+			parents = parents || strings.Contains(flags, "p")
+		default:
+			paths = append(paths, arg)
+		}
+	}
+	for _, path := range paths {
+		if path == "" || (c.directoryUnproven() && !filepath.IsAbs(path)) {
+			continue
+		}
+		target, err := c.resolve(dir, path)
+		if err != nil {
+			continue
+		}
+		for {
+			_, err := os.Lstat(target)
+			if err == nil || !errors.Is(err, os.ErrNotExist) {
+				break
+			}
+			c.createdDirectories = append(c.createdDirectories, target)
+			if !parents {
+				break
+			}
+			parent := filepath.Dir(target)
+			if parent == target {
+				break
+			}
+			target = parent
+		}
+	}
 }
 
 // wrapper consumes only documented options whose effect is understood. Unknown
@@ -1088,13 +1388,28 @@ func (c *classifier) git(args []string, complete bool, dir string) {
 	if len(args) < 2 {
 		return
 	}
-	if strings.HasPrefix(args[1], "-") {
+	subcommand, ok := gitSubcommand(args)
+	if !ok {
 		c.unresolved("git global options can change the repository or command dispatch")
 		return
 	}
-	if args[1] == "" {
+	if subcommand == len(args) {
+		return
+	}
+	if args[subcommand] == "" {
 		c.unresolved("the git subcommand is not literal, so its effect cannot be proven")
 		return
+	}
+	if subcommand > 1 {
+		// Behind options only a built-in subcommand can be read by name: an
+		// option can define an alias that replaces any other. git rm is left
+		// out because which repository the options select decides which files
+		// it unlinks.
+		if args[subcommand] == "rm" || !slices.Contains(gitBuiltins, args[subcommand]) {
+			c.unresolved("git global options can change the repository or command dispatch")
+			return
+		}
+		args = append([]string{"git"}, args[subcommand:]...)
 	}
 	switch args[1] {
 	case "restore":
@@ -1367,6 +1682,87 @@ func recursiveFlag(flags []string) bool {
 		}
 	}
 	return false
+}
+
+// gitFlagOptions are the git options before the subcommand that take no value.
+// --bare does choose a repository (the current directory, read as a bare one),
+// which is why a gated subcommand behind options is still analyzed and git rm
+// behind them stays unresolved.
+var gitFlagOptions = []string{
+	"-p", "--paginate", "-P", "--no-pager", "--bare",
+	"--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs", "--icase-pathspecs",
+	"--no-replace-objects", "--no-optional-locks", "--no-advice",
+}
+
+// gitValueOptionPrefixes are git long options whose value is attached after "=".
+var gitValueOptionPrefixes = []string{"--git-dir=", "--namespace=", "--super-prefix=", "--work-tree="}
+
+// gitBuiltins are the git subcommands compiled into git itself. Git runs a
+// built-in before it looks for an alias or a git-* program, so no option can
+// replace one. Only names that have been built in for years are listed: on a
+// git that lacks one it could be an alias.
+var gitBuiltins = []string{
+	"add", "am", "annotate", "apply", "archive", "bisect", "blame", "branch", "bundle",
+	"cat-file", "check-attr", "check-ignore", "check-mailmap", "check-ref-format",
+	"checkout", "checkout-index", "cherry", "cherry-pick", "clean", "clone", "column",
+	"commit", "commit-tree", "config", "count-objects", "describe", "diff", "diff-files",
+	"diff-index", "diff-tree", "difftool", "fast-export", "fast-import", "fetch", "fetch-pack",
+	"fmt-merge-msg", "for-each-ref", "format-patch", "fsck", "fsck-objects", "gc",
+	"get-tar-commit-id", "grep", "hash-object", "help", "index-pack", "init", "init-db",
+	"interpret-trailers", "log", "ls-files", "ls-remote", "ls-tree", "mailinfo", "mailsplit",
+	"merge", "merge-base", "merge-file", "merge-index", "merge-ours", "merge-recursive",
+	"merge-subtree", "merge-tree", "mergetool", "mktag", "mktree", "mv", "name-rev", "notes",
+	"pack-objects", "pack-redundant", "pack-refs", "patch-id", "prune", "prune-packed", "pull",
+	"push", "read-tree", "receive-pack", "reflog", "remote", "remote-ext", "remote-fd",
+	"repack", "replace", "rerere", "reset", "restore", "rev-list", "rev-parse", "revert", "rm",
+	"send-pack", "shortlog", "show", "show-branch", "show-index", "show-ref", "stash", "status",
+	"stripspace", "submodule", "switch", "symbolic-ref", "tag", "unpack-file", "unpack-objects",
+	"update-index", "update-ref", "update-server-info", "upload-archive", "upload-pack", "var",
+	"verify-commit", "verify-pack", "verify-tag", "version", "whatchanged", "worktree", "write-tree",
+}
+
+// gitConfigDispatches reports a -c or --config-env setting that can run another
+// command or pull in more configuration: an alias, an include, or a hook path.
+// A setting with no readable name cannot be checked, so it counts.
+func gitConfigDispatches(setting string) bool {
+	name, _, _ := strings.Cut(setting, "=")
+	// Git ignores case and surrounding whitespace in a key.
+	name = strings.ToLower(strings.TrimSpace(name))
+	return name == "" || strings.HasPrefix(name, "alias.") || strings.HasPrefix(name, "include.") ||
+		strings.HasPrefix(name, "includeif.") || name == "core.hookspath" || name == "core.fsmonitor"
+}
+
+// gitSubcommand returns the index of the subcommand after git's leading
+// options and whether those options may be stepped over. It reports len(args)
+// when an informational option ends the command.
+func gitSubcommand(args []string) (int, bool) {
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if arg == "" || !strings.HasPrefix(arg, "-") {
+			return i, true
+		}
+		switch {
+		case arg == "-h" || arg == "--help" || arg == "-v" || arg == "--version" ||
+			arg == "--html-path" || arg == "--man-path" || arg == "--info-path":
+			return len(args), true
+		case arg == "-C" || arg == "--git-dir" || arg == "--work-tree" || arg == "--namespace" || arg == "--super-prefix":
+			// The next argument is the value, literal or not.
+			i++
+		case arg == "-c" || arg == "--config-env":
+			if i+1 >= len(args) || gitConfigDispatches(args[i+1]) {
+				return i, false
+			}
+			i++
+		case strings.HasPrefix(arg, "--config-env="):
+			if gitConfigDispatches(strings.TrimPrefix(arg, "--config-env=")) {
+				return i, false
+			}
+		case slices.Contains(gitFlagOptions, arg) || slices.ContainsFunc(gitValueOptionPrefixes, func(prefix string) bool { return strings.HasPrefix(arg, prefix) }):
+		default:
+			return i, false
+		}
+	}
+	return len(args), true
 }
 
 // hasInformationalFlag recognizes only an unambiguous help/version invocation.

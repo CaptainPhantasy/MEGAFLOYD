@@ -25,7 +25,7 @@ func TestDeletionCompletionRequiresProof(t *testing.T) {
 		{name: "missing"},
 		{name: "malformed", metadata: `{`},
 		{name: "null", metadata: `null`},
-		{name: "nested failure", metadata: `{"results":[{"index":0,"command":"rm a","exit_code":1}]}`},
+		{name: "nested failure", metadata: `{"results":[{"index":0,"command":"rm -f a","exit_code":1}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, deletionSucceeded(fantasy.ToolResponse{Metadata: tc.metadata}, tc.err))
@@ -34,20 +34,20 @@ func TestDeletionCompletionRequiresProof(t *testing.T) {
 }
 
 func TestDeletionCompletionParallelToolFormats(t *testing.T) {
-	commands := []string{"rm a", "rm b"}
+	commands := []string{"rm -f a", "rm -f b"}
 	for _, tc := range []struct {
 		name, metadata string
 		successes      []int
 		finished       bool
 	}{
-		{name: "all successful", metadata: `{"results":[{"index":0,"command":"rm a","exit_code":0},{"index":1,"command":"rm b","exit_code":0}]}`, successes: []int{0, 1}, finished: true},
-		{name: "individual failure", metadata: `{"results":[{"index":0,"command":"rm a","exit_code":0},{"index":1,"command":"rm b","exit_code":7}]}`, successes: []int{0}, finished: true},
-		{name: "nested error", metadata: `{"results":[{"index":0,"command":"rm a","exit_code":0},{"index":1,"command":"rm b","exit_code":0,"error":"canceled"}]}`, successes: []int{0}, finished: false},
-		{name: "missing exit code", metadata: `{"results":[{"index":0,"command":"rm a"},{"index":1,"command":"rm b","exit_code":0}]}`},
-		{name: "missing result", metadata: `{"results":[{"index":0,"command":"rm a","exit_code":0}]}`},
-		{name: "duplicate index", metadata: `{"results":[{"index":0,"command":"rm a","exit_code":0},{"index":0,"command":"rm a","exit_code":0}]}`},
-		{name: "wrong command", metadata: `{"results":[{"index":0,"command":"rm other","exit_code":0},{"index":1,"command":"rm b","exit_code":0}]}`},
-		{name: "missing index", metadata: `{"results":[{"command":"rm a","exit_code":0},{"index":1,"command":"rm b","exit_code":0}]}`},
+		{name: "all successful", metadata: `{"results":[{"index":0,"command":"rm -f a","exit_code":0},{"index":1,"command":"rm -f b","exit_code":0}]}`, successes: []int{0, 1}, finished: true},
+		{name: "individual failure", metadata: `{"results":[{"index":0,"command":"rm -f a","exit_code":0},{"index":1,"command":"rm -f b","exit_code":7}]}`, successes: []int{0}, finished: true},
+		{name: "nested error", metadata: `{"results":[{"index":0,"command":"rm -f a","exit_code":0},{"index":1,"command":"rm -f b","exit_code":0,"error":"canceled"}]}`, successes: []int{0}, finished: false},
+		{name: "missing exit code", metadata: `{"results":[{"index":0,"command":"rm -f a"},{"index":1,"command":"rm -f b","exit_code":0}]}`},
+		{name: "missing result", metadata: `{"results":[{"index":0,"command":"rm -f a","exit_code":0}]}`},
+		{name: "duplicate index", metadata: `{"results":[{"index":0,"command":"rm -f a","exit_code":0},{"index":0,"command":"rm -f a","exit_code":0}]}`},
+		{name: "wrong command", metadata: `{"results":[{"index":0,"command":"rm -f other","exit_code":0},{"index":1,"command":"rm -f b","exit_code":0}]}`},
+		{name: "missing index", metadata: `{"results":[{"command":"rm -f a","exit_code":0},{"index":1,"command":"rm -f b","exit_code":0}]}`},
 		{name: "null", metadata: `null`},
 		{name: "malformed", metadata: `{"results":false}`},
 	} {
@@ -84,8 +84,8 @@ func TestDeletionCompletionRecordingThroughGuard(t *testing.T) {
 		{name: "timed out", tool: "bash", metadata: `{"exit_code":0}`, err: context.DeadlineExceeded},
 		{name: "missing", tool: "bash"},
 		{name: "malformed", tool: "bash", metadata: `{`},
-		{name: "parallel mixed", tool: "parallel_bash", metadata: `{"results":[{"index":0,"command":"rm a","exit_code":0},{"index":1,"command":"rm b","exit_code":9}]}`, successful: 1},
-		{name: "parallel success", tool: "parallel_bash", metadata: `{"results":[{"index":0,"command":"rm a","exit_code":0},{"index":1,"command":"rm b","exit_code":0}]}`, successful: 2},
+		{name: "parallel mixed", tool: "parallel_bash", metadata: `{"results":[{"index":0,"command":"rm -f a","exit_code":0},{"index":1,"command":"rm -f b","exit_code":9}]}`, successful: 1},
+		{name: "parallel success", tool: "parallel_bash", metadata: `{"results":[{"index":0,"command":"rm -f a","exit_code":0},{"index":1,"command":"rm -f b","exit_code":0}]}`, successful: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newDeletionFixture(t)
@@ -93,10 +93,10 @@ func TestDeletionCompletionRecordingThroughGuard(t *testing.T) {
 			ran := false
 			expected := fantasy.ToolResponse{Content: "original tool output", Metadata: tc.metadata}
 			inner := deletionRecordingTool{ran: &ran, resp: expected, err: tc.err}
-			wrapper := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
-			input := `{"command":"rm a"}`
+			wrapper := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir, nil)[0]
+			input := `{"command":"rm -f a"}`
 			if tc.tool == "parallel_bash" {
-				input = `{"commands":[{"command":"rm a"},{"command":"rm b"}]}`
+				input = `{"commands":[{"command":"rm -f a"},{"command":"rm -f b"}]}`
 			}
 			ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "completion-session")
 			got, err := wrapper.Run(ctx, fantasy.ToolCall{ID: "completion-call", Name: tc.tool, Input: input})
@@ -114,12 +114,12 @@ func TestDeletionCompletionRecordingThroughGuard(t *testing.T) {
 }
 
 func TestDeletionParallelOverlapDeniedBeforeExecution(t *testing.T) {
-	for _, commands := range [][]string{{"rm a", "rm a"}, {"rm -rf a", "rm a/child"}, {"rm a/child", "rm -rf a"}} {
+	for _, commands := range [][]string{{"rm -f a", "rm -f a"}, {"rm -rf a", "rm -f a/child"}, {"rm -f a/child", "rm -rf a"}} {
 		f := newDeletionFixture(t)
 		f.answers = []bool{true, true}
 		ran := false
 		inner := deletionRecordingTool{ran: &ran}
-		wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
+		wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir, nil)[0]
 		params := tools.ParallelBashParams{}
 		for _, command := range commands {
 			params.Commands = append(params.Commands, tools.ParallelBashCommand{Command: command})
@@ -132,7 +132,7 @@ func TestDeletionParallelOverlapDeniedBeforeExecution(t *testing.T) {
 		require.False(t, ran)
 		require.Empty(t, f.asked)
 	}
-	require.False(t, overlappingDeletionCommands([]string{"rm a", "rm ab"}, t.TempDir()))
+	require.False(t, overlappingDeletionCommands([]string{"rm -f a", "rm -f ab"}, t.TempDir()))
 }
 
 type completionMutatingTool struct {
@@ -157,7 +157,7 @@ func TestDeletionCompletionUsesPreExecutionClassification(t *testing.T) {
 		deletionRecordingTool: deletionRecordingTool{ran: &ran, resp: fantasy.ToolResponse{Metadata: `{"exit_code":0}`}},
 		after:                 func() error { return os.WriteFile(target, nil, 0o600) },
 	}
-	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir)[0]
+	wrapped := wrapToolsWithDeletionGuard([]fantasy.AgentTool{inner}, f.guard, f.workingDir, nil)[0]
 	response, err := wrapped.Run(context.WithValue(t.Context(), tools.SessionIDContextKey, "truncation"), fantasy.ToolCall{ID: "truncate", Name: tools.BashToolName, Input: `{"command":"> content"}`})
 	require.NoError(t, err)
 	require.False(t, response.IsError)

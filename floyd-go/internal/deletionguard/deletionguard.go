@@ -4,6 +4,10 @@
 // requires two separate human confirmations for the exact target set. The
 // confirmations are read from the durable per-session record, never from model
 // text, and an unreadable record refuses permanent deletion.
+//
+// The classification never depends on the selected permission mode: an rm is a
+// removal with or without -f. Whether this gate is applied at all is decided
+// by the caller that wraps the tool.
 package deletionguard
 
 import (

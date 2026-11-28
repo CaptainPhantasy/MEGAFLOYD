@@ -13,7 +13,7 @@ func backgroundFixture(t *testing.T) (*Guard, string, Classification, Background
 	t.Helper()
 	guard, dir, c, _ := recoveryFixture(t)
 	require.NoError(t, guard.BeginExecution("s", c, "launch"))
-	job, err := guard.BindBackground("s", c, "launch", BackgroundJob{SessionID: "s", ToolCallID: "launch", ShellID: "001", ExecutionID: "unique-process-job", Command: "rm a b", WorkingDir: dir, WorkspaceDir: dir, Classification: c})
+	job, err := guard.BindBackground("s", c, "launch", BackgroundJob{SessionID: "s", ToolCallID: "launch", ShellID: "001", ExecutionID: "unique-process-job", Command: "rm -f a b", WorkingDir: dir, WorkspaceDir: dir, Classification: c})
 	require.NoError(t, err)
 	require.Equal(t, c.Digest(), job.ApprovalSet)
 	return guard, dir, c, job
@@ -70,9 +70,9 @@ func TestBackgroundSuccessAndPartialFailureAfterRestart(t *testing.T) {
 			require.Len(t, record.Confirmations, 2)
 			require.Len(t, record.Executions, 1)
 			require.Equal(t, c.Digest(), record.Executions[0].ApprovalSet)
-			require.False(t, guard.Check(t.Context(), "s", "repeat", Classify("rm a", dir)).Allowed)
+			require.False(t, guard.Check(t.Context(), "s", "repeat", Classify("rm -f a", dir)).Allowed)
 			if partial {
-				require.True(t, guard.Check(t.Context(), "s", "remainder", Classify("rm b", dir)).Allowed)
+				require.True(t, guard.Check(t.Context(), "s", "remainder", Classify("rm -f b", dir)).Allowed)
 			} else {
 				require.False(t, guard.Check(t.Context(), "s", "repeat-all", c).Allowed)
 			}
@@ -109,7 +109,7 @@ func TestBackgroundRejectsMismatchedTerminalEvidence(t *testing.T) {
 			case "execution":
 				job.ExecutionID = "new-process-reused-shell-id"
 			case "command":
-				job.Command = "rm other"
+				job.Command = "rm -f other"
 			case "working dir":
 				job.WorkingDir = "/other"
 			case "workspace":
